@@ -1,0 +1,33 @@
+.hero { position: relative; overflow: hidden; padding: 92px 0 88px; background: linear-gradient(145deg,#fff 0%,#f6f9ff 55%,#edf4ff 100%); border-bottom: 1px solid var(--border); }
+.hero::before { content: ""; position: absolute; width: 520px; height: 520px; top: -290px; right: -120px; border: 1px solid rgba(37,99,235,.15); border-radius: 50%; box-shadow: 0 0 0 80px rgba(37,99,235,.025),0 0 0 160px rgba(37,99,235,.018); }
+.hero > div { position: relative; display: grid; grid-template-columns: 1.08fr .92fr; align-items: center; gap: 80px; }
+.heroContent h1 { max-width: 650px; font-size: clamp(2.65rem,5vw,4.7rem); line-height: 1.02; letter-spacing: -.058em; }
+.heroContent > p { max-width: 590px; margin-top: 24px; color: var(--muted); font-size: 1.08rem; line-height: 1.75; }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
+.codeWindow { overflow: hidden; background: #121a2b; border: 1px solid #24324d; border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); transform: rotate(1deg); }
+.windowBar { height: 46px; display: flex; align-items: center; gap: 7px; padding: 0 16px; background: #19243a; border-bottom: 1px solid #293752; }
+.windowBar span { width: 9px; height: 9px; background: #526079; border-radius: 50%; }
+.windowBar span:first-child { background: #fb7185; } .windowBar span:nth-child(2) { background: #fbbf24; } .windowBar span:nth-child(3) { background: #4ade80; }
+.windowBar p { margin: auto; padding-right: 42px; color: #8491aa; font: 500 .7rem ui-monospace,monospace; }
+.codeWindow pre { padding: 30px 26px 34px; overflow-x: auto; color: #dce6f7; font: 500 .76rem/2 ui-monospace,SFMono-Regular,Consolas,monospace; }
+.comment { color: #71809d; } .prompt { color: #60a5fa; } .success { color: #4ade80; }
+.repositories { padding: 76px 0 84px; }
+.sectionHeading { display: flex; justify-content: space-between; align-items: end; gap: 30px; margin-bottom: 28px; }
+.sectionHeading h2 { font-size: clamp(1.65rem,3vw,2.15rem); letter-spacing: -.035em; }
+.search { width: 310px; height: 42px; display: flex; align-items: center; gap: 9px; padding: 0 13px; color: #98a2b3; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-sm); }
+.search:focus-within { border-color: var(--brand-600); box-shadow: 0 0 0 3px var(--brand-100); }
+.search input { width: 100%; min-width: 0; outline: none; border: 0; color: var(--text); background: transparent; font-size: .82rem; }
+.repoGrid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; }
+.repoCard { min-width: 0; display: flex; gap: 14px; padding: 22px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); transition: .18s ease; }
+.repoCard:hover { border-color: #b8c8e4; box-shadow: 0 10px 24px rgba(40,61,99,.08); transform: translateY(-2px); }
+.repoIcon { flex: 0 0 auto; width: 34px; height: 34px; display: grid; place-items: center; color: var(--brand-600); background: var(--brand-50); border: 1px solid var(--brand-100); border-radius: 9px; font-weight: 800; }
+.repoBody { min-width: 0; flex: 1; } .repoTitle { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.repoTitle a { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--brand-700); font-size: .91rem; font-weight: 800; white-space: nowrap; }
+.repoTitle a span { color: #667085; font-weight: 550; }
+.repoBody > p { min-height: 60px; margin-top: 12px; color: var(--muted); font-size: .82rem; line-height: 1.55; }
+.repoMeta { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 18px; color: #7a8495; font-size: .7rem; }
+.repoMeta span { display: inline-flex; align-items: center; gap: 6px; } .repoMeta i { width: 8px; height: 8px; background: #3178c6; border-radius: 50%; }
+.demoNote { display: flex; align-items: center; gap: 10px; margin-top: 28px; padding: 13px 16px; color: #475467; background: #fffdf5; border: 1px solid #f3e6b8; border-radius: var(--radius-sm); font-size: .78rem; }
+.demoNote > span { color: #9a6700; font-size: 1rem; } .demoNote strong { color: #7a5100; }
+@media (max-width: 900px) { .hero > div { grid-template-columns: 1fr; gap: 48px; } .codeWindow { max-width: 620px; } .repoGrid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 650px) { .hero { padding: 65px 0 60px; } .heroContent h1 { font-size: 2.7rem; } .sectionHeading { align-items: stretch; flex-direction: column; } .search { width: 100%; } .repoGrid { grid-template-columns: 1fr; } .repoBody > p { min-height: auto; } .codeWindow pre { font-size: .66rem; padding-inline: 18px; } }

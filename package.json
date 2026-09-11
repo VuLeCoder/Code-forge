@@ -1,0 +1,10 @@
+{
+  "name": "code-forge",
+  "private": true,
+  "packageManager": "pnpm@12.3.4",
+  "scripts": {
+    "dev": "corepack pnpm --filter frontend dev",
+    "build": "corepack pnpm --filter frontend build",
+    "lint": "corepack pnpm --filter frontend lint"
+  }
+}
