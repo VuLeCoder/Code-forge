@@ -12,6 +12,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 
 FROM dependencies AS builder
 COPY backend backend
+RUN pnpm --filter backend prisma:generate
 RUN pnpm --filter backend build
 RUN pnpm deploy --filter backend --prod /app/release
 
@@ -27,6 +28,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=builder --chown=api:nodejs /app/release ./
 COPY --from=builder --chown=api:nodejs /app/backend/dist ./dist
+COPY --from=builder --chown=api:nodejs /app/backend/prisma ./prisma
 USER api
 EXPOSE 4000
 CMD ["node", "dist/main.js"]

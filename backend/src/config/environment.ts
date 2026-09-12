@@ -1,5 +1,5 @@
-import { plainToInstance, Type } from 'class-transformer';
-import { IsIn, IsInt, IsNotEmpty, IsString, Max, Min, validateSync } from 'class-validator';
+import { plainToInstance, Transform, Type } from 'class-transformer';
+import { IsBoolean, IsIn, IsInt, IsNotEmpty, IsString, Max, Min, MinLength, validateSync } from 'class-validator';
 
 class EnvironmentVariables {
   @IsIn(['development', 'test', 'production'])
@@ -26,6 +26,29 @@ class EnvironmentVariables {
   @IsString()
   @IsNotEmpty()
   FRONTEND_ORIGIN = 'http://localhost:3000';
+
+  @IsString()
+  @MinLength(32)
+  JWT_ACCESS_SECRET!: string;
+
+  @IsInt()
+  @Min(60)
+  @Max(3600)
+  @Type(() => Number)
+  ACCESS_TOKEN_TTL_SECONDS = 900;
+
+  @IsInt()
+  @Min(1)
+  @Max(90)
+  @Type(() => Number)
+  REFRESH_TOKEN_TTL_DAYS = 30;
+
+  @IsBoolean()
+  @Transform(({ value }: { value: unknown }) => value === true || value === 'true')
+  COOKIE_SECURE = false;
+
+  @IsIn(['lax', 'strict', 'none'])
+  COOKIE_SAME_SITE: 'lax' | 'strict' | 'none' = 'lax';
 }
 
 export function validateEnvironment(config: Record<string, unknown>): EnvironmentVariables {
@@ -33,6 +56,9 @@ export function validateEnvironment(config: Record<string, unknown>): Environmen
   const errors = validateSync(validated, { skipMissingProperties: false });
   if (errors.length > 0) {
     throw new Error(`Cấu hình môi trường không hợp lệ: ${errors.toString()}`);
+  }
+  if (validated.COOKIE_SAME_SITE === 'none' && !validated.COOKIE_SECURE) {
+    throw new Error('Cấu hình môi trường không hợp lệ: COOKIE_SAME_SITE=none yêu cầu COOKIE_SECURE=true');
   }
   return validated;
 }
