@@ -1,0 +1,48 @@
+.git
+.github
+.gitignore
+.dockerignore
+compose*.yaml
+docs
+*.md
+
+# Dependencies and generated output are rebuilt in the image
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+**/dist
+out
+**/out
+build
+**/build
+coverage
+**/coverage
+.cache
+**/.cache
+.turbo
+**/.turbo
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# The backend image only needs the frontend workspace manifest
+frontend/*
+!frontend/package.json
+
+# Tests are not part of the production image
+backend/test
+backend/**/*.spec.ts
+
+# Runtime data, logs, local secrets and editor state
+data
+*.log
+.DS_Store
+.idea
+.vscode
+.vercel
+.env
+.env.*
+!.env.example
+*.pem
+*.key

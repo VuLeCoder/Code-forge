@@ -4,7 +4,11 @@
   "packageManager": "pnpm@12.3.4",
   "scripts": {
     "dev": "corepack pnpm --filter frontend dev",
-    "build": "corepack pnpm --filter frontend build",
-    "lint": "corepack pnpm --filter frontend lint"
+    "dev:frontend": "corepack pnpm --filter frontend dev",
+    "dev:backend": "corepack pnpm --filter backend start:dev",
+    "build": "corepack pnpm -r --if-present build",
+    "lint": "corepack pnpm -r --if-present lint",
+    "test": "corepack pnpm -r --if-present test",
+    "typecheck": "corepack pnpm -r --if-present typecheck"
   }
 }
