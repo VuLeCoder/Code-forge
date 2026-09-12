@@ -4,6 +4,14 @@
 .form { display: grid; gap: 18px; } .field { display: grid; gap: 7px; } .field label { font-size: .8rem; font-weight: 700; }
 .field input { height: 44px; padding: 0 13px; border: 1px solid var(--border); border-radius: var(--radius-sm); outline: 0; background: #fff; }
 .field input:focus { border-color: var(--brand-600); box-shadow: 0 0 0 3px var(--brand-100); }
-.hint { color: var(--muted); font-size: .7rem; line-height: 1.45; } .submit { width: 100%; margin-top: 2px; }
+.field input[aria-invalid="true"] { border-color: var(--danger); }
+.hint { color: var(--muted); font-size: .7rem; line-height: 1.45; }
+.fieldError { color: var(--danger); font-size: .72rem; line-height: 1.45; }
+.error { display: flex; align-items: flex-start; gap: 10px; margin: -8px 0 20px; padding: 12px 13px; color: #991b1b; background: #fff5f5; border: 1px solid #fecaca; border-radius: var(--radius-sm); font-size: .78rem; line-height: 1.5; outline: none; }
+.error > span { flex: 0 0 auto; width: 19px; height: 19px; display: grid; place-items: center; color: #fff; background: var(--danger); border-radius: 50%; font-size: .68rem; font-weight: 900; }
+.submit { width: 100%; margin-top: 2px; gap: 9px; }
+.submit:disabled { opacity: .72; cursor: wait; transform: none; }
+.spinner { width: 15px; height: 15px; border: 2px solid rgba(255,255,255,.45); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .switch { margin-top: 22px; text-align: center; color: var(--muted); font-size: .8rem; } .switch a { color: var(--brand-700); font-weight: 750; } .switch a:hover { text-decoration: underline; }
 @media (max-width: 480px) { .page { place-items: start center; padding: 34px 14px; } .card { padding: 26px 20px; } }
