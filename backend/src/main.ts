@@ -2,6 +2,8 @@ import 'reflect-metadata';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+// cookie-parser exports a CommonJS function; synthetic default imports fail at runtime.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 import cookieParser = require('cookie-parser');
 import { AppModule } from './app.module';
 

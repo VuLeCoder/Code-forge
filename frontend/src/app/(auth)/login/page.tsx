@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { AuthSwitchLink } from "@/components/auth-switch-link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
@@ -50,6 +50,6 @@ export default function LoginPage() {
       <div className={styles.field}><label htmlFor="password">Mật khẩu</label><input id="password" name="password" type="password" autoComplete="current-password" minLength={8} maxLength={128} required /></div>
       <button className={`button buttonPrimary ${styles.submit}`} type="submit" disabled={submitting}>{submitting ? <><span className={styles.spinner} aria-hidden="true" />Đang đăng nhập…</> : "Đăng nhập"}</button>
     </form>
-    <p className={styles.switch}>Chưa có tài khoản? <Link href="/register">Đăng ký miễn phí</Link></p>
+    <p className={styles.switch}>Chưa có tài khoản? <AuthSwitchLink href="/register">Đăng ký miễn phí</AuthSwitchLink></p>
   </section></main>;
 }

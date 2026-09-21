@@ -24,6 +24,10 @@ export class AuthService {
   ) {}
 
   async register(dto: RegisterDto): Promise<AuthResult> {
+    const reserved = ['api', 'login', 'register', 'new', 'invitations', 'settings', 'admin', 'git', 'explore', 'tokens', 'favicon.ico', 'robots.txt', 'sitemap.xml'];
+    if (reserved.includes(normalizeUsername(dto.username))) {
+      throw new AuthError(HttpStatus.BAD_REQUEST, 'USERNAME_RESERVED', 'Username này được dành riêng cho hệ thống.');
+    }
     const passwordHash = await argon2.hash(dto.password, {
       type: argon2.argon2id,
       memoryCost: 19_456,

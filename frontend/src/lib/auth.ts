@@ -71,8 +71,21 @@ export const authApi = {
 };
 
 export function safeReturnTo(value: string | null): string {
-  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return "/";
+  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\") || /[\u0000-\u0020\u007f]/.test(value)) return "/";
   return value;
+}
+
+let pendingSession: Promise<AuthUser | null> | null = null;
+
+// Share bootstrap across Strict Mode effect remounts to avoid rotating one token twice.
+export function bootstrapSession(): Promise<AuthUser | null> {
+  if (!pendingSession) {
+    pendingSession = authApi.me().catch(async (error: unknown) => {
+      if (!(error instanceof ApiRequestError) || error.status !== 401) throw error;
+      return authApi.refresh();
+    }).then((result) => result.user).finally(() => { pendingSession = null; });
+  }
+  return pendingSession;
 }
 
 export function authErrorMessage(error: unknown): string {
@@ -81,6 +94,7 @@ export function authErrorMessage(error: unknown): string {
     INVALID_CREDENTIALS: "Email, username hoặc mật khẩu chưa chính xác.",
     ACCOUNT_LOCKED: "Tài khoản này đã bị khóa. Vui lòng liên hệ quản trị viên.",
     ACCOUNT_ALREADY_EXISTS: "Username hoặc email này đã được sử dụng.",
+    USERNAME_RESERVED: "Username này được dành riêng cho hệ thống. Vui lòng chọn tên khác.",
     ORIGIN_NOT_ALLOWED: "Yêu cầu không đến từ địa chỉ frontend được cho phép.",
     BACKEND_UNAVAILABLE: "Máy chủ đang khởi động hoặc tạm thời gián đoạn. Vui lòng thử lại sau ít phút.",
   };

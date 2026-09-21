@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { AuthSwitchLink } from "@/components/auth-switch-link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
@@ -57,12 +57,12 @@ export default function RegisterPage() {
     <div className={styles.heading}><span className="eyebrow">Bắt đầu xây dựng</span><h1>Tạo tài khoản</h1><p>Miễn phí cho dự án cá nhân và nhóm nhỏ.</p></div>
     {error && <div className={styles.error} role="alert" tabIndex={-1} ref={errorRef}><span aria-hidden="true">!</span><p>{error}</p></div>}
     <form className={styles.form} onSubmit={handleSubmit} aria-busy={submitting}>
-      <div className={styles.field}><label htmlFor="username">Username</label><input id="username" name="username" autoComplete="username" minLength={3} maxLength={39} pattern="[A-Za-z0-9_-]+" title="Chỉ dùng chữ, số, dấu gạch ngang hoặc gạch dưới" required autoFocus /><span className={styles.hint}>3–39 ký tự; dùng chữ, số, dấu gạch ngang hoặc gạch dưới.</span></div>
+      <div className={styles.field}><label htmlFor="username">Username</label><input id="username" name="username" autoComplete="username" minLength={3} maxLength={39} pattern={"[A-Za-z0-9][A-Za-z0-9._\\-]*[A-Za-z0-9]"} title="Bắt đầu và kết thúc bằng chữ hoặc số; ở giữa có thể dùng dấu chấm, gạch ngang, gạch dưới" required autoFocus /><span className={styles.hint}>3–39 ký tự; bắt đầu và kết thúc bằng chữ hoặc số. Cho phép dấu chấm, gạch ngang và gạch dưới ở giữa.</span></div>
       <div className={styles.field}><label htmlFor="email">Email</label><input id="email" name="email" type="email" autoComplete="email" maxLength={320} required /></div>
       <div className={styles.field}><label htmlFor="password">Mật khẩu</label><input id="password" name="password" type="password" autoComplete="new-password" minLength={8} maxLength={128} required /><span className={styles.hint}>Từ 8 đến 128 ký tự.</span></div>
       <div className={styles.field}><label htmlFor="confirmPassword">Xác nhận mật khẩu</label><input ref={confirmRef} id="confirmPassword" name="confirmPassword" type="password" autoComplete="new-password" minLength={8} maxLength={128} aria-invalid={Boolean(passwordError)} aria-describedby={passwordError ? "confirm-password-error" : undefined} required />{passwordError && <span className={styles.fieldError} id="confirm-password-error">{passwordError}</span>}</div>
       <button className={`button buttonPrimary ${styles.submit}`} type="submit" disabled={submitting}>{submitting ? <><span className={styles.spinner} aria-hidden="true" />Đang tạo tài khoản…</> : "Tạo tài khoản"}</button>
     </form>
-    <p className={styles.switch}>Đã có tài khoản? <Link href="/login">Đăng nhập</Link></p>
+    <p className={styles.switch}>Đã có tài khoản? <AuthSwitchLink href="/login">Đăng nhập</AuthSwitchLink></p>
   </section></main>;
 }

@@ -27,7 +27,7 @@ const session: Session = {
   userId: user.id,
   familyId: 'b113b534-a644-4cf7-ac67-6071441d7a84',
   tokenHash: 'hash',
-  expiresAt: new Date('2026-10-12T00:00:00.000Z'),
+  expiresAt: new Date(Date.now() + 86_400_000),
   lastUsedAt: null,
   revokedAt: null,
   createdAt: now,
@@ -74,6 +74,15 @@ describe('AuthService', () => {
     await expect(service.login({ login: 'nobody', password: 'wrong-password' })).rejects.toMatchObject({
       status: HttpStatus.UNAUTHORIZED,
     });
+    expect(sessionApi.create).not.toHaveBeenCalled();
+  });
+
+  it.each(['normalizedUsername', 'normalizedEmail'])('maps duplicate %s to a conflict without creating a session', async (field) => {
+    transaction.mockRejectedValue(new Prisma.PrismaClientKnownRequestError('Unique constraint', {
+      code: 'P2002', clientVersion: '6.19.3', meta: { target: [field] },
+    }));
+    await expect(service.register({ username: 'Alice', email: 'alice@example.test', password: 'correct-password' }))
+      .rejects.toMatchObject({ status: HttpStatus.CONFLICT });
     expect(sessionApi.create).not.toHaveBeenCalled();
   });
 

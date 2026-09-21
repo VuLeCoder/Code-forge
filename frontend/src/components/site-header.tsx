@@ -29,7 +29,7 @@ export function SiteHeader() {
     <nav className="mainNav" aria-label="Điều hướng chính"><Link href="/#repositories">Khám phá</Link><Link href="/new">Tạo repository</Link></nav>
     <div className="headerActions" aria-busy={loading}>
       {loading ? <span className="sessionSkeleton" aria-label="Đang kiểm tra phiên" /> : user ? <>
-        <span className="userBadge" title={user.email}><span aria-hidden="true">{user.username.slice(0, 1).toUpperCase()}</span><strong>{user.username}</strong></span>
+        <Link className="userBadge" href={`/${encodeURIComponent(user.username)}`} aria-label={`Hồ sơ ${user.username}`}><span aria-hidden="true">{user.username.slice(0, 1).toUpperCase()}</span><strong>{user.username}</strong></Link>
         <button className="textButton" type="button" onClick={handleLogout} disabled={loggingOut}>{loggingOut ? "Đang thoát…" : "Đăng xuất"}</button>
       </> : <>
         <Link className="textLink" href="/login">Đăng nhập</Link><Link className="button buttonPrimary buttonSmall" href="/register">Đăng ký</Link>

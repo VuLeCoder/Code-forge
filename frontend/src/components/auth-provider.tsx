@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { ApiRequestError, authApi, type AuthUser } from "@/lib/auth";
+import { authApi, bootstrapSession, type AuthUser } from "@/lib/auth";
 
 type AuthContextValue = {
   user: AuthUser | null;
@@ -20,16 +20,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let active = true;
     async function bootstrap() {
       try {
-        const current = await authApi.me();
-        if (active) setUserState(current.user);
-      } catch (error) {
-        if (!(error instanceof ApiRequestError) || error.status !== 401) return;
-        try {
-          const refreshed = await authApi.refresh();
-          if (active) setUserState(refreshed.user);
-        } catch {
-          if (active) setUserState(null);
-        }
+        const current = await bootstrapSession();
+        if (active) setUserState(current);
+      } catch {
+        if (active) setUserState(null);
       } finally {
         if (active) setLoading(false);
       }
