@@ -17,22 +17,58 @@ enum UserStatus {
   LOCKED
 }
 
+enum RepositoryVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum RepositoryStatus {
+  ACTIVE
+  LOCKED
+  DELETED
+}
+
 model User {
-  id                 String     @id @default(uuid()) @db.Uuid
-  username           String     @db.VarChar(39)
-  normalizedUsername String     @unique @map("normalized_username") @db.VarChar(39)
-  email              String     @db.VarChar(320)
-  normalizedEmail    String     @unique @map("normalized_email") @db.VarChar(320)
-  passwordHash       String     @map("password_hash") @db.VarChar(255)
-  systemRole         SystemRole @default(USER) @map("system_role")
-  status             UserStatus @default(ACTIVE)
-  lockedAt           DateTime?  @map("locked_at") @db.Timestamptz(3)
-  passwordChangedAt  DateTime   @default(now()) @map("password_changed_at") @db.Timestamptz(3)
-  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt          DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id                 String       @id @default(uuid()) @db.Uuid
+  username           String       @db.VarChar(39)
+  normalizedUsername String       @unique @map("normalized_username") @db.VarChar(39)
+  email              String       @db.VarChar(320)
+  normalizedEmail    String       @unique @map("normalized_email") @db.VarChar(320)
+  passwordHash       String       @map("password_hash") @db.VarChar(255)
+  systemRole         SystemRole   @default(USER) @map("system_role")
+  status             UserStatus   @default(ACTIVE)
+  lockedAt           DateTime?    @map("locked_at") @db.Timestamptz(3)
+  passwordChangedAt  DateTime     @default(now()) @map("password_changed_at") @db.Timestamptz(3)
+  createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
   sessions           Session[]
+  repositories       Repository[]
 
   @@map("users")
+}
+
+model Repository {
+  id                String               @id @default(uuid()) @db.Uuid
+  ownerId           String               @map("owner_id") @db.Uuid
+  name              String               @db.VarChar(100)
+  normalizedName    String               @map("normalized_name") @db.VarChar(100)
+  description       String?              @db.VarChar(2000)
+  visibility        RepositoryVisibility @default(PRIVATE)
+  status            RepositoryStatus     @default(ACTIVE)
+  defaultBranch     String               @default("main") @map("default_branch") @db.VarChar(255)
+  storageKey        String               @unique @map("storage_key") @db.VarChar(255)
+  storageGeneration Int                  @default(0) @map("storage_generation")
+  createdAt         DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt         DateTime?            @map("deleted_at") @db.Timestamptz(3)
+  purgeAfter        DateTime?            @map("purge_after") @db.Timestamptz(3)
+  owner             User                 @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+
+  @@unique([ownerId, normalizedName])
+  @@index([ownerId, status, createdAt])
+  @@index([visibility, status, createdAt])
+  @@index([status, purgeAfter])
+  @@map("repositories")
 }
 
 model Session {

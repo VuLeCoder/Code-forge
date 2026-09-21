@@ -122,4 +122,35 @@ describe('Milestone 1 HTTP + PostgreSQL', () => {
   it('limits registration attempts', async () => {
     expect((await call('auth/register', account)).status).toBe(429);
   });
+
+  it('enforces repository defaults, canonical ownership uniqueness and retention in PostgreSQL', async () => {
+    const alice = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'alice' } });
+    const bob = await db.user.create({ data: {
+      username: 'Bob', normalizedUsername: 'bob', email: 'bob@example.test',
+      normalizedEmail: 'bob@example.test', passwordHash: 'unused-test-fixture',
+    } });
+    const create = (ownerId: string, name: string, normalizedName = name.toLowerCase()) =>
+      db.repository.create({ data: {
+        ownerId, name, normalizedName, storageKey: randomBytes(16).toString('hex') + '.git',
+      } });
+    const repo = await create(alice.id, 'Demo');
+    expect(repo).toMatchObject({
+      visibility: 'PRIVATE', status: 'ACTIVE', defaultBranch: 'main',
+      storageGeneration: 0, description: null, deletedAt: null, purgeAfter: null,
+    });
+    expect(repo.createdAt).toBeInstanceOf(Date);
+    expect(repo.updatedAt).toBeInstanceOf(Date);
+    await expect(create(alice.id, 'DEMO')).rejects.toMatchObject({ code: 'P2002' });
+    await expect(create(bob.id, 'Demo')).resolves.toMatchObject({ ownerId: bob.id });
+    await expect(create(alice.id, 'Demo', 'different')).rejects.toThrow();
+    await expect(create('00000000-0000-0000-0000-000000000000', 'Orphan'))
+      .rejects.toMatchObject({ code: 'P2003' });
+    await expect(db.user.delete({ where: { id: bob.id } })).rejects.toMatchObject({ code: 'P2003' });
+    await db.repository.update({ where: { id: repo.id }, data: {
+      status: 'DELETED', deletedAt: new Date(), purgeAfter: new Date(Date.now() + 30 * 86400000),
+    } });
+    await expect(create(alice.id, 'demo')).rejects.toMatchObject({ code: 'P2002' });
+    await db.repository.delete({ where: { id: repo.id } });
+    await expect(create(alice.id, 'demo')).resolves.toMatchObject({ name: 'demo' });
+  });
 });
