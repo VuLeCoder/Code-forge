@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import { validateEnvironment } from './config/environment';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
+import { RepositoriesModule } from './repositories/repositories.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { HealthModule } from './health/health.module';
     DatabaseModule,
     AuthModule,
     HealthModule,
+    RepositoriesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

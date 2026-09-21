@@ -22,6 +22,15 @@ describe('validateEnvironment', () => {
     ).toThrow('DATABASE_URL');
   });
 
+  it('validates repository quota and retention settings', () => {
+    const defaults = validateEnvironment(validConfig);
+    expect(defaults.MAX_REPOSITORIES_PER_USER).toBe(20);
+    expect(defaults.SOFT_DELETE_RETENTION_DAYS).toBe(30);
+    expect(validateEnvironment({ ...validConfig, MAX_REPOSITORIES_PER_USER: '4' }).MAX_REPOSITORIES_PER_USER).toBe(4);
+    expect(() => validateEnvironment({ ...validConfig, MAX_REPOSITORIES_PER_USER: '0' })).toThrow('MAX_REPOSITORIES_PER_USER');
+    expect(() => validateEnvironment({ ...validConfig, SOFT_DELETE_RETENTION_DAYS: '-1' })).toThrow('SOFT_DELETE_RETENTION_DAYS');
+  });
+
   it('rejects a short JWT secret', () => {
     expect(() => validateEnvironment({ ...validConfig, JWT_ACCESS_SECRET: 'too-short' })).toThrow(
       'JWT_ACCESS_SECRET',

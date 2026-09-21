@@ -43,6 +43,18 @@ class EnvironmentVariables {
   @Type(() => Number)
   REFRESH_TOKEN_TTL_DAYS = 30;
 
+  @IsInt()
+  @Min(1)
+  @Max(10000)
+  @Type(() => Number)
+  MAX_REPOSITORIES_PER_USER = 20;
+
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  @Type(() => Number)
+  SOFT_DELETE_RETENTION_DAYS = 30;
+
   @IsBoolean()
   @Transform(({ value }: { value: unknown }) => value === true || value === 'true')
   COOKIE_SECURE = false;

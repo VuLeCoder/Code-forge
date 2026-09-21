@@ -10,6 +10,6 @@ import { OriginGuard } from './origin.guard';
   imports: [JwtModule.register({}), UsersModule],
   controllers: [AuthController],
   providers: [AuthService, AccessTokenGuard, OriginGuard],
-  exports: [AccessTokenGuard],
+  exports: [AccessTokenGuard, OriginGuard, JwtModule, UsersModule],
 })
 export class AuthModule {}
