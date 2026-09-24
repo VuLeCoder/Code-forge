@@ -11,4 +11,10 @@
 .empty h3 { font-size: 1.15rem; }
 .empty p { max-width: 420px; color: var(--muted); line-height: 1.8; }
 .repoIcon { display: grid; place-items: center; width: 60px; height: 60px; border-radius: 18px; color: var(--brand-600); background: var(--brand-50); font-size: 1.5rem; font-weight: 700; }
+.repoList { list-style: none; padding: 0; margin: 0; }
+.repoList li { padding: 20px 26px; border-bottom: 1px solid var(--border); }
+.repoList li:last-child { border-bottom: 0; }
+.repoList li > div { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.repoList a { color: var(--brand-700); font-weight: 700; overflow-wrap: anywhere; }
+.repoList p { color: var(--muted); margin-top: 8px; line-height: 1.6; overflow-wrap: anywhere; }
 @media (max-width: 700px) { .layout { grid-template-columns: minmax(0, 1fr); gap: 28px; padding-block: 32px 48px; } .avatar { width: 100px; height: 100px; font-size: 2.5rem; } .empty { padding: 36px 20px; } }

@@ -9,5 +9,6 @@ import { RepositoryPolicy } from './repository.policy';
   imports: [AuthModule],
   controllers: [RepositoriesController],
   providers: [RepositoriesService, RepositoryPolicy, OptionalAccessTokenGuard],
+  exports: [RepositoriesService, OptionalAccessTokenGuard],
 })
 export class RepositoriesModule {}

@@ -116,6 +116,17 @@ describe('Repository HTTP + PostgreSQL', () => {
 
   it('allows anonymous public reads but rejects non-owner mutations and invalid tokens', async () => {
     expect((await create('Public', 'PUBLIC')).status).toBe(201);
+    const publicList = await (await call('GET', 'repositories')).json();
+    expect(publicList.repositories.map((repo: { name: string }) => repo.name)).toEqual(['Public']);
+    expect(publicList.repositories[0].permissions).toEqual({ canRead: true, canManage: false });
+    expect((await (await call('GET', 'repositories?q=owner')).json()).repositories).toHaveLength(1);
+    expect((await (await call('GET', 'repositories?q=missing')).json()).repositories).toHaveLength(0);
+    expect((await call('GET', 'repositories?page=0')).status).toBe(400);
+    const anonymousProfile = await (await call('GET', 'users/Owner')).json();
+    expect(anonymousProfile.repositories.map((repo: { name: string }) => repo.name)).toEqual(['Public']);
+    expect((await (await call('GET', 'repositories/owner/Owner', ownerCookie)).json()).repositories.map((repo: { name: string }) => repo.name).sort()).toEqual(['Demo', 'Public']);
+    expect((await (await call('GET', 'repositories/owner/Owner', otherCookie)).json()).repositories.map((repo: { name: string }) => repo.name)).toEqual(['Public']);
+    expect((await (await call('GET', 'repositories/owner/Owner')).json()).repositories.map((repo: { name: string }) => repo.name)).toEqual(['Public']);
     const publicRes = await call('GET', 'repos/owner/public');
     expect(publicRes.status).toBe(200);
     expect((await publicRes.json()).repository.permissions).toEqual({ canRead: true, canManage: false });

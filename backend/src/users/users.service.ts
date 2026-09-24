@@ -10,10 +10,15 @@ export class UsersService {
   async publicProfile(username: string) {
     const user = await this.prisma.user.findUnique({
       where: { normalizedUsername: normalizeUsername(username) },
-      select: { username: true, createdAt: true },
+      select: { id: true, username: true, createdAt: true },
     });
     if (!user) throw new NotFoundException({ error: { code: 'USER_NOT_FOUND', message: 'Không tìm thấy người dùng.' } });
-    return { user, repositories: [], repositoriesAvailable: false };
+    const rows = await this.prisma.repository.findMany({ where: { ownerId: user.id, status: 'ACTIVE', deletedAt: null, visibility: 'PUBLIC' },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }] });
+    const repositories = rows.map((repo) => ({ id: repo.id, owner: { username: user.username }, name: repo.name,
+      description: repo.description, visibility: repo.visibility, status: repo.status, defaultBranch: repo.defaultBranch,
+      createdAt: repo.createdAt, updatedAt: repo.updatedAt, permissions: { canRead: true, canManage: false } }));
+    return { user: { username: user.username, createdAt: user.createdAt }, repositories, repositoriesAvailable: true };
   }
 
   findByLogin(normalizedLogin: string): Promise<User | null> {

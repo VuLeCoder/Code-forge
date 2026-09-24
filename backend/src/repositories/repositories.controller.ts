@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { AccessTokenGuard } from '../auth/access-token.guard';
 import type { AuthenticatedRequest, AuthPrincipal } from '../auth/auth.types';
@@ -10,6 +10,22 @@ import { RepositoriesService } from './repositories.service';
 @Controller()
 export class RepositoriesController {
   constructor(private readonly repositories: RepositoriesService) {}
+
+  @Get('repositories')
+  list(@Query('q') search?: string, @Query('page') rawPage?: string) {
+    const page = rawPage === undefined ? 1 : Number(rawPage);
+    if ((search !== undefined && (typeof search !== 'string' || search.length > 100)) ||
+      !Number.isSafeInteger(page) || page < 1 || page > 1000) {
+      throw new BadRequestException('Tham số tìm kiếm hoặc trang không hợp lệ.');
+    }
+    return this.repositories.listPublic(search?.trim(), page);
+  }
+
+  @Get('repositories/owner/:username')
+  @UseGuards(OptionalAccessTokenGuard)
+  async listOwner(@Param('username') username: string, @Req() request: Request & { user?: AuthPrincipal }) {
+    return this.repositories.listByUsername(username, request.user?.id);
+  }
 
   @Post('repositories')
   @UseGuards(OriginGuard, AccessTokenGuard)

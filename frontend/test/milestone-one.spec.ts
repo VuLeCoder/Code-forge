@@ -11,9 +11,19 @@ test('public profile is accessible anonymously and fits a mobile viewport', asyn
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto('/alice');
   await expect(page.getByRole('heading', { name: 'alice', exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Repository công khai' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Repository', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'hello-world' })).toBeVisible();
   await expect(page.getByText(user.email)).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test('explore lists public repositories and searches real API results', async ({ page }) => {
+  await anonymous(page);
+  await page.goto('/');
+  await expect(page.getByRole('link', { name: 'alice / hello-world' })).toBeVisible();
+  await page.getByRole('searchbox', { name: 'Tìm repository' }).fill('khong-co');
+  await page.getByRole('button', { name: 'Tìm kiếm' }).click();
+  await expect(page.getByText('Không tìm thấy repository phù hợp.')).toBeVisible();
 });
 
 test('unknown profile and backend failure have distinct states', async ({ page }) => {

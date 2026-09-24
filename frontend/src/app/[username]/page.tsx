@@ -1,6 +1,7 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import styles from "./profile.module.css";
+import { RepositoryList } from "./repository-list";
+import type { RepositorySummary } from "@/lib/repositories";
 
 export default async function ProfilePage({ params }: { params: Promise<{ username: string }> }) {
   const { username } = await params;
@@ -15,7 +16,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ userna
   }
   if (response.status === 404) notFound();
   if (!response.ok) throw new Error("Không thể tải hồ sơ lúc này.");
-  const { user } = await response.json() as { user: { username: string; createdAt: string } };
+  const { user, repositories } = await response.json() as { user: { username: string; createdAt: string }; repositories: RepositorySummary[] };
   return <main className={`container ${styles.layout}`}>
     <aside className={styles.identity}>
       <div className={styles.avatar} aria-hidden="true">{user.username.slice(0, 1).toUpperCase()}</div>
@@ -25,13 +26,8 @@ export default async function ProfilePage({ params }: { params: Promise<{ userna
       <p className={styles.joined}>Tham gia {new Intl.DateTimeFormat("vi-VN", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(user.createdAt))}</p>
     </aside>
     <section className={styles.repositories} aria-labelledby="repositories-title">
-      <div className={styles.heading}><h2 id="repositories-title">Repository công khai</h2><span className="badge">Hồ sơ công khai</span></div>
-      <div className={styles.empty}>
-        <span className={styles.repoIcon} aria-hidden="true">&lt;/&gt;</span>
-        <h3>Không gian cho những ý tưởng mới</h3>
-        <p>Repository chưa khả dụng trong phiên bản này. Các dự án công khai sẽ xuất hiện ở đây khi tính năng được mở.</p>
-        <Link className="button buttonSecondary" href="/">Khám phá Code Forge</Link>
-      </div>
+      <div className={styles.heading}><h2 id="repositories-title">Repository</h2></div>
+      <RepositoryList username={user.username} initial={repositories ?? []} />
     </section>
   </main>;
 }

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { BadRequestException, ConflictException, ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma, type Repository } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
@@ -74,6 +74,34 @@ export class RepositoriesService {
     const repo = await this.load(this.db, owner, name);
     this.policy.assertRead(repo, userId);
     return this.response(repo, userId);
+  }
+
+  async listPublic(search = '', page = 1) {
+    const where: Prisma.RepositoryWhereInput = {
+      status: 'ACTIVE', deletedAt: null, visibility: 'PUBLIC',
+      ...(search ? { OR: [
+        { name: { contains: search, mode: 'insensitive' } },
+        { owner: { username: { contains: search, mode: 'insensitive' } } },
+      ] } : {}),
+    };
+    const rows = await this.db.repository.findMany({ where, include: { owner: { select: { username: true } } },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }], skip: (page - 1) * 20, take: 21 });
+    return { repositories: rows.slice(0, 20).map((repo) => this.response(repo).repository), hasMore: rows.length > 20, page };
+  }
+
+  async listForOwner(ownerId: string, viewerId?: string) {
+    const rows = await this.db.repository.findMany({
+      where: { ownerId, status: 'ACTIVE', deletedAt: null,
+        ...(viewerId === ownerId ? {} : { visibility: 'PUBLIC' }) },
+      include: { owner: { select: { username: true } } }, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+    });
+    return rows.map((repo) => this.response(repo, viewerId).repository);
+  }
+
+  async listByUsername(username: string, viewerId?: string) {
+    const owner = await this.db.user.findUnique({ where: { normalizedUsername: username.toLowerCase() }, select: { id: true } });
+    if (!owner) throw new NotFoundException({ error: { code: 'USER_NOT_FOUND', message: 'Không tìm thấy người dùng.' } });
+    return { repositories: await this.listForOwner(owner.id, viewerId) };
   }
 
   async update(owner: string, name: string, userId: string, dto: UpdateRepositoryDto) {

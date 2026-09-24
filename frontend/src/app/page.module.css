@@ -17,6 +17,9 @@
 .search { width: 310px; height: 42px; display: flex; align-items: center; gap: 9px; padding: 0 13px; color: #98a2b3; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-sm); }
 .search:focus-within { border-color: var(--brand-600); box-shadow: 0 0 0 3px var(--brand-100); }
 .search input { width: 100%; min-width: 0; outline: none; border: 0; color: var(--text); background: transparent; font-size: .82rem; }
+.search button { border: 0; background: transparent; color: var(--brand-700); font-weight: 700; cursor: pointer; }
+.pagination { display: flex; justify-content: center; align-items: center; gap: 18px; margin-top: 24px; font-size: .85rem; }
+.pagination a { color: var(--brand-700); font-weight: 700; }
 .repoGrid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; }
 .repoCard { min-width: 0; display: flex; gap: 14px; padding: 22px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); transition: .18s ease; }
 .repoCard:hover { border-color: #b8c8e4; box-shadow: 0 10px 24px rgba(40,61,99,.08); transform: translateY(-2px); }
