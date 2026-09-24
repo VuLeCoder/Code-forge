@@ -26,6 +26,37 @@ test('explore lists public repositories and searches real API results', async ({
   await expect(page.getByText('Không tìm thấy repository phù hợp.')).toBeVisible();
 });
 
+test('public repository opens its empty page', async ({ page }) => {
+  await anonymous(page);
+  await page.goto('/alice/hello-world');
+  await expect(page.getByRole('heading', { name: 'Repository chưa có mã nguồn' })).toBeVisible();
+  await expect(page.getByText('Repository thử nghiệm')).toBeVisible();
+  await expect(page.getByText('main', { exact: true })).toBeVisible();
+});
+
+test('create repository reports name conflicts and opens the new repository', async ({ page }) => {
+  await anonymous(page);
+  await page.route('**/api/v1/auth/refresh', (route) => route.fulfill({ json: { user } }));
+  await page.route('**/api/v1/repositories', async (route) => {
+    const data = route.request().postDataJSON() as { name: string; description: string; visibility: string };
+    if (data.name === 'taken') return route.fulfill({ status: 409, json: { error: { code: 'REPOSITORY_NAME_TAKEN' } } });
+    expect(data).toEqual({ name: 'my-project', description: 'Mô tả thử nghiệm', visibility: 'PRIVATE' });
+    return route.fulfill({ status: 201, json: { repository: { id: 'created', owner: { username: 'alice' }, name: data.name, description: data.description, visibility: data.visibility } } });
+  });
+  await page.route('**/api/v1/repos/alice/my-project', (route) => route.fulfill({ json: { repository: { id: 'created', owner: { username: 'alice' }, name: 'my-project', description: 'Mô tả thử nghiệm', visibility: 'PRIVATE', status: 'ACTIVE', defaultBranch: 'main', permissions: { canRead: true, canManage: true } } } }));
+  await page.goto('/new');
+  await page.getByLabel('Tên repository').fill('taken');
+  await page.getByRole('button', { name: 'Tạo repository' }).click();
+  await expect(page.getByRole('main').getByRole('alert')).toContainText('đã được sử dụng');
+  await page.getByLabel('Tên repository').fill('my-project');
+  await page.getByLabel('Mô tả').fill('Mô tả thử nghiệm');
+  await page.getByRole('radio', { name: /Riêng tư/ }).check();
+  await page.getByRole('button', { name: 'Tạo repository' }).click();
+  await expect(page).toHaveURL('/alice/my-project');
+  await expect(page.getByRole('heading', { name: 'Repository chưa có mã nguồn' })).toBeVisible();
+  await expect(page.getByText('Riêng tư')).toBeVisible();
+});
+
 test('unknown profile and backend failure have distinct states', async ({ page }) => {
   await anonymous(page);
   await page.goto('/missing-user');
