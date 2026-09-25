@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsEnum, IsString, Matches, MaxLength, MinLength, ValidateIf } from 'class-validator';
+import { IsBoolean, IsEnum, IsString, Matches, MaxLength, MinLength, ValidateIf } from 'class-validator';
 import { RepositoryVisibility } from '@prisma/client';
 
 // ASCII route segment, without traversal or the reserved Git transport suffix.
@@ -22,6 +22,10 @@ export class CreateRepositoryDto {
   @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsEnum(RepositoryVisibility)
   visibility?: RepositoryVisibility;
+
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsBoolean()
+  initializeReadme?: boolean;
 }
 
 export class UpdateRepositoryDto {

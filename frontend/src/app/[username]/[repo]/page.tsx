@@ -4,10 +4,11 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
+import { sessionFetch } from "@/lib/auth";
 import { repositoryPath, type RepositorySummary } from "@/lib/repositories";
 import styles from "./repository.module.css";
 
-type Repository = RepositorySummary & { defaultBranch: string; createdAt: string; status: string };
+type Repository = RepositorySummary & { defaultBranch: string; createdAt: string; status: string; storageState?: "READY" | "EMPTY" | "RESET"; readme?: string | null };
 
 export default function RepositoryPage() {
   const params = useParams<{ username: string; repo: string }>();
@@ -19,7 +20,7 @@ export default function RepositoryPage() {
   useEffect(() => {
     if (loading) return;
     let active = true;
-    fetch(`/api/v1/repos/${encodeURIComponent(params.username)}/${encodeURIComponent(params.repo)}`, { credentials: "include", cache: "no-store" })
+    sessionFetch(`/api/v1/repos/${encodeURIComponent(params.username)}/${encodeURIComponent(params.repo)}`, { cache: "no-store" })
       .then(async (response) => {
         if (response.status === 404) return { repository: null, error: "not-found" as const, key };
         if (!response.ok) throw new Error("Không thể tải repository.");
@@ -38,8 +39,9 @@ export default function RepositoryPage() {
   const repo = result.repository;
   return <main className={`container ${styles.page}`}>
     <div className={styles.breadcrumb}><Link href={`/${encodeURIComponent(repo.owner.username)}`}>{repo.owner.username}</Link><span>/</span><strong>{repo.name}</strong><span className="badge">{repo.visibility === "PRIVATE" ? "Riêng tư" : "Công khai"}</span></div>
-    <div className={styles.header}><div><span className="eyebrow">Repository</span><h1>{repo.name}</h1>{repo.description && <p>{repo.description}</p>}</div></div>
-    <section className={styles.empty} aria-labelledby="empty-title"><span className={styles.icon} aria-hidden="true">&lt;/&gt;</span><h2 id="empty-title">Repository chưa có mã nguồn</h2><p>Repository này hiện chưa có tệp nào.</p><div className={styles.details}><span>Nhánh mặc định</span><strong>{repo.defaultBranch}</strong></div></section>
+    <div className={styles.header}><div><span className="eyebrow">Repository</span><h1>{repo.name}</h1>{repo.description && <p>{repo.description}</p>}</div>{repo.permissions?.canManage && <Link className="button buttonSecondary" href={`${repositoryPath(repo)}/settings`}>Cài đặt</Link>}</div>
+    {repo.storageState === "RESET" && <div className={styles.notice} role="status">Mã nguồn của repository demo đã bị reset. Bare repository rỗng đã được tạo lại; lịch sử commit trước đó không thể khôi phục.</div>}
+    {repo.readme ? <section className={styles.empty} aria-labelledby="readme-title"><h2 id="readme-title">README.md</h2><pre className={styles.readme}>{repo.readme}</pre><div className={styles.details}><span>Nhánh mặc định</span><strong>{repo.defaultBranch}</strong></div></section> : <section className={styles.empty} aria-labelledby="empty-title"><span className={styles.icon} aria-hidden="true">&lt;/&gt;</span><h2 id="empty-title">{repo.storageState === "READY" ? "Repository đã có mã nguồn" : "Repository chưa có mã nguồn"}</h2><p>{repo.storageState === "READY" ? "Repository này chưa có README để hiển thị." : "Repository này hiện chưa có tệp nào."}</p><div className={styles.details}><span>Nhánh mặc định</span><strong>{repo.defaultBranch}</strong></div></section>}
     <div className={styles.bottom}><Link href={repositoryPath(repo)}>Repository</Link><Link href={`/${encodeURIComponent(repo.owner.username)}`}>Hồ sơ {repo.owner.username}</Link></div>
   </main>;
 }

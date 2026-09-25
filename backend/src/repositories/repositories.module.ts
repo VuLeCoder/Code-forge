@@ -4,11 +4,12 @@ import { OptionalAccessTokenGuard } from './optional-access-token.guard';
 import { RepositoriesController } from './repositories.controller';
 import { RepositoriesService } from './repositories.service';
 import { RepositoryPolicy } from './repository.policy';
+import { GitStorageService } from './git-storage.service';
 
 @Module({
   imports: [AuthModule],
   controllers: [RepositoriesController],
-  providers: [RepositoriesService, RepositoryPolicy, OptionalAccessTokenGuard],
+  providers: [RepositoriesService, RepositoryPolicy, OptionalAccessTokenGuard, GitStorageService],
   exports: [RepositoriesService, OptionalAccessTokenGuard],
 })
 export class RepositoriesModule {}

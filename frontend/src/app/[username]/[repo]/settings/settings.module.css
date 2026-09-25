@@ -1,0 +1,12 @@
+.page { width: min(760px, 100%); padding-block: 38px 88px; min-height: 70vh; }
+.page h1 { margin-top: 18px; font-size: clamp(1.8rem, 4vw, 2.4rem); overflow-wrap: anywhere; }
+.page > p, .intro { color: var(--muted); line-height: 1.6; margin: 10px 0 26px; }
+.back { color: var(--brand-700); font-weight: 700; }
+.card { display: grid; gap: 15px; margin-top: 20px; padding: 26px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.card h2 { font-size: 1.2rem; } .card p { color: var(--muted); line-height: 1.6; } .card strong { color: var(--text); } .card > button { justify-self: start; }
+.form { display: grid; gap: 10px; } .form label, .dialog label { font-weight: 700; } .form input, .form textarea, .dialog input { width: 100%; padding: 11px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff; } .form textarea { resize: vertical; } .form button { justify-self: start; margin-top: 8px; }
+.hint { font-size: .82rem; } .error, .success { margin-top: 18px; padding: 12px 14px; border-radius: var(--radius-sm); line-height: 1.5; } .error { background: #fff5f5; color: #991b1b; border: 1px solid #fecaca; } .success { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+.danger { border-color: #fecaca; } .danger h2 { color: #991b1b; }
+.dialog { width: min(480px, calc(100% - 32px)); margin: auto; padding: 26px; border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); } .dialog::backdrop { background: rgb(15 23 42 / 55%); } .dialog h2 { margin-bottom: 14px; font-size: 1.25rem; } .dialog p { line-height: 1.6; margin-bottom: 18px; } .dialog label { display: block; margin-bottom: 8px; }
+.actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 24px; } .deleteButton { padding: 10px 16px; border: 0; border-radius: var(--radius-sm); color: #fff; background: #b91c1c; font-weight: 700; cursor: pointer; } .deleteButton:disabled { opacity: .55; cursor: not-allowed; }
+@media (max-width: 600px) { .page { padding-block: 28px 56px; } .card, .dialog { padding: 20px; } }

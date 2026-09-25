@@ -27,7 +27,7 @@
 .repoBody { min-width: 0; flex: 1; } .repoTitle { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .repoTitle a { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--brand-700); font-size: .91rem; font-weight: 800; white-space: nowrap; }
 .repoTitle a span { color: #667085; font-weight: 550; }
-.repoBody > p { min-height: 60px; margin-top: 12px; color: var(--muted); font-size: .82rem; line-height: 1.55; }
+.repoBody > p { min-height: 60px; margin-top: 12px; color: var(--muted); font-size: .82rem; line-height: 1.55; overflow-wrap: anywhere; }
 .repoMeta { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 18px; color: #7a8495; font-size: .7rem; }
 .repoMeta span { display: inline-flex; align-items: center; gap: 6px; } .repoMeta i { width: 8px; height: 8px; background: #3178c6; border-radius: 50%; }
 .demoNote { display: flex; align-items: center; gap: 10px; margin-top: 28px; padding: 13px 16px; color: #475467; background: #fffdf5; border: 1px solid #f3e6b8; border-radius: var(--radius-sm); font-size: .78rem; }

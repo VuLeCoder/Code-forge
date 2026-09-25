@@ -5,6 +5,7 @@ import { Prisma, type Repository } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { CreateRepositoryDto, UpdateRepositoryDto } from './repository.dto';
 import { RepositoryPolicy } from './repository.policy';
+import { GitStorageService } from './git-storage.service';
 
 @Injectable()
 export class RepositoriesService {
@@ -12,6 +13,7 @@ export class RepositoriesService {
     private readonly db: PrismaService,
     private readonly config: ConfigService,
     private readonly policy: RepositoryPolicy,
+    private readonly storage: GitStorageService,
   ) {}
 
   private async activeOwner(tx: Prisma.TransactionClient, userId: string) {
@@ -31,12 +33,13 @@ export class RepositoriesService {
     });
   }
 
-  private response(repo: Repository & { owner: { username: string } }, userId?: string) {
+  private response(repo: Repository & { owner: { username: string } }, userId?: string, storage?: { state: 'READY' | 'EMPTY' | 'RESET'; readme: string | null }) {
     return { repository: {
       id: repo.id, owner: { username: repo.owner.username }, name: repo.name,
       description: repo.description, visibility: repo.visibility, status: repo.status,
       defaultBranch: repo.defaultBranch, createdAt: repo.createdAt, updatedAt: repo.updatedAt,
       permissions: this.policy.permissions(repo, userId),
+      ...(storage ? { storageState: storage.state, storageGeneration: repo.storageGeneration, readme: storage.readme } : {}),
     } };
   }
 
@@ -54,7 +57,8 @@ export class RepositoriesService {
   }
 
   async create(userId: string, dto: CreateRepositoryDto) {
-    return this.conflict(() => this.db.$transaction(async (tx) => {
+    let createdKey: string | undefined;
+    try { return await this.conflict(() => this.db.$transaction(async (tx) => {
       await this.activeOwner(tx, userId);
       const count = await tx.repository.count({ where: { ownerId: userId } });
       if (count >= this.config.getOrThrow<number>('MAX_REPOSITORIES_PER_USER')) {
@@ -66,14 +70,32 @@ export class RepositoriesService {
           description: dto.description, visibility: dto.visibility, storageKey: `${id}.git` },
         include: { owner: { select: { username: true } } },
       });
-      return this.response(repo, userId);
-    }));
+      await this.storage.create(repo.storageKey, repo.defaultBranch, dto.initializeReadme ?? false, repo.name);
+      createdKey = repo.storageKey;
+      const inspected = await this.storage.inspect(repo.storageKey, repo.defaultBranch);
+      return this.response(repo, userId, inspected);
+    }, { timeout: 30_000 })); }
+    catch (error) {
+      if (createdKey) await this.storage.remove(createdKey);
+      throw error;
+    }
   }
 
   async read(owner: string, name: string, userId?: string) {
     const repo = await this.load(this.db, owner, name);
     this.policy.assertRead(repo, userId);
-    return this.response(repo, userId);
+    // Serialize recovery so concurrent readers do not increment generation twice.
+    return this.db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM repositories WHERE id = ${repo.id}::uuid FOR UPDATE`;
+      let current = await tx.repository.findUniqueOrThrow({ where: { id: repo.id }, include: { owner: { select: { username: true } } } });
+      this.policy.assertRead(current, userId);
+      if (!(await this.storage.exists(current.storageKey))) {
+        await this.storage.create(current.storageKey, current.defaultBranch, false, current.name);
+        current = await tx.repository.update({ where: { id: current.id }, data: { storageGeneration: { increment: 1 } }, include: { owner: { select: { username: true } } } });
+      }
+      const inspected = await this.storage.inspect(current.storageKey, current.defaultBranch);
+      return this.response(current, userId, { ...inspected, state: current.storageGeneration > 0 && inspected.state === 'EMPTY' ? 'RESET' : inspected.state });
+    }, { timeout: 30_000 });
   }
 
   async listPublic(search = '', page = 1) {

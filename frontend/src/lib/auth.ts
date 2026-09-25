@@ -76,13 +76,38 @@ export function safeReturnTo(value: string | null): string {
 }
 
 let pendingSession: Promise<AuthUser | null> | null = null;
+let pendingRefresh: Promise<AuthResponse> | null = null;
+
+function refreshSession(): Promise<AuthResponse> {
+  if (!pendingRefresh) {
+    pendingRefresh = authApi.refresh().finally(() => { pendingRefresh = null; });
+  }
+  return pendingRefresh;
+}
+
+// Repository callers use replayable JSON bodies. Retry only authentication failures,
+// never network failures, which may occur after a mutation has already succeeded.
+export async function sessionFetch(path: string, init?: RequestInit): Promise<Response> {
+  const options = { ...init, credentials: "include" as const };
+  const response = await fetch(path, options);
+  if (response.status !== 401) return response;
+  try {
+    await refreshSession();
+  } catch (error) {
+    if (error instanceof ApiRequestError && error.status === 401) {
+      throw new ApiRequestError("AUTH_REQUIRED", "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.", 401);
+    }
+    throw error;
+  }
+  return fetch(path, options);
+}
 
 // Share bootstrap across Strict Mode effect remounts to avoid rotating one token twice.
 export function bootstrapSession(): Promise<AuthUser | null> {
   if (!pendingSession) {
     pendingSession = authApi.me().catch(async (error: unknown) => {
       if (!(error instanceof ApiRequestError) || error.status !== 401) throw error;
-      return authApi.refresh();
+      return refreshSession();
     }).then((result) => result.user).finally(() => { pendingSession = null; });
   }
   return pendingSession;

@@ -1,5 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
@@ -19,6 +22,8 @@ describe('Repository HTTP + PostgreSQL', () => {
   let originalUrl: string | undefined;
   let originalQuota: string | undefined;
   let originalRetention: string | undefined;
+  let originalStorage: string | undefined;
+  let storageRoot: string;
   const cookie = (res: Response) => res.headers.getSetCookie().map((value) => value.split(';')[0]).join('; ');
   const call = (method: string, path: string, cookies = '', body?: unknown, requestOrigin = origin) =>
     fetch(`${base}/${path}`, { method, headers: {
@@ -32,6 +37,9 @@ describe('Repository HTTP + PostgreSQL', () => {
     originalUrl = process.env.DATABASE_URL;
     originalQuota = process.env.MAX_REPOSITORIES_PER_USER;
     originalRetention = process.env.SOFT_DELETE_RETENTION_DAYS;
+    originalStorage = process.env.GIT_STORAGE_PATH;
+    storageRoot = await mkdtemp(join(tmpdir(), 'code-forge-repositories-'));
+    process.env.GIT_STORAGE_PATH = storageRoot;
     if (!originalUrl) throw new Error('DATABASE_URL is required for integration tests');
     admin = new PrismaClient({ datasourceUrl: originalUrl });
     await admin.$executeRawUnsafe(`CREATE SCHEMA "${schema}"`);
@@ -68,13 +76,15 @@ describe('Repository HTTP + PostgreSQL', () => {
   afterAll(async () => {
     await app?.close();
     await db?.$disconnect();
-    if (admin) {
+    if (storageRoot) await rm(storageRoot, { recursive: true, force: true });
+    if (admin && app) {
       await admin.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
       await admin.$disconnect();
     }
     for (const [key, value] of Object.entries({
       DATABASE_URL: originalUrl, MAX_REPOSITORIES_PER_USER: originalQuota,
       SOFT_DELETE_RETENTION_DAYS: originalRetention,
+      GIT_STORAGE_PATH: originalStorage,
     })) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -94,7 +104,7 @@ describe('Repository HTTP + PostgreSQL', () => {
   });
 
   it('creates private metadata with a UUID storage key and hides private existence', async () => {
-    const res = await call('POST', 'repositories', ownerCookie, { name: ' Demo ', description: 'Example' });
+    const res = await call('POST', 'repositories', ownerCookie, { name: ' Demo ', description: 'Example', initializeReadme: true });
     expect(res.status).toBe(201);
     const { repository } = await res.json();
     expect(repository).toMatchObject({ name: 'Demo', visibility: 'PRIVATE', owner: { username: 'Owner' },
@@ -103,6 +113,15 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect(repository.owner.email).toBeUndefined();
     const stored = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
     expect(stored.storageKey).toBe(`${repository.id}.git`);
+    const bare = join(storageRoot, stored.storageKey);
+    expect(execFileSync('git', ['--git-dir', bare, 'symbolic-ref', 'HEAD'], { encoding: 'utf8' }).trim()).toBe('refs/heads/main');
+    expect(execFileSync('git', ['--git-dir', bare, 'show', 'HEAD:README.md'], { encoding: 'utf8' })).toBe('# Demo\n');
+    expect(repository).toMatchObject({ storageState: 'READY', storageGeneration: 0, readme: '# Demo\n' });
+    await rm(bare, { recursive: true });
+    const recovered = await (await call('GET', 'repos/owner/demo', ownerCookie)).json();
+    expect(recovered.repository).toMatchObject({ storageState: 'RESET', storageGeneration: 1, readme: null });
+    expect(execFileSync('git', ['--git-dir', bare, 'symbolic-ref', 'HEAD'], { encoding: 'utf8' }).trim()).toBe('refs/heads/main');
+    expect((await (await call('GET', 'repos/owner/demo', ownerCookie)).json()).repository.storageGeneration).toBe(1);
     expect((await call('GET', 'repos/OWNER/DEMO', ownerCookie)).status).toBe(200);
     const hidden = await call('GET', 'repos/owner/demo', otherCookie);
     expect(hidden.status).toBe(404);

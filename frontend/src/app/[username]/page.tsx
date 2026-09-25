@@ -3,8 +3,9 @@ import styles from "./profile.module.css";
 import { RepositoryList } from "./repository-list";
 import type { RepositorySummary } from "@/lib/repositories";
 
-export default async function ProfilePage({ params }: { params: Promise<{ username: string }> }) {
+export default async function ProfilePage({ params, searchParams }: { params: Promise<{ username: string }>; searchParams: Promise<{ deleted?: string }> }) {
   const { username } = await params;
+  const { deleted } = await searchParams;
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{1,37}[a-zA-Z0-9]$/.test(username)) notFound();
   let response: Response;
   try {
@@ -27,6 +28,7 @@ export default async function ProfilePage({ params }: { params: Promise<{ userna
     </aside>
     <section className={styles.repositories} aria-labelledby="repositories-title">
       <div className={styles.heading}><h2 id="repositories-title">Repository</h2></div>
+      {deleted === "1" && <p role="status">Repository đã được xóa. Bạn có thể khôi phục trong thời hạn lưu giữ.</p>}
       <RepositoryList username={user.username} initial={repositories ?? []} />
     </section>
   </main>;
