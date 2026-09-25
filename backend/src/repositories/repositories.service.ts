@@ -126,6 +126,16 @@ export class RepositoriesService {
     return { repositories: await this.listForOwner(owner.id, viewerId) };
   }
 
+  async listDeleted(userId: string) {
+    const rows = await this.db.repository.findMany({
+      where: { ownerId: userId, status: 'DELETED', purgeAfter: { gt: new Date() } },
+      include: { owner: { select: { username: true } } }, orderBy: [{ deletedAt: 'desc' }, { id: 'desc' }],
+    });
+    return { repositories: rows.map((repo) => ({
+      ...this.response(repo, userId).repository, deletedAt: repo.deletedAt, purgeAfter: repo.purgeAfter,
+    })) };
+  }
+
   async update(owner: string, name: string, userId: string, dto: UpdateRepositoryDto) {
     if (dto.name === undefined && dto.description === undefined && dto.visibility === undefined) {
       throw new BadRequestException({ error: { code: 'EMPTY_UPDATE', message: 'Cần ít nhất một trường để cập nhật.', details: {} } });
@@ -151,6 +161,27 @@ export class RepositoriesService {
       const deletedAt = new Date();
       const purgeAfter = new Date(deletedAt.getTime() + this.config.getOrThrow<number>('SOFT_DELETE_RETENTION_DAYS') * 86_400_000);
       await tx.repository.update({ where: { id: repo.id }, data: { status: 'DELETED', deletedAt, purgeAfter } });
+    });
+  }
+
+
+  async restore(owner: string, name: string, userId: string) {
+    return this.db.$transaction(async (tx) => {
+      await this.activeOwner(tx, userId);
+      await tx.$queryRaw`SELECT r.id FROM repositories r JOIN users u ON u.id = r.owner_id
+        WHERE u.normalized_username = ${owner.toLowerCase()} AND r.normalized_name = ${name.toLowerCase()} FOR UPDATE OF r`;
+      const repo = await this.load(tx, owner, name);
+      if (!repo || repo.ownerId !== userId || repo.status !== 'DELETED') {
+        throw new NotFoundException({ error: { code: 'REPOSITORY_NOT_FOUND', message: 'Không tìm thấy repository.', details: {} } });
+      }
+      if (!repo.purgeAfter || repo.purgeAfter <= new Date()) {
+        throw new ConflictException({ error: { code: 'RESTORE_EXPIRED', message: 'Đã hết thời hạn khôi phục repository.', details: {} } });
+      }
+      const updated = await tx.repository.update({
+        where: { id: repo.id }, data: { status: 'ACTIVE', deletedAt: null, purgeAfter: null },
+        include: { owner: { select: { username: true } } },
+      });
+      return this.response(updated, userId);
     });
   }
 }

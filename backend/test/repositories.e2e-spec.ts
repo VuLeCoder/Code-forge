@@ -8,6 +8,8 @@ import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
 import cookieParser = require('cookie-parser');
+import { RepositoryPurgeService } from '../src/repositories/repository-purge.service';
+import { GitStorageService } from '../src/repositories/git-storage.service';
 
 describe('Repository HTTP + PostgreSQL', () => {
   const schema = `repo_test_${randomBytes(8).toString('hex')}`;
@@ -186,6 +188,42 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect((await call('PATCH', 'repos/owner/renamed', ownerCookie, { name: 'Restored' })).status).toBe(404);
     expect((await call('DELETE', 'repos/owner/renamed', ownerCookie)).status).toBe(404);
     expect((await create('RENAMED')).status).toBe(409);
+  });
+
+  it('lists only the owner deleted repositories and restores within retention', async () => {
+    const path = 'repos/owner/renamed/restore';
+    expect((await call('GET', 'repositories/deleted')).status).toBe(401);
+    expect((await call('POST', path)).status).toBe(401);
+    expect((await call('POST', path, otherCookie)).status).toBe(404);
+    expect((await call('POST', path, ownerCookie, undefined, 'https://evil.example')).status).toBe(403);
+    expect((await (await call('GET', 'repositories/deleted', otherCookie)).json()).repositories).toEqual([]);
+    const listed = await (await call('GET', 'repositories/deleted', ownerCookie)).json();
+    expect(listed.repositories).toHaveLength(1);
+    expect(listed.repositories[0]).toMatchObject({ name: 'Renamed', status: 'DELETED' });
+    expect(listed.repositories[0].storageKey).toBeUndefined();
+    const restored = await call('POST', path, ownerCookie);
+    expect(restored.status).toBe(201);
+    expect((await restored.json()).repository).toMatchObject({ name: 'Renamed', status: 'ACTIVE' });
+    expect((await call('GET', 'repos/owner/renamed', ownerCookie)).status).toBe(200);
+    expect((await (await call('GET', 'repositories/deleted', ownerCookie)).json()).repositories).toEqual([]);
+    expect((await call('POST', path, ownerCookie)).status).toBe(404);
+    expect((await call('DELETE', 'repos/owner/renamed', ownerCookie)).status).toBe(204);
+  });
+
+  it('rejects expired restore and purges source and metadata before reusing the name', async () => {
+    const repo = await db.repository.findFirstOrThrow({ where: { ownerId, normalizedName: 'renamed' } });
+    const bare = join(storageRoot, repo.storageKey);
+    await db.repository.update({ where: { id: repo.id }, data: { purgeAfter: new Date(Date.now() - 1000) } });
+    expect((await (await call('POST', 'repos/owner/renamed/restore', ownerCookie)).json()).error.code).toBe('RESTORE_EXPIRED');
+    expect((await (await call('GET', 'repositories/deleted', ownerCookie)).json()).repositories).toEqual([]);
+    const failedRemoval = jest.spyOn(app.get(GitStorageService), 'remove').mockRejectedValueOnce(new Error('disk unavailable'));
+    expect(await app.get(RepositoryPurgeService).purgeDue()).toBe(0);
+    expect(await db.repository.findUnique({ where: { id: repo.id } })).not.toBeNull();
+    failedRemoval.mockRestore();
+    expect(await app.get(RepositoryPurgeService).purgeDue()).toBe(1);
+    expect(await db.repository.findUnique({ where: { id: repo.id } })).toBeNull();
+    expect(() => execFileSync('git', ['--git-dir', bare, 'rev-parse', '--is-bare-repository'], { stdio: 'pipe' })).toThrow();
+    expect((await create('RENAMED')).status).toBe(201);
   });
 
   it('serializes concurrent creates and counts soft-deleted repositories toward quota', async () => {

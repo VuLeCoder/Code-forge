@@ -33,6 +33,12 @@ export class RepositoriesController {
     return this.repositories.create(request.user.id, dto);
   }
 
+  @Get('repositories/deleted')
+  @UseGuards(AccessTokenGuard)
+  listDeleted(@Req() request: AuthenticatedRequest) {
+    return this.repositories.listDeleted(request.user.id);
+  }
+
   @Get('repos/:owner/:repo')
   @UseGuards(OptionalAccessTokenGuard)
   read(@Param('owner') owner: string, @Param('repo') repo: string, @Req() request: Request & { user?: AuthPrincipal }) {
@@ -50,5 +56,11 @@ export class RepositoriesController {
   @UseGuards(OriginGuard, AccessTokenGuard)
   remove(@Param('owner') owner: string, @Param('repo') repo: string, @Req() request: AuthenticatedRequest) {
     return this.repositories.remove(owner, repo, request.user.id);
+  }
+
+  @Post('repos/:owner/:repo/restore')
+  @UseGuards(OriginGuard, AccessTokenGuard)
+  restore(@Param('owner') owner: string, @Param('repo') repo: string, @Req() request: AuthenticatedRequest) {
+    return this.repositories.restore(owner, repo, request.user.id);
   }
 }

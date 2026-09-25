@@ -54,6 +54,19 @@ test('owner list reports failure and retries with a refreshed session', async ({
   expect(refreshes).toBe(1);
 });
 
+test('owner sees deleted repositories and restores one from the profile', async ({ page }) => {
+  await page.route('**/api/v1/auth/me', (route) => route.fulfill({ json: { user } }));
+  let restored = false;
+  await page.route('**/api/v1/users/alice', (route) => route.fulfill({ json: { repositories: restored ? [{ id: 'deleted', name: 'old-project', visibility: 'PRIVATE', owner: { username: 'alice' } }] : [] } }));
+  await page.route('**/api/v1/repositories/deleted', (route) => route.fulfill({ json: { repositories: restored ? [] : [{ id: 'deleted', name: 'old-project', visibility: 'PRIVATE', owner: { username: 'alice' }, purgeAfter: '2026-10-01T00:00:00.000Z' }] } }));
+  await page.route('**/api/v1/repos/alice/old-project/restore', (route) => { restored = true; return route.fulfill({ status: 201, json: { repository: { name: 'old-project' } } }); });
+  await page.goto('/alice');
+  await expect(page.getByRole('heading', { name: 'Repository đã xóa' })).toBeVisible();
+  await page.getByRole('button', { name: 'Khôi phục' }).click();
+  await expect(page.getByRole('link', { name: 'old-project' })).toBeVisible();
+  await expect(page.getByText('Không có repository đang chờ xóa.')).toBeVisible();
+});
+
 test('repository read refreshes mid-session and long names fit mobile', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.route('**/api/v1/auth/me', (route) => route.fulfill({ json: { user } }));
