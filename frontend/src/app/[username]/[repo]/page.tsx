@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { BranchBrowser } from "./branch-browser";
 import { useAuth } from "@/components/auth-provider";
 import { sessionFetch } from "@/lib/auth";
 import { repositoryPath, type RepositorySummary } from "@/lib/repositories";
@@ -12,10 +13,10 @@ type Repository = RepositorySummary & { defaultBranch: string; createdAt: string
 
 export default function RepositoryPage() {
   const params = useParams<{ username: string; repo: string }>();
-  const { loading } = useAuth();
+  const { loading, user } = useAuth();
   const [result, setResult] = useState<{ repository: Repository | null; error: "not-found" | "unavailable" | null; key: string }>({ repository: null, error: null, key: "" });
   const [attempt, setAttempt] = useState(0);
-  const key = `${params.username}/${params.repo}`;
+  const key = `${params.username}/${params.repo}/${user?.id ?? "anonymous"}`;
 
   useEffect(() => {
     if (loading) return;
@@ -41,7 +42,9 @@ export default function RepositoryPage() {
     <div className={styles.breadcrumb}><Link href={`/${encodeURIComponent(repo.owner.username)}`}>{repo.owner.username}</Link><span>/</span><strong>{repo.name}</strong><span className="badge">{repo.visibility === "PRIVATE" ? "Riêng tư" : "Công khai"}</span></div>
     <div className={styles.header}><div><span className="eyebrow">Repository</span><h1>{repo.name}</h1>{repo.description && <p>{repo.description}</p>}</div>{repo.permissions?.canManage && <Link className="button buttonSecondary" href={`${repositoryPath(repo)}/settings`}>Cài đặt</Link>}</div>
     {repo.storageState === "RESET" && <div className={styles.notice} role="status">Mã nguồn của repository demo đã bị reset. Bare repository rỗng đã được tạo lại; lịch sử commit trước đó không thể khôi phục.</div>}
+    <Suspense fallback={<p role="status">Đang tải branch…</p>}><BranchBrowser endpoint={`/api/v1/repos/${encodeURIComponent(params.username)}/${encodeURIComponent(params.repo)}`}>
     {repo.readme ? <section className={styles.empty} aria-labelledby="readme-title"><h2 id="readme-title">README.md</h2><pre className={styles.readme}>{repo.readme}</pre><div className={styles.details}><span>Nhánh mặc định</span><strong>{repo.defaultBranch}</strong></div></section> : <section className={styles.empty} aria-labelledby="empty-title"><span className={styles.icon} aria-hidden="true">&lt;/&gt;</span><h2 id="empty-title">{repo.storageState === "READY" ? "Repository đã có mã nguồn" : "Repository chưa có mã nguồn"}</h2><p>{repo.storageState === "READY" ? "Repository này chưa có README để hiển thị." : "Repository này hiện chưa có tệp nào."}</p><div className={styles.details}><span>Nhánh mặc định</span><strong>{repo.defaultBranch}</strong></div></section>}
+    </BranchBrowser></Suspense>
     <div className={styles.bottom}><Link href={repositoryPath(repo)}>Repository</Link><Link href={`/${encodeURIComponent(repo.owner.username)}`}>Hồ sơ {repo.owner.username}</Link></div>
   </main>;
 }

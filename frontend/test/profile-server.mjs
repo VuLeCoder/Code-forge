@@ -5,6 +5,9 @@ let offlineRequests = 0;
 const server = createServer((request, response) => {
   response.setHeader("Content-Type", "application/json");
   if (request.url === "/health") return response.end('{}');
+  if (request.url === "/api/v1/repos/alice/hello-world/branches") {
+    return response.end(JSON.stringify({ branches: [], defaultBranch: 'main', selectedBranch: null, storageState: 'EMPTY', storageGeneration: 0 }));
+  }
   if (request.url?.startsWith("/api/v1/repositories?")) {
     const query = new URL(request.url, "http://localhost").searchParams.get("q") ?? "";
     const repository = { id: "public-repo", owner: { username: "alice" }, name: "hello-world", description: "Repository thử nghiệm", visibility: "PUBLIC", updatedAt: "2026-09-01T00:00:00.000Z", permissions: { canRead: true, canManage: false } };

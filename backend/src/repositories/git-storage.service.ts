@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 const runFile = promisify(execFile);
@@ -12,6 +12,48 @@ const runFile = promisify(execFile);
 @Injectable()
 export class GitStorageService {
   constructor(private readonly config: ConfigService) {}
+
+  validateRef(ref: string) {
+    if (typeof ref !== 'string' || Buffer.byteLength(ref) > 255 || !ref ||
+      [...ref].some((char) => char.charCodeAt(0) <= 32 || char.charCodeAt(0) === 127 || '~^:?*[\\'.includes(char)) || ref.includes('..') || ref.includes('@{') ||
+      ref === '@' || ref.startsWith('-') || ref.endsWith('.') ||
+      ref.split('/').some((part) => !part || part.startsWith('.') || part.endsWith('.lock'))) {
+      throw new BadRequestException({ error: { code: 'INVALID_REF', message: 'Tên branch không hợp lệ.' } });
+    }
+  }
+
+  validateSourcePath(path: string) {
+    if (typeof path !== 'string' || Buffer.byteLength(path) > 4096 || [...path].some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127 || char === '\\') ||
+      (path !== '' && path.split('/').some((part) => !part || part === '.' || part === '..'))) {
+      throw new BadRequestException({ error: { code: 'INVALID_PATH', message: 'Đường dẫn mã nguồn không hợp lệ.' } });
+    }
+  }
+
+  async branches(key: string, defaultBranch: string, ref?: string) {
+    if (ref !== undefined) this.validateRef(ref);
+    let stdout: string;
+    try {
+      ({ stdout } = await this.git(['--git-dir', this.path(key), 'for-each-ref', '--sort=refname',
+        '--count=1001', '--format=%(refname)%09%(objectname)', 'refs/heads/']));
+    } catch {
+      throw new ServiceUnavailableException({ error: { code: 'GIT_READ_UNAVAILABLE', message: 'Không thể đọc danh sách branch trong giới hạn cho phép.' } });
+    }
+    const branches = stdout.trim().split('\n').filter(Boolean).map((line) => {
+      const [name, commitSha] = line.split('\t');
+      if (!name?.startsWith('refs/heads/') || !commitSha || !/^[a-f0-9]{40,64}$/.test(commitSha)) {
+        throw new ServiceUnavailableException({ error: { code: 'GIT_READ_UNAVAILABLE', message: 'Dữ liệu branch không hợp lệ.' } });
+      }
+      return { name: name.slice('refs/heads/'.length), commitSha, isDefault: name === `refs/heads/${defaultBranch}` };
+    });
+    if (branches.length > 1000) {
+      throw new ServiceUnavailableException({ error: { code: 'GIT_READ_LIMIT_EXCEEDED', message: 'Repository vượt giới hạn 1000 branch.' } });
+    }
+    const selectedBranch = branches.find((branch) => branch.name === (ref ?? defaultBranch)) ?? null;
+    if (ref !== undefined && !selectedBranch) {
+      throw new NotFoundException({ error: { code: 'REF_NOT_FOUND', message: 'Branch không tồn tại hoặc đã bị xóa.' } });
+    }
+    return { branches, defaultBranch, selectedBranch };
+  }
 
   private root() { return resolve(this.config.getOrThrow<string>('GIT_STORAGE_PATH')); }
 

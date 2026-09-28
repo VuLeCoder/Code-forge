@@ -7,3 +7,5 @@
 .notice { margin-bottom: 18px; padding: 14px 18px; border: 1px solid #f5c06a; border-radius: var(--radius-sm); background: #fff8e7; line-height: 1.6; }
 .readme { width: 100%; margin: 0; padding: 20px; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 @media (max-width: 600px) { .empty { padding: 42px 20px; } }
+.branchBar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 20px 0; }
+.branchBar select { max-width: 100%; min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: inherit; font: inherit; }

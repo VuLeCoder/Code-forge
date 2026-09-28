@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Header, HttpCode, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { AccessTokenGuard } from '../auth/access-token.guard';
 import type { AuthenticatedRequest, AuthPrincipal } from '../auth/auth.types';
@@ -49,6 +49,15 @@ export class RepositoriesController {
   @UseGuards(OriginGuard, AccessTokenGuard)
   update(@Param('owner') owner: string, @Param('repo') repo: string, @Req() request: AuthenticatedRequest, @Body() dto: UpdateRepositoryDto) {
     return this.repositories.update(owner, repo, request.user.id, dto);
+  }
+
+  @Get('repos/:owner/:repo/branches')
+  @Header('Cache-Control', 'private, no-store')
+  @UseGuards(OptionalAccessTokenGuard)
+  branches(@Param('owner') owner: string, @Param('repo') repo: string,
+    @Req() request: Request & { user?: AuthPrincipal }) {
+    // Read the raw query: ValidationPipe coerces duplicate primitive params to a string.
+    return this.repositories.read(owner, repo, request.user?.id, { ref: request.query.ref as string | undefined });
   }
 
   @Delete('repos/:owner/:repo')

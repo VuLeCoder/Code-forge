@@ -81,11 +81,12 @@ export class RepositoriesService {
     }
   }
 
-  async read(owner: string, name: string, userId?: string) {
+  async read(owner: string, name: string, userId?: string, branchQuery?: { ref?: string }) {
     const repo = await this.load(this.db, owner, name);
     this.policy.assertRead(repo, userId);
+    if (branchQuery?.ref !== undefined) this.storage.validateRef(branchQuery.ref);
     // Serialize recovery so concurrent readers do not increment generation twice.
-    return this.db.$transaction(async (tx) => {
+    const response = await this.db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM repositories WHERE id = ${repo.id}::uuid FOR UPDATE`;
       let current = await tx.repository.findUniqueOrThrow({ where: { id: repo.id }, include: { owner: { select: { username: true } } } });
       this.policy.assertRead(current, userId);
@@ -93,9 +94,22 @@ export class RepositoriesService {
         await this.storage.create(current.storageKey, current.defaultBranch, false, current.name);
         current = await tx.repository.update({ where: { id: current.id }, data: { storageGeneration: { increment: 1 } }, include: { owner: { select: { username: true } } } });
       }
+      if (branchQuery) {
+        const result = await this.storage.branches(current.storageKey, current.defaultBranch);
+        return { ...result,
+          storageState: result.branches.length ? 'READY' : current.storageGeneration > 0 ? 'RESET' : 'EMPTY',
+          storageGeneration: current.storageGeneration };
+      }
       const inspected = await this.storage.inspect(current.storageKey, current.defaultBranch);
       return this.response(current, userId, { ...inspected, state: current.storageGeneration > 0 && inspected.state === 'EMPTY' ? 'RESET' : inspected.state });
     }, { timeout: 30_000 });
+    // Commit recovery before reporting a missing requested ref; Git creation cannot roll back with SQL.
+    if ('branches' in response && branchQuery?.ref !== undefined) {
+      const selectedBranch = response.branches.find((branch) => branch.name === branchQuery.ref);
+      if (!selectedBranch) throw new NotFoundException({ error: { code: 'REF_NOT_FOUND', message: 'Branch không tồn tại hoặc đã bị xóa.' } });
+      return { ...response, selectedBranch };
+    }
+    return response;
   }
 
   async listPublic(search = '', page = 1) {

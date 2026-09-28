@@ -2,6 +2,13 @@ import { expect, test, type Page } from "@playwright/test";
 
 const user = { id: "test-user", username: "alice", email: "private@example.test", systemRole: "USER", status: "ACTIVE", createdAt: "2026-09-01T00:00:00.000Z" };
 
+// M1/M2 fixtures have unborn HEAD; branch interaction is covered by milestone-three.
+test.beforeEach(async ({ page }) => {
+  await page.route('**/api/v1/repos/*/*/branches*', (route) => route.fulfill({ json: {
+    branches: [], selectedBranch: null, defaultBranch: 'main', storageState: 'EMPTY', storageGeneration: 0,
+  } }));
+});
+
 async function anonymous(page: Page) {
   await page.route("**/api/v1/auth/*", (route) => route.fulfill({ status: 401, json: { error: { code: "AUTH_REQUIRED" } } }));
 }

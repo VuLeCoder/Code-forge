@@ -119,9 +119,19 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect(execFileSync('git', ['--git-dir', bare, 'symbolic-ref', 'HEAD'], { encoding: 'utf8' }).trim()).toBe('refs/heads/main');
     expect(execFileSync('git', ['--git-dir', bare, 'show', 'HEAD:README.md'], { encoding: 'utf8' })).toBe('# Demo\n');
     expect(repository).toMatchObject({ storageState: 'READY', storageGeneration: 0, readme: '# Demo\n' });
+    const branches = await (await call('GET', 'repos/owner/demo/branches', ownerCookie)).json();
+    expect(branches.selectedBranch).toMatchObject({ name: 'main', isDefault: true });
+    expect(branches.branches).toHaveLength(1);
+    expect((await call('GET', 'repos/owner/demo/branches')).status).toBe(404);
+    expect((await call('GET', 'repos/owner/demo/branches', otherCookie)).status).toBe(404);
+    expect((await call('GET', 'repos/owner/demo/branches?ref=missing', ownerCookie)).status).toBe(404);
+    expect((await call('GET', 'repos/owner/demo/branches?ref=..%2Fmain', ownerCookie)).status).toBe(400);
+    expect((await call('GET', 'repos/owner/demo/branches?ref=a&ref=b', ownerCookie)).status).toBe(400);
     await rm(bare, { recursive: true });
+    expect((await call('GET', 'repos/owner/demo/branches?ref=main', ownerCookie)).status).toBe(404);
     const recovered = await (await call('GET', 'repos/owner/demo', ownerCookie)).json();
     expect(recovered.repository).toMatchObject({ storageState: 'RESET', storageGeneration: 1, readme: null });
+    expect(await (await call('GET', 'repos/owner/demo/branches', ownerCookie)).json()).toMatchObject({ storageState: 'RESET', branches: [], selectedBranch: null });
     expect(execFileSync('git', ['--git-dir', bare, 'symbolic-ref', 'HEAD'], { encoding: 'utf8' }).trim()).toBe('refs/heads/main');
     expect((await (await call('GET', 'repos/owner/demo', ownerCookie)).json()).repository.storageGeneration).toBe(1);
     expect((await call('GET', 'repos/OWNER/DEMO', ownerCookie)).status).toBe(200);
@@ -137,6 +147,7 @@ describe('Repository HTTP + PostgreSQL', () => {
 
   it('allows anonymous public reads but rejects non-owner mutations and invalid tokens', async () => {
     expect((await create('Public', 'PUBLIC')).status).toBe(201);
+    expect(await (await call('GET', 'repos/owner/public/branches')).json()).toMatchObject({ branches: [], selectedBranch: null, storageState: 'EMPTY' });
     const publicList = await (await call('GET', 'repositories')).json();
     expect(publicList.repositories.map((repo: { name: string }) => repo.name)).toEqual(['Public']);
     expect(publicList.repositories[0].permissions).toEqual({ canRead: true, canManage: false });
@@ -184,6 +195,7 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect(deleted.purgeAfter!.getTime() - deleted.deletedAt!.getTime()).toBe(7 * 86400000);
     for (const cookies of ['', ownerCookie, otherCookie]) {
       expect((await call('GET', 'repos/owner/renamed', cookies)).status).toBe(404);
+      expect((await call('GET', 'repos/owner/renamed/branches', cookies)).status).toBe(404);
     }
     expect((await call('PATCH', 'repos/owner/renamed', ownerCookie, { name: 'Restored' })).status).toBe(404);
     expect((await call('DELETE', 'repos/owner/renamed', ownerCookie)).status).toBe(404);
