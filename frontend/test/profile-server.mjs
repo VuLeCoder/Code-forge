@@ -5,6 +5,31 @@ let offlineRequests = 0;
 const server = createServer((request, response) => {
   response.setHeader("Content-Type", "application/json");
   if (request.url === "/health") return response.end('{}');
+  if (request.url?.startsWith('/api/v1/repos/alice/hello-world/image?')) {
+    const query = new URL(request.url, 'http://fixture').searchParams;
+    if (query.getAll('path').length !== 1 || query.getAll('ref').length > 1) {
+      response.statusCode = 400;
+      return response.end(JSON.stringify({ error: { code: 'INVALID_PATH' } }));
+    }
+    if (query.get('path') !== 'logo.png') { response.statusCode = 404; return response.end('{}'); }
+    return response.end(JSON.stringify({ kind: 'image', mime: 'image/png', content: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9XcAAAAASUVORK5CYII=' }));
+  }
+  if (request.url?.startsWith("/api/v1/repos/alice/hello-world/blob?")) {
+    const query = new URL(request.url, 'http://fixture').searchParams;
+    const path = query.get('path');
+    if (!path || query.getAll('path').length > 1 || query.getAll('ref').length > 1) {
+      response.statusCode = 400;
+      return response.end(JSON.stringify({ error: { code: 'INVALID_PATH' } }));
+    }
+    if (path === 'missing') {
+      response.statusCode = 404;
+      return response.end(JSON.stringify({ error: { code: 'PATH_NOT_FOUND' } }));
+    }
+    const kind = path === 'binary' ? 'binary' : path === 'large' ? 'large' : 'text';
+    const content = kind !== 'text' ? null : path === 'empty' ? '' : `<script>window.sourceExecuted = true</script>\n${query.get('ref') ?? 'main'}\n${'long line '.repeat(100)}\n`;
+    return response.end(JSON.stringify({ path, kind, content, size: path === 'large' ? 1048577 : 1024,
+      truncated: path === 'truncated', objectSha: 'b'.repeat(40), commitSha: 'a'.repeat(40) }));
+  }
   if (request.url?.startsWith("/api/v1/repos/alice/hello-world/tree?")) {
     const params = new URL(request.url, "http://localhost").searchParams;
     const path = params.get("path") ?? "";
@@ -18,10 +43,10 @@ const server = createServer((request, response) => {
     }
     const entries = path === "src # ü/nested" ? [] : path ? [
       { name: "nested", path: `${path}/nested`, type: "directory", navigable: true },
-      { name: "hello & ü.ts", path: `${path}/hello & ü.ts`, type: "file", navigable: false },
+      { name: "hello & ü.ts", path: `${path}/hello & ü.ts`, type: "file", navigable: true },
     ] : [
       { name: "src # ü", path: "src # ü", type: "directory", navigable: true },
-      { name: "README.md", path: "README.md", type: "file", navigable: false },
+      { name: "README.md", path: "README.md", type: "file", navigable: true },
       { name: "link", path: "link", type: "symlink", navigable: false },
     ];
     return response.end(JSON.stringify({ entries, path, ref: params.get("ref"), storageState: "READY", commitSha: "a".repeat(40) }));

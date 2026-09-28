@@ -165,6 +165,16 @@ test('README option is sent on create and a storage reset is explained', async (
     return route.fulfill({ status: 201, json: { repository: { name: 'with-readme', owner: { username: 'alice' } } } });
   });
   let reset = false;
+  const branch = { name: 'main', commitSha: 'a'.repeat(40), isDefault: true };
+  await page.route('**/api/v1/repos/alice/with-readme/branches*', (route) => route.fulfill({ json: {
+    branches: reset ? [] : [branch], selectedBranch: reset ? null : branch, defaultBranch: 'main', storageState: reset ? 'RESET' : 'READY',
+  } }));
+  await page.route('**/api/v1/repos/alice/with-readme/tree?**', (route) => route.fulfill({ json: {
+    storageState: 'READY', entries: [{ name: 'README.md', path: 'README.md', type: 'file', navigable: true }],
+  } }));
+  await page.route('**/api/v1/repos/alice/with-readme/blob?**', (route) => route.fulfill({ json: {
+    kind: 'text', path: 'README.md', content: '# with-readme\n', truncated: false,
+  } }));
   await page.route('**/api/v1/repos/alice/with-readme', (route) => route.fulfill({ json: { repository: {
     name: 'with-readme', owner: { username: 'alice' }, visibility: 'PRIVATE', defaultBranch: 'main',
     storageState: reset ? 'RESET' : 'READY', readme: reset ? null : '# with-readme\n',
@@ -173,12 +183,12 @@ test('README option is sent on create and a storage reset is explained', async (
   await page.getByRole('textbox', { name: 'Tên repository' }).fill('with-readme');
   await page.getByRole('checkbox', { name: /Thêm README.md/ }).check();
   await page.getByRole('button', { name: 'Tạo repository' }).click();
-  await expect(page.getByRole('heading', { name: 'README.md' })).toBeVisible();
-  await expect(page.getByText('# with-readme')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'README', exact: true }).getByRole('heading', { name: 'with-readme', exact: true })).toBeVisible();
   reset = true;
   await page.reload();
-  await expect(page.getByRole('status')).toContainText('Mã nguồn của repository demo đã bị reset');
+  await expect(page.getByRole('status').filter({ hasText: 'Mã nguồn của repository demo đã bị reset' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Repository chưa có mã nguồn' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'README', exact: true })).toHaveCount(0);
 });
 
 test('owner can edit repository settings, confirm visibility, and confirm deletion', async ({ page }) => {

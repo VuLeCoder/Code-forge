@@ -102,6 +102,61 @@ describe('GitStorageService with real Git', () => {
     await expect(storage.tree('../escape.git', commit)).rejects.toThrow();
   });
 
+  it('reads blobs at exact commits and bounds UTF-8, binary and large previews', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'main', true, 'Before');
+    const git = (args: string[], input?: string | Buffer) => execFileSync('git', ['--git-dir', join(root, key), ...args], { encoding: 'utf8', input }).trim();
+    const oldCommit = git(['rev-parse', 'HEAD']);
+    const files: Record<string, string | Buffer> = {
+      'README.md': '<script>alert(1)</script>\nTiếng Việt\n',
+      'empty': '', 'binary': Buffer.from([65, 0, 66]), 'invalid': Buffer.from([0xff, 0xfe]),
+      'large': 'x'.repeat(1024 * 1024 + 1), 'limit': 'x'.repeat(1024 * 1024),
+      'unicode': 'x'.repeat(128 * 1024 - 1) + '😀tail', 'lines': 'line\n'.repeat(2001),
+      ':(glob)*': 'literal',
+    };
+    const blobs = Object.entries(files).map(([name, content]) => `100644 blob ${git(['hash-object', '-w', '--stdin'], content)}\t${name}\0`).join('');
+    const nested = git(['mktree', '-z'], blobs);
+    const link = git(['hash-object', '-w', '--stdin'], '/etc/passwd');
+    const tree = git(['mktree', '-z'], blobs + `040000 tree ${nested}\tsrc # ü\0` + `120000 blob ${link}\tlink\0` + `160000 commit ${oldCommit}\tmodule\0`);
+    const commit = git(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', tree, '-m', 'Files']);
+    expect(await storage.blob(key, oldCommit, 'README.md')).toMatchObject({ kind: 'text', content: '# Before\n', truncated: false });
+    expect(await storage.blob(key, commit, 'src # ü/README.md')).toMatchObject({ kind: 'text', content: files['README.md'], truncated: false });
+    expect(await storage.blob(key, commit, ':(glob)*')).toMatchObject({ content: 'literal' });
+    expect(await storage.blob(key, commit, 'empty')).toMatchObject({ content: '', size: 0, truncated: false });
+    for (const name of ['binary', 'invalid']) expect(await storage.blob(key, commit, name)).toMatchObject({ kind: 'binary', content: null });
+    expect(await storage.blob(key, commit, 'large')).toMatchObject({ kind: 'large', content: null });
+    expect(await storage.blob(key, commit, 'limit')).toMatchObject({ kind: 'text', content: 'x'.repeat(128 * 1024), truncated: true });
+    expect(await storage.blob(key, commit, 'unicode')).toMatchObject({ content: 'x'.repeat(128 * 1024 - 1), truncated: true });
+    expect((await storage.blob(key, commit, 'lines')).content?.split('\n')).toHaveLength(2000);
+    for (const name of ['link', 'module', 'src # ü']) await expect(storage.blob(key, commit, name)).rejects.toMatchObject({ response: { error: { code: 'PATH_NOT_FILE' } } });
+    for (const name of ['missing', 'link/passwd']) await expect(storage.blob(key, commit, name)).rejects.toMatchObject({ response: { error: { code: 'PATH_NOT_FOUND' } } });
+    for (const name of ['', '../secret', '/etc/passwd']) await expect(storage.blob(key, commit, name)).rejects.toMatchObject({ response: { error: { code: 'INVALID_PATH' } } });
+    const other = `${randomUUID()}.git`;
+    await storage.create(other, 'main', false, 'Other');
+    await expect(storage.blob(other, commit, 'README.md')).rejects.toThrow();
+  });
+
+  it('reads bounded raster images at the selected commit and rejects SVG and symlinks', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'main', true, 'Images');
+    const git = (args: string[], input?: string | Buffer) => execFileSync('git', ['--git-dir', join(root, key), ...args], { encoding: 'utf8', input }).trim();
+    const oldCommit = git(['rev-parse', 'HEAD']);
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9XcAAAAASUVORK5CYII=', 'base64');
+    const files = { 'image.png': png, 'image.svg': Buffer.from('<svg onload="alert(1)"/>'), 'large.png': Buffer.alloc(1024 * 1024 + 1),
+      'image.gif': Buffer.from('GIF89a'), 'image.jpg': Buffer.from('ffd8ff', 'hex'), 'image.webp': Buffer.from('RIFF0000WEBP') };
+    const blob = git(['hash-object', '-w', '--stdin'], png);
+    const tree = git(['mktree', '-z'], Object.entries(files).map(([name, content]) => `100644 blob ${git(['hash-object', '-w', '--stdin'], content)}\t${name}\0`).join('') + `120000 blob ${blob}\tlink.png\0`);
+    const commit = git(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', tree, '-m', 'Images']);
+    expect(await storage.blob(key, commit, 'image.png', true)).toMatchObject({ kind: 'image', mime: 'image/png', content: png.toString('base64') });
+    for (const [file, mime] of [['image.gif', 'image/gif'], ['image.jpg', 'image/jpeg'], ['image.webp', 'image/webp']]) {
+      expect(await storage.blob(key, commit, file!, true)).toMatchObject({ kind: 'image', mime });
+    }
+    expect(await storage.blob(key, commit, 'large.png', true)).toMatchObject({ kind: 'large', content: null });
+    await expect(storage.blob(key, commit, 'image.svg', true)).rejects.toMatchObject({ response: { error: { code: 'UNSUPPORTED_IMAGE' } } });
+    await expect(storage.blob(key, commit, 'link.png', true)).rejects.toMatchObject({ response: { error: { code: 'PATH_NOT_FILE' } } });
+    await expect(storage.blob(key, oldCommit, 'image.png', true)).rejects.toMatchObject({ response: { error: { code: 'PATH_NOT_FOUND' } } });
+  });
+
   it('rejects oversized trees without returning partial entries', async () => {
     const key = `${randomUUID()}.git`;
     await storage.create(key, 'main', true, 'Limits');

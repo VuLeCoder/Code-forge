@@ -70,6 +70,26 @@ export class RepositoriesController {
     });
   }
 
+  @Get('repos/:owner/:repo/blob')
+  @Header('Cache-Control', 'private, no-store')
+  @UseGuards(OptionalAccessTokenGuard)
+  blob(@Param('owner') owner: string, @Param('repo') repo: string,
+    @Req() request: Request & { user?: AuthPrincipal }) {
+    return this.repositories.read(owner, repo, request.user?.id, {
+      blob: true, ref: request.query.ref as string | undefined, path: request.query.path as string | undefined,
+    });
+  }
+
+  @Get('repos/:owner/:repo/image')
+  @Header('Cache-Control', 'private, no-store')
+  @UseGuards(OptionalAccessTokenGuard)
+  image(@Param('owner') owner: string, @Param('repo') repo: string,
+    @Req() request: Request & { user?: AuthPrincipal }) {
+    return this.repositories.read(owner, repo, request.user?.id, {
+      blob: true, image: true, ref: request.query.ref as string | undefined, path: request.query.path as string | undefined,
+    });
+  }
+
   @Delete('repos/:owner/:repo')
   @HttpCode(204)
   @UseGuards(OriginGuard, AccessTokenGuard)

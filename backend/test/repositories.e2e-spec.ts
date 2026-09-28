@@ -140,7 +140,37 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect((await call('GET', 'repos/owner/demo/tree?ref=missing', ownerCookie)).status).toBe(404);
     expect((await call('GET', 'repos/owner/demo/tree?path=missing', ownerCookie)).status).toBe(404);
     expect((await call('GET', 'repos/owner/demo/tree?path=README.md', ownerCookie)).status).toBe(400);
+    const blobResponse = await call('GET', 'repos/owner/demo/blob?path=README.md', ownerCookie);
+    expect(blobResponse.status).toBe(200);
+    expect(blobResponse.headers.get('cache-control')).toBe('private, no-store');
+    expect(await blobResponse.json()).toMatchObject({ ref: 'main', path: 'README.md', kind: 'text', content: '# Demo\n', truncated: false });
+    for (const cookies of ['', otherCookie]) {
+      expect((await call('GET', 'repos/owner/demo/blob?path=README.md', cookies)).status).toBe(404);
+      expect((await call('GET', 'repos/owner/demo/blob?path=..', cookies)).status).toBe(404);
+    }
+    for (const query of ['', 'path=', 'path=../secret', 'path=a&path=b', 'path=README.md&ref=a&ref=b']) {
+      expect((await call('GET', `repos/owner/demo/blob?${query}`, ownerCookie)).status).toBe(400);
+    }
+    expect((await call('GET', 'repos/owner/demo/blob?path=missing', ownerCookie)).status).toBe(404);
+    expect((await call('GET', 'repos/owner/demo/blob?path=README.md&ref=missing', ownerCookie)).status).toBe(404);
+    const gitImage = (args: string[], input?: string | Buffer) => execFileSync('git', ['--git-dir', bare, ...args], { encoding: 'utf8', input }).trim();
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9XcAAAAASUVORK5CYII=', 'base64');
+    const imageBlob = gitImage(['hash-object', '-w', '--stdin'], png);
+    const readmeBlob = gitImage(['hash-object', '-w', '--stdin'], '# Feature README\n![logo](logo.png)');
+    const imageTree = gitImage(['mktree'], `100644 blob ${imageBlob}\tlogo.png\n100644 blob ${readmeBlob}\tREADME.md\n`);
+    const imageCommit = gitImage(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', imageTree, '-m', 'Feature']);
+    gitImage(['update-ref', 'refs/heads/feature/readme', imageCommit]);
+    expect(await (await call('GET', 'repos/owner/demo/blob?ref=feature%2Freadme&path=README.md', ownerCookie)).json()).toMatchObject({ content: '# Feature README\n![logo](logo.png)', ref: 'feature/readme' });
+    const imageResponse = await call('GET', 'repos/owner/demo/image?ref=feature%2Freadme&path=logo.png', ownerCookie);
+    expect(imageResponse.status).toBe(200);
+    expect(imageResponse.headers.get('cache-control')).toBe('private, no-store');
+    expect(await imageResponse.json()).toMatchObject({ kind: 'image', mime: 'image/png', content: png.toString('base64') });
+    for (const cookies of ['', otherCookie]) expect((await call('GET', 'repos/owner/demo/image?ref=feature%2Freadme&path=logo.png', cookies)).status).toBe(404);
+    for (const query of ['path=..', 'path=a&path=b', 'path=logo.png&ref=a&ref=b', '']) expect((await call('GET', `repos/owner/demo/image?${query}`, ownerCookie)).status).toBe(400);
+    expect((await call('GET', 'repos/owner/demo/image?path=logo.png', ownerCookie)).status).toBe(404);
+    expect((await call('GET', 'repos/owner/demo/image?path=README.md', ownerCookie)).status).toBe(400);
     await rm(bare, { recursive: true });
+    expect((await call('GET', 'repos/owner/demo/blob?path=README.md&ref=main', ownerCookie)).status).toBe(404);
     expect((await call('GET', 'repos/owner/demo/tree?ref=main', ownerCookie)).status).toBe(404);
     expect((await call('GET', 'repos/owner/demo/branches?ref=main', ownerCookie)).status).toBe(404);
     const recovered = await (await call('GET', 'repos/owner/demo', ownerCookie)).json();
@@ -164,6 +194,14 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect((await create('Public', 'PUBLIC')).status).toBe(201);
     expect(await (await call('GET', 'repos/owner/public/branches')).json()).toMatchObject({ branches: [], selectedBranch: null, storageState: 'EMPTY' });
     expect(await (await call('GET', 'repos/owner/public/tree')).json()).toMatchObject({ entries: [], ref: null, storageState: 'EMPTY' });
+    expect((await call('GET', 'repos/owner/public/blob?path=README.md')).status).toBe(404);
+    const publicRepo = await db.repository.findFirstOrThrow({ where: { ownerId, normalizedName: 'public' } });
+    const git = (args: string[], input?: string) => execFileSync('git', ['--git-dir', join(storageRoot, publicRepo.storageKey), ...args], { encoding: 'utf8', input }).trim();
+    const blob = git(['hash-object', '-w', '--stdin'], 'public source');
+    const tree = git(['mktree'], `100644 blob ${blob}\tcode.txt\n`);
+    const commit = git(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', tree, '-m', 'Public']);
+    git(['update-ref', 'refs/heads/main', commit]);
+    expect(await (await call('GET', 'repos/owner/public/blob?path=code.txt')).json()).toMatchObject({ kind: 'text', content: 'public source' });
     const publicList = await (await call('GET', 'repositories')).json();
     expect(publicList.repositories.map((repo: { name: string }) => repo.name)).toEqual(['Public']);
     expect(publicList.repositories[0].permissions).toEqual({ canRead: true, canManage: false });
@@ -213,6 +251,8 @@ describe('Repository HTTP + PostgreSQL', () => {
       expect((await call('GET', 'repos/owner/renamed', cookies)).status).toBe(404);
       expect((await call('GET', 'repos/owner/renamed/branches', cookies)).status).toBe(404);
       expect((await call('GET', 'repos/owner/renamed/tree', cookies)).status).toBe(404);
+      expect((await call('GET', 'repos/owner/renamed/blob?path=README.md', cookies)).status).toBe(404);
+      expect((await call('GET', 'repos/owner/renamed/image?path=logo.png', cookies)).status).toBe(404);
     }
     expect((await call('PATCH', 'repos/owner/renamed', ownerCookie, { name: 'Restored' })).status).toBe(404);
     expect((await call('DELETE', 'repos/owner/renamed', ownerCookie)).status).toBe(404);

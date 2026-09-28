@@ -83,13 +83,57 @@ export class GitStorageService {
       if (!match) throw new ServiceUnavailableException({ error: { code: 'GIT_READ_UNAVAILABLE', message: 'Dữ liệu thư mục không hợp lệ.' } });
       const [, mode, objectType, objectSha, name] = match as unknown as [string, string, string, string, string];
       const entryPath = path ? `${path}/${name}` : name;
-      let navigable = objectType === 'tree';
+      let navigable = objectType === 'tree' || (objectType === 'blob' && mode !== '120000');
       try { this.validateSourcePath(entryPath); } catch { navigable = false; }
       return { name, path: entryPath, mode, objectSha,
         type: mode === '120000' ? 'symlink' : objectType === 'commit' ? 'submodule' : objectType === 'tree' ? 'directory' : 'file', navigable };
     });
     entries.sort((a, b) => Number(b.type === 'directory') - Number(a.type === 'directory') || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     return { path, commitSha, entries };
+  }
+
+  async blob(key: string, commitSha: string, path: string, image = false) {
+    this.validateSourcePath(path);
+    if (!path) throw new BadRequestException({ error: { code: 'INVALID_PATH', message: 'Cần đường dẫn tới file.' } });
+    if (!/^[a-f0-9]{40,64}$/.test(commitSha)) throw new Error('Invalid commit SHA');
+    const args = ['--git-dir', this.path(key)];
+    const unavailable = () => new ServiceUnavailableException({ error: { code: 'GIT_READ_UNAVAILABLE', message: 'Không thể đọc file trong giới hạn cho phép.' } });
+    let record: string;
+    try { record = (await this.git([...args, 'ls-tree', '-z', commitSha, '--', `:(literal)${path}`])).stdout; }
+    catch { throw unavailable(); }
+    const match = /^(\d{6}) (blob|tree|commit) ([a-f0-9]{40,64})\t([^\0]+)\0$/.exec(record);
+    if (!match || match[4] !== path) throw new NotFoundException({ error: { code: 'PATH_NOT_FOUND', message: 'Đường dẫn không tồn tại trên branch này.' } });
+    const [, mode, type, objectSha] = match;
+    if (type !== 'blob' || mode === '120000') throw new BadRequestException({ error: { code: 'PATH_NOT_FILE', message: 'Đường dẫn không phải file thông thường.' } });
+    let size: number;
+    try { size = Number((await this.git([...args, 'cat-file', '-s', objectSha!])).stdout.trim()); }
+    catch { throw unavailable(); }
+    if (!Number.isSafeInteger(size) || size < 0) throw unavailable();
+    const metadata = { path, commitSha, objectSha, size, previewByteLimit: 128 * 1024, previewLineLimit: 2000 };
+    if (size > 1024 * 1024) return { ...metadata, kind: 'large', content: null, truncated: false };
+    let bytes: Buffer;
+    try { bytes = (await runFile('git', [...args, 'cat-file', 'blob', objectSha!], { encoding: 'buffer', timeout: 15_000, maxBuffer: 1024 * 1024 })).stdout; }
+    catch { throw unavailable(); }
+    if (bytes.length !== size) throw unavailable();
+    if (image) {
+      const mime = bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')) ? 'image/png'
+        : bytes.subarray(0, 3).equals(Buffer.from('ffd8ff', 'hex')) ? 'image/jpeg'
+        : ['GIF87a', 'GIF89a'].includes(bytes.subarray(0, 6).toString('ascii')) ? 'image/gif'
+        : bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP' ? 'image/webp' : null;
+      if (!mime) throw new BadRequestException({ error: { code: 'UNSUPPORTED_IMAGE', message: 'Chỉ hỗ trợ ảnh PNG, JPEG, GIF và WebP.' } });
+      return { ...metadata, kind: 'image', mime, content: bytes.toString('base64'), truncated: false };
+    }
+    let text: string;
+    try {
+      if (bytes.includes(0)) throw new Error('Binary');
+      text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+    } catch { return { ...metadata, kind: 'binary', content: null, truncated: false }; }
+    // Streaming decode omits a partial UTF-8 character at the preview boundary.
+    let content = size > metadata.previewByteLimit
+      ? new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes.subarray(0, metadata.previewByteLimit), { stream: true }) : text;
+    const lines = content.split('\n');
+    if (lines.length > metadata.previewLineLimit) content = lines.slice(0, metadata.previewLineLimit).join('\n');
+    return { ...metadata, kind: 'text', content, truncated: content !== text };
   }
 
   private root() { return resolve(this.config.getOrThrow<string>('GIT_STORAGE_PATH')); }

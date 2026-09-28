@@ -81,11 +81,12 @@ export class RepositoriesService {
     }
   }
 
-  async read(owner: string, name: string, userId?: string, branchQuery?: { ref?: string; path?: string; tree?: boolean }) {
+  async read(owner: string, name: string, userId?: string, branchQuery?: { ref?: string; path?: string; tree?: boolean; blob?: boolean; image?: boolean }) {
     const repo = await this.load(this.db, owner, name);
     this.policy.assertRead(repo, userId);
     if (branchQuery?.ref !== undefined) this.storage.validateRef(branchQuery.ref);
     if (branchQuery?.path !== undefined) this.storage.validateSourcePath(branchQuery.path);
+    if (branchQuery?.blob && !branchQuery.path) throw new BadRequestException({ error: { code: 'INVALID_PATH', message: 'Cần đường dẫn tới file.' } });
     // Serialize recovery so concurrent readers do not increment generation twice.
     const response = await this.db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM repositories WHERE id = ${repo.id}::uuid FOR UPDATE`;
@@ -97,7 +98,7 @@ export class RepositoriesService {
       }
       if (branchQuery) {
         const result = await this.storage.branches(current.storageKey, current.defaultBranch);
-        if (branchQuery.tree) {
+        if (branchQuery.tree || branchQuery.blob) {
           // Return errors until recovery commits: filesystem creation cannot roll back with SQL.
           try {
             const selected = result.branches.find((branch) => branch.name === (branchQuery.ref ?? current.defaultBranch));
@@ -106,6 +107,9 @@ export class RepositoriesService {
               throw new NotFoundException({ error: { code: 'REF_NOT_FOUND', message: 'Branch không tồn tại hoặc đã bị xóa.' } });
             }
             if (!selected && path) throw new NotFoundException({ error: { code: 'PATH_NOT_FOUND', message: 'Đường dẫn không tồn tại trên branch này.' } });
+            if (branchQuery.blob && selected) {
+              return { ...await this.storage.blob(current.storageKey, selected.commitSha, path, branchQuery.image), ref: selected.name, storageState: 'READY', storageGeneration: current.storageGeneration };
+            }
             const tree = selected ? await this.storage.tree(current.storageKey, selected.commitSha, path) : { path, commitSha: null, entries: [] };
             return { ...tree, ref: selected?.name ?? null, storageState: selected ? 'READY' : current.storageGeneration > 0 ? 'RESET' : 'EMPTY', storageGeneration: current.storageGeneration };
           } catch (error) { return { readError: error }; }

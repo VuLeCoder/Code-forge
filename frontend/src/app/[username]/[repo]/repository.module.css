@@ -20,3 +20,27 @@
 .treeList a { color: var(--brand-700); font-weight: 600; }
 .treeList small { color: var(--muted); flex-shrink: 0; max-width: 45%; }
 .treeEmpty { padding: 24px 0; color: var(--muted); }
+.blobMeta { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; padding: 14px; border: 1px solid var(--border); overflow-wrap: anywhere; }
+.blobMeta strong { min-width: 0; } .blobMeta span, .blobMeta code { color: var(--muted); font-size: .85rem; }
+.codeScroll { max-width: 100%; overflow: auto; max-height: 75vh; border: 1px solid var(--border); border-top: 0; background: var(--surface); }
+.codeScroll:focus-visible { outline: 2px solid var(--brand-700); outline-offset: 2px; }
+.codeTable { border-collapse: collapse; width: 100%; font-size: .85rem; line-height: 1.6; text-align: left; }
+.codeTable td { white-space: pre; padding: 0 16px; vertical-align: top; tab-size: 4; }
+.lineNumber { position: sticky; left: 0; padding: 0 12px; min-width: 48px; width: 1%; text-align: right; font-weight: 400; color: var(--muted); background: var(--surface); border-right: 1px solid var(--border); user-select: none; font-family: monospace; }
+.readmePanel { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); overflow: hidden; }
+.readmePanel > p, .readmePanel > div:not(.blobMeta):not(.markdown) { padding: 18px; }
+.readmePanel .blobMeta { border: 0; border-bottom: 1px solid var(--border); }
+.readmePanel a { color: var(--brand-700); text-decoration: underline; }
+.markdown { padding: 24px; line-height: 1.7; overflow-wrap: anywhere; min-width: 0; }
+.markdown > * { margin-block: 0 16px; }
+.markdown :is(h1,h2,h3,h4,h5,h6) { margin-block: 24px 12px; line-height: 1.3; scroll-margin-top: 24px; }
+.markdown > :first-child { margin-top: 0; }
+.markdown ul, .markdown ol { padding-left: 24px; }
+.markdown pre { padding: 16px; background: var(--brand-50); overflow: auto; max-width: 100%; white-space: pre; }
+.markdown code { font-size: .9em; }
+.markdown blockquote { padding-left: 16px; border-left: 4px solid var(--border); color: var(--muted); }
+.markdown table { display: block; max-width: 100%; overflow: auto; border-collapse: collapse; }
+.markdown th, .markdown td { border: 1px solid var(--border); padding: 8px 12px; }
+.markdown img { max-width: 100%; height: auto; }
+.imageNotice { color: var(--muted); font-size: .9rem; }
+@media (max-width: 600px) { .markdown { padding: 16px; } }
