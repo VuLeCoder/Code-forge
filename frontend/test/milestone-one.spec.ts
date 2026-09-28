@@ -230,7 +230,7 @@ test('owner can edit repository settings, confirm visibility, and confirm deleti
   await page.getByRole('dialog', { name: 'Xác nhận xóa repository' }).getByRole('textbox', { name: 'Tên repository' }).fill('renamed');
   await page.getByRole('button', { name: 'Xác nhận xóa' }).click();
   await expect(page).toHaveURL('/alice?deleted=1');
-  await expect(page.getByRole('status')).toContainText('Repository đã được xóa');
+  await expect(page.getByRole('status').filter({ hasText: 'Repository đã được xóa' })).toBeVisible();
   expect(mutations).toEqual([
     { method: 'PATCH', body: { name: 'taken', description: 'Initial description' } },
     { method: 'PATCH', body: { name: 'renamed', description: 'Updated' } },

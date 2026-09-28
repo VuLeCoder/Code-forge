@@ -81,10 +81,11 @@ export class RepositoriesService {
     }
   }
 
-  async read(owner: string, name: string, userId?: string, branchQuery?: { ref?: string }) {
+  async read(owner: string, name: string, userId?: string, branchQuery?: { ref?: string; path?: string; tree?: boolean }) {
     const repo = await this.load(this.db, owner, name);
     this.policy.assertRead(repo, userId);
     if (branchQuery?.ref !== undefined) this.storage.validateRef(branchQuery.ref);
+    if (branchQuery?.path !== undefined) this.storage.validateSourcePath(branchQuery.path);
     // Serialize recovery so concurrent readers do not increment generation twice.
     const response = await this.db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM repositories WHERE id = ${repo.id}::uuid FOR UPDATE`;
@@ -96,6 +97,19 @@ export class RepositoriesService {
       }
       if (branchQuery) {
         const result = await this.storage.branches(current.storageKey, current.defaultBranch);
+        if (branchQuery.tree) {
+          // Return errors until recovery commits: filesystem creation cannot roll back with SQL.
+          try {
+            const selected = result.branches.find((branch) => branch.name === (branchQuery.ref ?? current.defaultBranch));
+            const path = branchQuery.path ?? '';
+            if (!selected && (branchQuery.ref !== undefined || result.branches.length)) {
+              throw new NotFoundException({ error: { code: 'REF_NOT_FOUND', message: 'Branch không tồn tại hoặc đã bị xóa.' } });
+            }
+            if (!selected && path) throw new NotFoundException({ error: { code: 'PATH_NOT_FOUND', message: 'Đường dẫn không tồn tại trên branch này.' } });
+            const tree = selected ? await this.storage.tree(current.storageKey, selected.commitSha, path) : { path, commitSha: null, entries: [] };
+            return { ...tree, ref: selected?.name ?? null, storageState: selected ? 'READY' : current.storageGeneration > 0 ? 'RESET' : 'EMPTY', storageGeneration: current.storageGeneration };
+          } catch (error) { return { readError: error }; }
+        }
         return { ...result,
           storageState: result.branches.length ? 'READY' : current.storageGeneration > 0 ? 'RESET' : 'EMPTY',
           storageGeneration: current.storageGeneration };
@@ -103,6 +117,7 @@ export class RepositoriesService {
       const inspected = await this.storage.inspect(current.storageKey, current.defaultBranch);
       return this.response(current, userId, { ...inspected, state: current.storageGeneration > 0 && inspected.state === 'EMPTY' ? 'RESET' : inspected.state });
     }, { timeout: 30_000 });
+    if ('readError' in response) throw response.readError;
     // Commit recovery before reporting a missing requested ref; Git creation cannot roll back with SQL.
     if ('branches' in response && branchQuery?.ref !== undefined) {
       const selectedBranch = response.branches.find((branch) => branch.name === branchQuery.ref);

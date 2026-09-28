@@ -9,3 +9,14 @@
 @media (max-width: 600px) { .empty { padding: 42px 20px; } }
 .branchBar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 20px 0; }
 .branchBar select { max-width: 100%; min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: inherit; font: inherit; }
+.source { min-width: 0; }
+.source .breadcrumb { margin-bottom: 16px; overflow-wrap: anywhere; }
+.source .breadcrumb span { min-width: 0; }
+.parentLink { display: inline-block; margin-bottom: 14px; color: var(--brand-700); }
+.treeList { list-style: none; padding: 0; margin: 0 0 24px; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.treeList li { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.treeList li:last-child { border-bottom: 0; }
+.treeList a, .treeList span { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.treeList a { color: var(--brand-700); font-weight: 600; }
+.treeList small { color: var(--muted); flex-shrink: 0; max-width: 45%; }
+.treeEmpty { padding: 24px 0; color: var(--muted); }

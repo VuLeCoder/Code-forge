@@ -127,11 +127,26 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect((await call('GET', 'repos/owner/demo/branches?ref=missing', ownerCookie)).status).toBe(404);
     expect((await call('GET', 'repos/owner/demo/branches?ref=..%2Fmain', ownerCookie)).status).toBe(400);
     expect((await call('GET', 'repos/owner/demo/branches?ref=a&ref=b', ownerCookie)).status).toBe(400);
+    const treeResponse = await call('GET', 'repos/owner/demo/tree', ownerCookie);
+    expect(treeResponse.status).toBe(200);
+    expect(treeResponse.headers.get('cache-control')).toBe('private, no-store');
+    expect(await treeResponse.json()).toMatchObject({ ref: 'main', path: '', entries: [{ name: 'README.md', type: 'file' }] });
+    for (const cookies of ['', otherCookie]) {
+      expect((await call('GET', 'repos/owner/demo/tree?path=..', cookies)).status).toBe(404);
+    }
+    for (const query of ['path=..%2Fsecret', 'path=%2Fetc%2Fpasswd', 'path=a&path=b', 'ref=a&ref=b']) {
+      expect((await call('GET', `repos/owner/demo/tree?${query}`, ownerCookie)).status).toBe(400);
+    }
+    expect((await call('GET', 'repos/owner/demo/tree?ref=missing', ownerCookie)).status).toBe(404);
+    expect((await call('GET', 'repos/owner/demo/tree?path=missing', ownerCookie)).status).toBe(404);
+    expect((await call('GET', 'repos/owner/demo/tree?path=README.md', ownerCookie)).status).toBe(400);
     await rm(bare, { recursive: true });
+    expect((await call('GET', 'repos/owner/demo/tree?ref=main', ownerCookie)).status).toBe(404);
     expect((await call('GET', 'repos/owner/demo/branches?ref=main', ownerCookie)).status).toBe(404);
     const recovered = await (await call('GET', 'repos/owner/demo', ownerCookie)).json();
     expect(recovered.repository).toMatchObject({ storageState: 'RESET', storageGeneration: 1, readme: null });
     expect(await (await call('GET', 'repos/owner/demo/branches', ownerCookie)).json()).toMatchObject({ storageState: 'RESET', branches: [], selectedBranch: null });
+    expect(await (await call('GET', 'repos/owner/demo/tree', ownerCookie)).json()).toMatchObject({ storageState: 'RESET', storageGeneration: 1, entries: [], commitSha: null });
     expect(execFileSync('git', ['--git-dir', bare, 'symbolic-ref', 'HEAD'], { encoding: 'utf8' }).trim()).toBe('refs/heads/main');
     expect((await (await call('GET', 'repos/owner/demo', ownerCookie)).json()).repository.storageGeneration).toBe(1);
     expect((await call('GET', 'repos/OWNER/DEMO', ownerCookie)).status).toBe(200);
@@ -148,6 +163,7 @@ describe('Repository HTTP + PostgreSQL', () => {
   it('allows anonymous public reads but rejects non-owner mutations and invalid tokens', async () => {
     expect((await create('Public', 'PUBLIC')).status).toBe(201);
     expect(await (await call('GET', 'repos/owner/public/branches')).json()).toMatchObject({ branches: [], selectedBranch: null, storageState: 'EMPTY' });
+    expect(await (await call('GET', 'repos/owner/public/tree')).json()).toMatchObject({ entries: [], ref: null, storageState: 'EMPTY' });
     const publicList = await (await call('GET', 'repositories')).json();
     expect(publicList.repositories.map((repo: { name: string }) => repo.name)).toEqual(['Public']);
     expect(publicList.repositories[0].permissions).toEqual({ canRead: true, canManage: false });
@@ -196,6 +212,7 @@ describe('Repository HTTP + PostgreSQL', () => {
     for (const cookies of ['', ownerCookie, otherCookie]) {
       expect((await call('GET', 'repos/owner/renamed', cookies)).status).toBe(404);
       expect((await call('GET', 'repos/owner/renamed/branches', cookies)).status).toBe(404);
+      expect((await call('GET', 'repos/owner/renamed/tree', cookies)).status).toBe(404);
     }
     expect((await call('PATCH', 'repos/owner/renamed', ownerCookie, { name: 'Restored' })).status).toBe(404);
     expect((await call('DELETE', 'repos/owner/renamed', ownerCookie)).status).toBe(404);

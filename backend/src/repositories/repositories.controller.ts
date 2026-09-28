@@ -60,6 +60,16 @@ export class RepositoriesController {
     return this.repositories.read(owner, repo, request.user?.id, { ref: request.query.ref as string | undefined });
   }
 
+  @Get('repos/:owner/:repo/tree')
+  @Header('Cache-Control', 'private, no-store')
+  @UseGuards(OptionalAccessTokenGuard)
+  tree(@Param('owner') owner: string, @Param('repo') repo: string,
+    @Req() request: Request & { user?: AuthPrincipal }) {
+    return this.repositories.read(owner, repo, request.user?.id, {
+      tree: true, ref: request.query.ref as string | undefined, path: request.query.path as string | undefined,
+    });
+  }
+
   @Delete('repos/:owner/:repo')
   @HttpCode(204)
   @UseGuards(OriginGuard, AccessTokenGuard)

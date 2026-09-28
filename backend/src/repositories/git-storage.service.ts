@@ -55,6 +55,43 @@ export class GitStorageService {
     return { branches, defaultBranch, selectedBranch };
   }
 
+  async tree(key: string, commitSha: string, path = '') {
+    this.validateSourcePath(path);
+    if (!/^[a-f0-9]{40,64}$/.test(commitSha)) throw new Error('Invalid commit SHA');
+    const args = ['--git-dir', this.path(key)];
+    const target = `${commitSha}:${path}`;
+    let type: string;
+    try {
+      type = (await this.git([...args, 'cat-file', '-t', target])).stdout.trim();
+    } catch (error) {
+      if ((error as { code?: unknown }).code === 128) {
+        throw new NotFoundException({ error: { code: 'PATH_NOT_FOUND', message: 'Đường dẫn không tồn tại trên branch này.' } });
+      }
+      throw new ServiceUnavailableException({ error: { code: 'GIT_READ_UNAVAILABLE', message: 'Không thể đọc cây thư mục.' } });
+    }
+    if (type !== 'tree') throw new BadRequestException({ error: { code: 'PATH_NOT_DIRECTORY', message: 'Đường dẫn không phải thư mục.' } });
+    let stdout: string;
+    try {
+      ({ stdout } = await this.git([...args, 'ls-tree', '-z', target]));
+    } catch {
+      throw new ServiceUnavailableException({ error: { code: 'GIT_READ_UNAVAILABLE', message: 'Không thể đọc thư mục trong giới hạn cho phép.' } });
+    }
+    const records = stdout.split('\0').filter(Boolean);
+    if (records.length > 1000) throw new ServiceUnavailableException({ error: { code: 'GIT_READ_LIMIT_EXCEEDED', message: 'Thư mục vượt giới hạn 1000 mục.' } });
+    const entries = records.map((record) => {
+      const match = /^(\d{6}) (blob|tree|commit) ([a-f0-9]{40,64})\t([\s\S]+)$/.exec(record);
+      if (!match) throw new ServiceUnavailableException({ error: { code: 'GIT_READ_UNAVAILABLE', message: 'Dữ liệu thư mục không hợp lệ.' } });
+      const [, mode, objectType, objectSha, name] = match as unknown as [string, string, string, string, string];
+      const entryPath = path ? `${path}/${name}` : name;
+      let navigable = objectType === 'tree';
+      try { this.validateSourcePath(entryPath); } catch { navigable = false; }
+      return { name, path: entryPath, mode, objectSha,
+        type: mode === '120000' ? 'symlink' : objectType === 'commit' ? 'submodule' : objectType === 'tree' ? 'directory' : 'file', navigable };
+    });
+    entries.sort((a, b) => Number(b.type === 'directory') - Number(a.type === 'directory') || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    return { path, commitSha, entries };
+  }
+
   private root() { return resolve(this.config.getOrThrow<string>('GIT_STORAGE_PATH')); }
 
   private path(key: string) {
