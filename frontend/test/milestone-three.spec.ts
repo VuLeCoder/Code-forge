@@ -1,4 +1,60 @@
 import { expect, test } from '@playwright/test';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+test('M3.6 clone dialog copies public URL, handles clipboard errors, keyboard and mobile; Git CLI clones through Next', async ({ page, context }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.route('**/api/v1/auth/*', (route) => route.fulfill({ status: 401, json: {} }));
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto('/alice/hello-world');
+  await page.getByRole('button', { name: 'Clone', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Clone repository' });
+  await expect(dialog).toBeVisible();
+  const url = 'http://localhost:3111/git/alice/hello-world.git';
+  await expect(dialog.getByLabel('URL clone')).toHaveValue(url);
+  await dialog.getByRole('button', { name: 'Sao chép URL' }).click();
+  await expect(dialog.getByRole('status')).toHaveText('Đã sao chép URL clone.');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(url);
+  expect(await dialog.evaluate((element) => { const r = element.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; })).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByRole('button', { name: 'Clone', exact: true })).toBeFocused();
+  await page.getByRole('button', { name: 'Clone', exact: true }).click();
+  await page.evaluate(() => Object.defineProperty(navigator.clipboard, 'writeText', { value: async () => { throw new Error('Denied'); } }));
+  await dialog.getByRole('button', { name: 'Sao chép URL' }).click();
+  await expect(dialog.getByRole('status')).toContainText('Hãy sao chép URL đã chọn');
+  await expect(dialog.getByLabel('URL clone')).toBeFocused();
+  await dialog.getByRole('button', { name: 'Đóng', exact: true }).click();
+  const root = await mkdtemp(join(tmpdir(), 'code-forge-browser-clone-'));
+  try {
+    const git = promisify(execFile);
+    await git('git', ['-c', 'protocol.version=2', 'clone', url, join(root, 'clone')], { timeout: 20_000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+    expect(await readFile(join(root, 'clone', 'README.md'), 'utf8')).toBe('Clone through Next proxy\n');
+    await git('git', ['-C', join(root, 'clone'), '-c', 'protocol.version=0', 'fetch', 'origin'], { timeout: 20_000 });
+  } finally { await rm(root, { recursive: true, force: true }); }
+  const response = await page.request.get(`${url}/info/refs?service=git-upload-pack`, { headers: { Cookie: 'session=do-not-forward', Authorization: 'Basic do-not-forward' } });
+  expect(response.status()).toBe(200);
+  expect(response.headers()['cache-control']).toBe('private, no-store');
+  expect((await page.request.post(`${url}/git-receive-pack`)).status()).toBe(404);
+  expect((await page.request.get(`${url}/HEAD`)).status()).toBe(404);
+  expect((await page.request.get('/git/alice/private.git/info/refs?service=git-upload-pack')).status()).toBe(404);
+});
+
+test('M3.6 private repository explains unavailable clone without offering a usable URL', async ({ page }) => {
+  await page.route('**/api/v1/auth/*', (route) => route.fulfill({ status: 401, json: {} }));
+  await page.route('**/api/v1/repos/alice/private', (route) => route.fulfill({ json: { repository: {
+    id: 'private', owner: { username: 'alice' }, name: 'private', visibility: 'PRIVATE', permissions: { canRead: true, canManage: true }, defaultBranch: 'main',
+  } } }));
+  await page.goto('/alice/private');
+  await page.getByRole('button', { name: 'Clone', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('Clone repository riêng tư chưa khả dụng');
+  await expect(dialog.getByLabel('URL clone')).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Sao chép URL' })).toHaveCount(0);
+});
 
 test('M3.5 paginates through proxy, opens direct commit URLs and parents, preserves branch and fits mobile', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });

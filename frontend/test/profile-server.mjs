@@ -1,8 +1,42 @@
 import { createServer } from "node:http";
+import { execFile, execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+// Real Git objects behind the fixture verify Next's binary transport with Git CLI.
+const gitRoot = mkdtempSync(join(tmpdir(), 'code-forge-proxy-'));
+const bare = join(gitRoot, 'fixture.git');
+execFileSync('git', ['init', '--bare', '--initial-branch=main', bare]);
+const git = (args, input) => execFileSync('git', ['--git-dir', bare, ...args], { input, encoding: 'utf8' }).trim();
+const blob = git(['hash-object', '-w', '--stdin'], 'Clone through Next proxy\n');
+const tree = git(['mktree'], `100644 blob ${blob}\tREADME.md\n`);
+const commit = git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit-tree', tree, '-m', 'Initial']);
+git(['update-ref', 'refs/heads/main', commit]);
 
 // Public-profile fixture for Next server rendering; auth is mocked per browser test.
 let offlineRequests = 0;
 const server = createServer((request, response) => {
+  if (request.url?.startsWith('/api/v1/git/')) {
+    const url = new URL(request.url, 'http://fixture');
+    const advertise = url.pathname === '/api/v1/git/alice/hello-world.git/info/refs' && request.method === 'GET' && url.search === '?service=git-upload-pack';
+    const upload = url.pathname === '/api/v1/git/alice/hello-world.git/git-upload-pack' && request.method === 'POST';
+    if ((!advertise && !upload) || request.headers.cookie || request.headers.authorization) { response.statusCode = 404; return response.end(); }
+    const child = execFile('git', ['http-backend'], { encoding: 'buffer', maxBuffer: 4 * 1024 * 1024,
+      env: { PATH: process.env.PATH, GIT_PROJECT_ROOT: gitRoot, GIT_HTTP_EXPORT_ALL: '1',
+        PATH_INFO: `/fixture.git/${advertise ? 'info/refs' : 'git-upload-pack'}`, REQUEST_METHOD: request.method,
+        QUERY_STRING: advertise ? 'service=git-upload-pack' : '', CONTENT_TYPE: request.headers['content-type'] ?? '',
+        ...(request.headers['git-protocol'] ? { GIT_PROTOCOL: request.headers['git-protocol'] } : {}),
+      },
+    }, (error, stdout) => {
+      if (error) { response.statusCode = 503; return response.end(); }
+      const boundary = stdout.indexOf('\r\n\r\n');
+      response.setHeader('Content-Type', `application/x-git-upload-pack-${advertise ? 'advertisement' : 'result'}`);
+      response.end(stdout.subarray(boundary + 4));
+    });
+    request.pipe(child.stdin);
+    return;
+  }
   response.setHeader("Content-Type", "application/json");
   if (request.url === "/health") return response.end('{}');
   if (request.url?.startsWith('/api/v1/repos/alice/hello-world/commits')) {
@@ -93,4 +127,5 @@ const server = createServer((request, response) => {
   response.end('{}');
 });
 server.listen(4111, '127.0.0.1');
-process.on('SIGTERM', () => server.close());
+process.on('SIGTERM', () => server.close(() => { rmSync(gitRoot, { recursive: true, force: true }); }));
+process.on('exit', () => rmSync(gitRoot, { recursive: true, force: true }));

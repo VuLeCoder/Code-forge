@@ -155,7 +155,7 @@ test('create repository reports name conflicts and opens the new repository', as
   await page.getByRole('button', { name: 'Tạo repository' }).click();
   await expect(page).toHaveURL('/alice/my-project');
   await expect(page.getByRole('heading', { name: 'Repository chưa có mã nguồn' })).toBeVisible();
-  await expect(page.getByText('Riêng tư')).toBeVisible();
+  await expect(page.getByText('Riêng tư', { exact: true })).toBeVisible();
 });
 
 test('README option is sent on create and a storage reset is explained', async ({ page }) => {

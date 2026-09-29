@@ -166,6 +166,21 @@ export class RepositoriesService {
     return { repositories: rows.slice(0, 20).map((repo) => this.response(repo).repository), hasMore: rows.length > 20, page };
   }
 
+  async preparePublicGit(owner: string, name: string) {
+    const repo = await this.load(this.db, owner, name);
+    this.policy.assertRead(repo); // M3.6 is anonymous public transport, including for session owners.
+    return this.db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM repositories WHERE id = ${repo.id}::uuid FOR UPDATE`;
+      const current = await tx.repository.findUnique({ where: { id: repo.id } });
+      this.policy.assertRead(current);
+      if (!(await this.storage.exists(current.storageKey))) {
+        await this.storage.create(current.storageKey, current.defaultBranch, false, current.name);
+        await tx.repository.update({ where: { id: current.id }, data: { storageGeneration: { increment: 1 } } });
+      }
+      return current.storageKey;
+    }, { timeout: 30_000 });
+  }
+
   async listForOwner(ownerId: string, viewerId?: string) {
     const rows = await this.db.repository.findMany({
       where: { ownerId, status: 'ACTIVE', deletedAt: null,

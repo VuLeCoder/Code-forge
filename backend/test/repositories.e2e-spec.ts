@@ -1,6 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { execFile, execFileSync } from 'node:child_process';
+import { promisify } from 'node:util';
+import { gzipSync } from 'node:zlib';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
@@ -246,6 +248,63 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect((await call('DELETE', 'repos/owner/public', ownerCookie, undefined, 'https://evil.example')).status).toBe(403);
     expect((await call('PATCH', 'repos/owner/public', ownerCookie, { visibility: 'PRIVATE' }, 'https://evil.example')).status).toBe(403);
   });
+
+  it('M3.6 clones/fetches public Git with v0/v2, hides private/deleted/locked and recovers missing storage', async () => {
+    const run = promisify(execFile);
+    const git = (args: string[]) => run('git', args, { timeout: 20_000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } });
+    const url = `${base}/git/Owner/Public.git`;
+    const pub = await db.repository.findFirstOrThrow({ where: { ownerId, normalizedName: 'public' } });
+    const bare = join(storageRoot, pub.storageKey);
+    const work = join(storageRoot, 'http-clone');
+    const advertisement = await fetch(`${url}/info/refs?service=git-upload-pack`);
+    expect(advertisement.status).toBe(200);
+    expect(advertisement.headers.get('content-type')).toBe('application/x-git-upload-pack-advertisement');
+    expect(advertisement.headers.get('cache-control')).toBe('private, no-store');
+    expect(await advertisement.text()).toContain('# service=git-upload-pack');
+    await git(['-c', 'protocol.version=2', 'clone', url, work]);
+    expect(await readFile(join(work, 'code.txt'), 'utf8')).toBe('public source');
+    const first = (await git(['-C', work, 'rev-parse', 'HEAD'])).stdout.trim();
+    const tree = execFileSync('git', ['--git-dir', bare, 'rev-parse', 'HEAD^{tree}'], { encoding: 'utf8' }).trim();
+    const next = execFileSync('git', ['--git-dir', bare, '-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', tree, '-p', first, '-m', 'Fetched commit'], { encoding: 'utf8' }).trim();
+    await git(['--git-dir', bare, 'update-ref', 'refs/heads/main', next]);
+    await git(['--git-dir', bare, 'update-ref', 'refs/heads/feature/test', first]);
+    await git(['-C', work, '-c', 'protocol.version=0', 'fetch', 'origin']);
+    expect((await git(['-C', work, 'rev-parse', 'origin/main'])).stdout.trim()).toBe(next);
+    expect((await git(['-C', work, 'rev-parse', 'origin/feature/test'])).stdout.trim()).toBe(first);
+    await git(['-C', work, 'pull', '--ff-only']);
+    expect((await git(['-C', work, 'rev-parse', 'HEAD'])).stdout.trim()).toBe(next);
+    await git(['-c', 'protocol.version=0', 'clone', '--depth=1', url, join(storageRoot, 'shallow-clone')]);
+    expect((await git(['-C', join(storageRoot, 'shallow-clone'), 'rev-list', '--count', 'HEAD'])).stdout.trim()).toBe('1');
+    for (const name of ['Demo', 'Missing']) {
+      for (const cookie of ['', ownerCookie, otherCookie]) {
+        const hidden = `${base}/git/Owner/${name}.git`;
+        expect((await fetch(`${hidden}/info/refs?service=git-upload-pack`, { headers: { Cookie: cookie } })).status).toBe(404);
+        expect((await fetch(`${hidden}/git-upload-pack`, { method: 'POST' })).status).toBe(404);
+      }
+    }
+    for (const query of ['', '?service=git-receive-pack', '?service=git-upload-pack&service=git-upload-pack']) expect((await fetch(`${url}/info/refs${query}`)).status).toBe(400);
+    expect((await fetch(`${url}/git-receive-pack`, { method: 'POST' })).status).toBe(404);
+    expect((await fetch(`${url}/HEAD`)).status).toBe(404);
+    expect((await fetch(`${url}/objects/info/packs`)).status).toBe(404);
+    expect((await fetch(`${base}/git/Owner/%2e%2e%2fPublic.git/info/refs?service=git-upload-pack`)).status).toBe(404);
+    expect((await fetch(`${url}/git-upload-pack`, { method: 'POST', body: '0000' })).status).toBe(415);
+    const gzip = await fetch(`${url}/git-upload-pack`, { method: 'POST', headers: { 'content-type': 'application/x-git-upload-pack-request', 'content-encoding': 'gzip' }, body: gzipSync('0000') });
+    expect(gzip.status).toBe(200);
+    expect(gzip.headers.get('content-type')).toBe('application/x-git-upload-pack-result');
+    await gzip.arrayBuffer();
+    expect((await fetch(`${url}/git-upload-pack`, { method: 'POST', headers: { 'content-type': 'application/x-git-upload-pack-request' }, body: 'x'.repeat(1048577) })).status).toBe(413);
+    await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/forbidden'])).rejects.toThrow();
+    for (const change of [{ visibility: 'PRIVATE' as const }, { status: 'DELETED' as const }, { status: 'LOCKED' as const }]) {
+      await db.repository.update({ where: { id: pub.id }, data: change });
+      expect((await fetch(`${url}/info/refs?service=git-upload-pack`)).status).toBe(404);
+      expect((await fetch(`${url}/git-upload-pack`, { method: 'POST' })).status).toBe(404);
+      await db.repository.update({ where: { id: pub.id }, data: { visibility: 'PUBLIC', status: 'ACTIVE' } });
+    }
+    await rm(bare, { recursive: true });
+    await git(['clone', url, join(storageRoot, 'empty-clone')]);
+    expect((await git(['-C', join(storageRoot, 'empty-clone'), 'symbolic-ref', 'HEAD'])).stdout.trim()).toBe('refs/heads/main');
+    expect((await db.repository.findUniqueOrThrow({ where: { id: pub.id } })).storageGeneration).toBe(1);
+  }, 60_000);
 
   it('updates metadata, clears description, normalizes rename and applies visibility immediately', async () => {
     const path = 'repos/owner/demo';

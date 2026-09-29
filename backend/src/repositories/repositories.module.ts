@@ -6,11 +6,13 @@ import { RepositoriesService } from './repositories.service';
 import { RepositoryPolicy } from './repository.policy';
 import { GitStorageService } from './git-storage.service';
 import { RepositoryPurgeService } from './repository-purge.service';
+import { GitHttpController } from './git-http.controller';
+import { GitHttpService } from './git-http.service';
 
 @Module({
   imports: [AuthModule],
-  controllers: [RepositoriesController],
-  providers: [RepositoriesService, RepositoryPolicy, OptionalAccessTokenGuard, GitStorageService, RepositoryPurgeService],
+  controllers: [RepositoriesController, GitHttpController],
+  providers: [RepositoriesService, RepositoryPolicy, OptionalAccessTokenGuard, GitStorageService, RepositoryPurgeService, GitHttpService],
   exports: [RepositoriesService, OptionalAccessTokenGuard],
 })
 export class RepositoriesModule {}

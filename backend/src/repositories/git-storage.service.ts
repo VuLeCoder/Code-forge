@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -12,6 +12,23 @@ const runFile = promisify(execFile);
 @Injectable()
 export class GitStorageService {
   constructor(private readonly config: ConfigService) {}
+
+  openUploadPack(key: string, advertise: boolean, protocol?: string) {
+    this.path(key); // Only server-owned UUID keys may enter the CGI environment.
+    return spawn('git', ['-c', 'http.receivepack=false', '-c', 'http.getanyfile=false',
+      '-c', 'http.uploadpack=true', '-c', 'http.maxRequestBuffer=1048576', 'http-backend'], {
+      detached: process.platform !== 'win32',
+      env: { PATH: process.env.PATH, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_PROJECT_ROOT: this.root(), GIT_HTTP_EXPORT_ALL: '1',
+        PATH_INFO: `/${key}/${advertise ? 'info/refs' : 'git-upload-pack'}`,
+        REQUEST_METHOD: advertise ? 'GET' : 'POST',
+        QUERY_STRING: advertise ? 'service=git-upload-pack' : '',
+        CONTENT_TYPE: advertise ? '' : 'application/x-git-upload-pack-request',
+        ...(protocol ? { GIT_PROTOCOL: protocol } : {}),
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  }
 
   validateCommitSha(sha: string) {
     if (typeof sha !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(sha)) {
