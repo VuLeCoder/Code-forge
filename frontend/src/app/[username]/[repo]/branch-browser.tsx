@@ -6,6 +6,7 @@ import { useAuth } from "@/components/auth-provider";
 import { sessionFetch } from "@/lib/auth";
 import styles from "./repository.module.css";
 import { TreeBrowser } from "./tree-browser";
+import { CommitBrowser } from "./commit-browser";
 
 type Branch = { name: string; commitSha: string; isDefault: boolean };
 type Branches = { branches: Branch[]; selectedBranch: Branch | null; defaultBranch: string; storageState: string };
@@ -34,7 +35,10 @@ export function BranchBrowser({ endpoint, children }: { endpoint: string; childr
   function select(value: string) {
     const next = new URLSearchParams(query.toString());
     next.delete("path");
-    next.delete("view");
+    if (next.get("view") !== "commits") next.delete("view");
+    next.delete("page");
+    next.delete("snapshot");
+    next.delete("sha");
     if (value) next.set("ref", value); else next.delete("ref");
     router.push(`${pathname}${next.size ? `?${next}` : ""}`, { scroll: false });
   }
@@ -50,6 +54,6 @@ export function BranchBrowser({ endpoint, children }: { endpoint: string; childr
       </select>
       {data.selectedBranch && <code title={data.selectedBranch.commitSha}>{data.selectedBranch.commitSha.slice(0, 12)}</code>}
     </div>
-    {data.selectedBranch || query.get("path") ? <TreeBrowser endpoint={endpoint} refName={data.selectedBranch?.name ?? null} /> : !data.branches.length ? children : <section className={styles.empty}><h2>Nhánh mặc định chưa có commit</h2><p>Chọn một branch hiện có để xem thông tin.</p></section>}
+    {query.get("view") === "commits" ? <CommitBrowser endpoint={endpoint} /> : data.selectedBranch || query.get("path") ? <TreeBrowser endpoint={endpoint} refName={data.selectedBranch?.name ?? null} /> : !data.branches.length ? children : <section className={styles.empty}><h2>Nhánh mặc định chưa có commit</h2><p>Chọn một branch hiện có để xem thông tin.</p></section>}
   </>;
 }

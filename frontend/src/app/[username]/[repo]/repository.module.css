@@ -10,6 +10,24 @@
 .branchBar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 20px 0; }
 .branchBar select { max-width: 100%; min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: inherit; font: inherit; }
 .source { min-width: 0; }
+.sourceTabs { display: flex; flex-wrap: wrap; gap: 20px; margin-block: 20px; border-bottom: 1px solid var(--border); }
+.sourceTabs a { padding-block: 12px; color: var(--brand-700); }
+.sourceTabs a[aria-current] { border-bottom: 3px solid var(--brand-700); font-weight: 700; }
+.commitPanel { min-width: 0; padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow-wrap: anywhere; }
+.commitPanel h2, .commitPanel h3, .commitPanel p { margin-block: 12px; }
+.commitPanel a { color: var(--brand-700); }
+.commitPanel button { margin: 12px 12px 12px 0; }
+.commitList { list-style: none; padding: 0; margin-block: 20px; }
+.commitList li { padding-block: 16px; border-bottom: 1px solid var(--border); }
+.commitList li > a { font-weight: 600; }
+.commitList p, .commitList code { color: var(--muted); font-size: .875rem; }
+.commitPagination { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 20px; }
+.commitDetails { display: grid; grid-template-columns: minmax(0, 160px) minmax(0, 1fr); gap: 12px; margin-block: 20px; }
+.commitDetails dt { color: var(--muted); }
+.commitDetails dd { margin: 0; min-width: 0; }
+.parentCommit { display: block; margin-bottom: 8px; }
+.commitMessage { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; padding: 16px; background: var(--brand-50); }
+@media (max-width: 600px) { .commitPanel { padding: 16px; } .commitDetails { grid-template-columns: minmax(0, 1fr); gap: 6px; } .commitDetails dd { margin-bottom: 10px; } }
 .source .breadcrumb { margin-bottom: 16px; overflow-wrap: anywhere; }
 .source .breadcrumb span { min-width: 0; }
 .parentLink { display: inline-block; margin-bottom: 14px; color: var(--brand-700); }

@@ -13,6 +13,83 @@ const runFile = promisify(execFile);
 export class GitStorageService {
   constructor(private readonly config: ConfigService) {}
 
+  validateCommitSha(sha: string) {
+    if (typeof sha !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(sha)) {
+      throw new BadRequestException({ error: { code: 'INVALID_SHA', message: 'Cần SHA commit đầy đủ, dạng hex chữ thường.' } });
+    }
+  }
+
+  validateCommitPage(page?: string) {
+    if (page !== undefined && (typeof page !== 'string' || !/^[1-9][0-9]{0,3}$/.test(page) || Number(page) > 1000)) {
+      throw new BadRequestException({ error: { code: 'INVALID_PAGE', message: 'Trang phải từ 1 đến 1000.' } });
+    }
+    return page === undefined ? 1 : Number(page);
+  }
+
+  private commitUnavailable() {
+    return new ServiceUnavailableException({ error: { code: 'GIT_READ_UNAVAILABLE', message: 'Không thể đọc lịch sử trong giới hạn cho phép.' } });
+  }
+
+  private commitMissing() {
+    return new NotFoundException({ error: { code: 'COMMIT_NOT_FOUND', message: 'Commit không tồn tại trong lịch sử hiện tại.' } });
+  }
+
+  private readonly commitFormat = '%H%x00%P%x00%an%x00%ae%x00%aI%x00%cn%x00%ce%x00%cI%x00%B';
+
+  private parseCommits(output: string) {
+    if (!output) return [];
+    const fields = output.split('\0');
+    if (fields.length % 9 !== 0) throw this.commitUnavailable();
+    const commits = [];
+    for (let i = 0; i < fields.length; i += 9) {
+      const [sha, parents, authorName, authorEmail, authoredAt, committerName, committerEmail, committedAt, message] = fields.slice(i, i + 9) as [string, string, string, string, string, string, string, string, string];
+      const parentShas = parents ? parents.split(' ') : [];
+      if (![sha, ...parentShas].every((value) => /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value)) ||
+        !Number.isFinite(Date.parse(authoredAt)) || !Number.isFinite(Date.parse(committedAt))) throw this.commitUnavailable();
+      commits.push({ sha, parentShas, author: { name: authorName, email: authorEmail }, authoredAt,
+        committer: { name: committerName, email: committerEmail }, committedAt, message,
+        subject: message.split('\n')[0] ?? '' });
+    }
+    return commits;
+  }
+
+  // Only commits reachable from a live branch may be read, never dangling objects.
+  async commit(key: string, sha: string) {
+    this.validateCommitSha(sha);
+    const args = ['--git-dir', this.path(key)];
+    try {
+      const type = (await this.git([...args, 'cat-file', '-t', sha])).stdout.trim();
+      if (type !== 'commit') throw this.commitMissing();
+      const refs = (await this.git([...args, 'for-each-ref', '--count=1', `--contains=${sha}`, '--format=%(refname)', 'refs/heads/'])).stdout;
+      if (!refs.trim()) throw this.commitMissing();
+      const output = (await this.git([...args, 'show', '-s', '--no-notes', `--format=format:${this.commitFormat}`, sha, '--'])).stdout;
+      const commits = this.parseCommits(output);
+      if (commits.length !== 1) throw this.commitUnavailable();
+      return commits[0]!;
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      if ([128, 1].includes((error as { code: number }).code)) throw this.commitMissing();
+      throw this.commitUnavailable();
+    }
+  }
+
+  async commits(key: string, headSha: string, page = 1, snapshot = headSha) {
+    this.validateCommitSha(headSha);
+    this.validateCommitSha(snapshot);
+    this.validateCommitPage(String(page));
+    const args = ['--git-dir', this.path(key)];
+    try {
+      await this.git([...args, 'merge-base', '--is-ancestor', snapshot, headSha]);
+      const output = (await this.git([...args, 'log', '--topo-order', '--no-notes', '-z',
+        `--format=format:${this.commitFormat}`, '--max-count=21', `--skip=${(page - 1) * 20}`, snapshot, '--'])).stdout;
+      const commits = this.parseCommits(output);
+      return { commits: commits.slice(0, 20), page, pageSize: 20, hasMore: commits.length > 20, snapshot };
+    } catch (error) {
+      if ([128, 1].includes((error as { code: number }).code)) throw this.commitMissing();
+      throw this.commitUnavailable();
+    }
+  }
+
   validateRef(ref: string) {
     if (typeof ref !== 'string' || Buffer.byteLength(ref) > 255 || !ref ||
       [...ref].some((char) => char.charCodeAt(0) <= 32 || char.charCodeAt(0) === 127 || '~^:?*[\\'.includes(char)) || ref.includes('..') || ref.includes('@{') ||

@@ -1,5 +1,90 @@
 import { expect, test } from '@playwright/test';
 
+test('M3.5 paginates through proxy, opens direct commit URLs and parents, preserves branch and fits mobile', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.route('**/api/v1/auth/*', (route) => route.fulfill({ status: 401, json: {} }));
+  await page.route('**/api/v1/repos/alice/hello-world/branches*', (route) => {
+    const ref = new URL(route.request().url()).searchParams.get('ref') ?? 'main';
+    const branches = ['main', 'feature/demo'].map((name) => ({ name, commitSha: 'a'.repeat(40), isDefault: name === 'main' }));
+    return route.fulfill({ json: { branches, selectedBranch: branches.find((branch) => branch.name === ref) } });
+  });
+  await page.goto('/alice/hello-world?ref=feature%2Fdemo');
+  await page.getByRole('navigation', { name: 'Nội dung repository' }).getByRole('link', { name: 'Lịch sử commit' }).click();
+  const history = page.getByRole('region', { name: 'Lịch sử commit', exact: true });
+  await expect(history.getByRole('listitem')).toHaveCount(20);
+  await history.getByRole('link', { name: 'Trang sau' }).click();
+  await expect(history.getByRole('listitem')).toHaveCount(1);
+  await expect(page).toHaveURL(/page=2&snapshot=/);
+  await page.reload();
+  await expect(history.getByRole('link', { name: 'Commit 1', exact: true })).toBeVisible();
+  await history.getByRole('link', { name: 'Trang trước' }).click();
+  await history.getByRole('link', { name: 'Commit 21', exact: true }).click();
+  const detail = page.getByRole('region', { name: 'Chi tiết commit', exact: true });
+  await expect(detail.getByRole('heading', { name: 'Commit 21', exact: true })).toBeVisible();
+  await expect(detail.getByText('Tác giả ü <author@example.test>', { exact: true })).toBeVisible();
+  await expect(detail.getByText('Committer <committer@example.test>', { exact: true })).toBeVisible();
+  await expect(detail.locator('time').first()).toContainText('UTC');
+  await expect(detail.locator('pre')).toContainText('<script>window.commitExecuted = true</script>');
+  expect(await page.evaluate(() => 'commitExecuted' in window)).toBe(false);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.reload();
+  await detail.getByRole('link', { name: '14'.padStart(40, '0'), exact: true }).click();
+  await expect(detail.getByRole('heading', { name: 'Commit 20', exact: true })).toBeVisible();
+  await page.goBack();
+  await expect(detail.getByRole('heading', { name: 'Commit 21', exact: true })).toBeVisible();
+  await detail.getByRole('link', { name: '← Về lịch sử commit' }).click();
+  await expect(page.getByLabel('Branch', { exact: true })).toHaveValue('feature/demo');
+  await page.getByLabel('Branch', { exact: true }).selectOption('main');
+  await expect(page).toHaveURL(/\?ref=main&view=commits$/);
+  await expect(history.getByRole('listitem')).toHaveCount(20);
+  const response = await page.request.get('/api/v1/repos/alice/hello-world/commits?page=1&page=2');
+  expect(response.status()).toBe(400);
+  expect(response.headers()['cache-control']).toBe('private, no-store');
+  expect((await page.request.get('/api/v1/repos/alice/hello-world/commits?ref=a&ref=b')).status()).toBe(400);
+  expect((await page.request.get('/api/v1/repos/alice/hello-world/commits?snapshot=a&snapshot=b')).status()).toBe(400);
+  const commitResponse = await page.request.get(`/api/v1/repos/alice/hello-world/commits/${'1'.padStart(40, '0')}`);
+  expect(commitResponse.status()).toBe(200);
+  expect(commitResponse.headers()['cache-control']).toBe('private, no-store');
+  await page.goto(`/alice/hello-world?view=commit&sha=${'1'.padStart(40, '0')}`);
+  await expect(detail.getByText('Commit đầu tiên, không có commit cha.')).toBeVisible();
+});
+
+test('M3.5 handles malformed and missing SHA, invalid page, empty/reset history and retry', async ({ page }) => {
+  await page.route('**/api/v1/auth/*', (route) => route.fulfill({ status: 401, json: {} }));
+  const detail = page.getByRole('region', { name: 'Chi tiết commit', exact: true });
+  for (const [sha, text] of [['bad', 'SHA commit không hợp lệ'], ['f'.repeat(40), 'Commit không tồn tại']]) {
+    await page.goto(`/alice/hello-world?view=commit&sha=${sha}`);
+    await expect(detail.getByRole('alert')).toContainText(text);
+  }
+  await page.goto('/alice/hello-world?view=commits&page=0');
+  const history = page.getByRole('region', { name: 'Lịch sử commit', exact: true });
+  await expect(history.getByRole('alert')).toContainText('Trang lịch sử phải');
+  await page.goto('/alice/hello-world?view=commits&page=3');
+  await expect(history.getByText('Trang này không có commit.')).toBeVisible();
+  await page.route('**/api/v1/repos/alice/hello-world/commits?**', (route) => route.fulfill({ json: { commits: [], page: 1000, hasMore: true, snapshot: 'a'.repeat(40), storageState: 'READY' } }));
+  await page.goto('/alice/hello-world?view=commits&page=1000');
+  await expect(history.getByText('Đã đạt giới hạn 1.000 trang.', { exact: false })).toBeVisible();
+  await expect(history.getByRole('link', { name: 'Trang sau' })).toHaveCount(0);
+  await page.unroute('**/api/v1/repos/alice/hello-world/commits?**');
+  for (const state of ['EMPTY', 'RESET']) {
+    await page.route('**/api/v1/repos/alice/hello-world/commits?**', (route) => route.fulfill({ json: { commits: [], page: 1, hasMore: false, snapshot: null, storageState: state } }));
+    await page.goto('/alice/hello-world?view=commits');
+    await expect(history.getByText('Chưa có commit trên branch này.')).toBeVisible();
+    if (state === 'RESET') await expect(history.getByText('Git storage đã được khởi tạo lại;', { exact: false })).toBeVisible();
+    await page.unroute('**/api/v1/repos/alice/hello-world/commits?**');
+  }
+  let release: () => void = () => {};
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  await page.route('**/api/v1/repos/alice/hello-world/commits/*', async (route) => { await pending; await route.fulfill({ status: 503, json: {} }); });
+  await page.goto(`/alice/hello-world?view=commit&sha=${'1'.padStart(40, '0')}`);
+  await expect(detail.getByRole('status')).toContainText('Đang tải commit');
+  release();
+  await expect(detail.getByRole('alert')).toContainText('Chưa thể tải commit');
+  await page.unroute('**/api/v1/repos/alice/hello-world/commits/*');
+  await detail.getByRole('button', { name: 'Tải lại commit' }).click();
+  await expect(detail.getByRole('heading', { name: 'Commit 1', exact: true })).toBeVisible();
+});
+
 test('M3.4 renders branch README, GFM, safe links/images and mobile layout', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.route('**/api/v1/auth/*', (route) => route.fulfill({ status: 401, json: {} }));

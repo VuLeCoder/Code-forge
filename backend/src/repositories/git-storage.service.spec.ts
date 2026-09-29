@@ -15,6 +15,59 @@ describe('GitStorageService with real Git', () => {
   });
   afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
+  it('paginates a pinned history, reads merge parents and isolates reachable commits', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'main', true, 'History');
+    const git = (args: string[], input?: string) => execFileSync('git', ['--git-dir', join(root, key), ...args], { encoding: 'utf8', input }).trim();
+    const first = git(['rev-parse', 'HEAD']);
+    const tree = git(['rev-parse', 'HEAD^{tree}']);
+    const make = (parents: string[], message: string) => git(['-c', 'user.name=Tác giả ü', '-c', 'user.email=test@example.test', 'commit-tree', tree, ...parents.flatMap((parent) => ['-p', parent]), '-F', '-'], message);
+    let head = first;
+    for (let i = 1; i <= 22; i++) head = make([head], `Commit ${i}\n\nBody <script>bad()</script>\n`);
+    git(['update-ref', 'refs/heads/main', head]);
+    const one = await storage.commits(key, head);
+    expect(one).toMatchObject({ page: 1, pageSize: 20, hasMore: true, snapshot: head });
+    expect(one.commits).toHaveLength(20);
+    expect(one.commits[0]).toMatchObject({ sha: head, subject: 'Commit 22', author: { name: 'Tác giả ü', email: 'test@example.test' } });
+    const newHead = make([head], 'New head');
+    git(['update-ref', 'refs/heads/main', newHead]);
+    const two = await storage.commits(key, newHead, 2, one.snapshot);
+    expect(two).toMatchObject({ hasMore: false, snapshot: head });
+    expect(two.commits).toHaveLength(3);
+    expect(new Set([...one.commits, ...two.commits].map((commit) => commit.sha)).size).toBe(23);
+    expect(two.commits.at(-1)?.sha).toBe(first);
+    expect((await storage.commits(key, head, 3)).commits).toEqual([]);
+    const side = make([first], 'Side');
+    const merge = make([newHead, side], 'Merge\n\nMultiline ü\n');
+    git(['update-ref', 'refs/heads/feature/merge', merge]);
+    const detail = await storage.commit(key, merge);
+    expect(detail).toMatchObject({ parentShas: [newHead, side], message: 'Merge\n\nMultiline ü\n' });
+    expect((await storage.commit(key, first)).parentShas).toEqual([]);
+    expect((await storage.commits(key, merge)).commits.map((commit) => commit.sha)).toContain(side);
+    const dangling = make([], 'Not reachable');
+    for (const sha of [dangling, tree, 'f'.repeat(40)]) await expect(storage.commit(key, sha)).rejects.toMatchObject({ response: { error: { code: 'COMMIT_NOT_FOUND' } } });
+    await expect(storage.commits(key, head, 1, side)).rejects.toMatchObject({ response: { error: { code: 'COMMIT_NOT_FOUND' } } });
+    for (const sha of ['HEAD', '--all', head.slice(0, 12), 'a'.repeat(41), `${head}:README.md`]) expect(() => storage.validateCommitSha(sha)).toThrow();
+    for (const page of ['', '0', '-1', '01', '1.5', '1001', '1e2']) expect(() => storage.validateCommitPage(page)).toThrow();
+    const other = `${randomUUID()}.git`;
+    await storage.create(other, 'main', true, 'Other');
+    await expect(storage.commit(other, merge)).rejects.toMatchObject({ response: { error: { code: 'COMMIT_NOT_FOUND' } } });
+    git(['update-ref', '-d', 'refs/heads/feature/merge']);
+    await expect(storage.commit(key, merge)).rejects.toMatchObject({ response: { error: { code: 'COMMIT_NOT_FOUND' } } });
+  });
+
+  it('fails closed when commit messages exceed the Git output limit', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'main', true, 'Limit');
+    const git = (args: string[], input?: string) => execFileSync('git', ['--git-dir', join(root, key), ...args], { encoding: 'utf8', input }).trim();
+    const tree = git(['rev-parse', 'HEAD^{tree}']);
+    const sha = git(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', tree, '-F', '-'], 'x'.repeat(129 * 1024));
+    git(['update-ref', 'refs/heads/main', sha]);
+    for (const operation of [() => storage.commit(key, sha), () => storage.commits(key, sha)]) {
+      await expect(operation()).rejects.toMatchObject({ response: { error: { code: 'GIT_READ_UNAVAILABLE' } } });
+    }
+  });
+
   it('creates an empty bare repository with symbolic default HEAD', async () => {
     const key = `${randomUUID()}.git`;
     await storage.create(key, 'main', false, 'Empty');

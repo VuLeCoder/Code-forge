@@ -5,6 +5,27 @@ let offlineRequests = 0;
 const server = createServer((request, response) => {
   response.setHeader("Content-Type", "application/json");
   if (request.url === "/health") return response.end('{}');
+  if (request.url?.startsWith('/api/v1/repos/alice/hello-world/commits')) {
+    const url = new URL(request.url, 'http://fixture');
+    const query = url.searchParams;
+    const fail = (status, code) => { response.statusCode = status; return response.end(JSON.stringify({ error: { code } })); };
+    const makeCommit = (index) => ({ sha: index.toString(16).padStart(40, '0'), parentShas: index > 1 ? [(index - 1).toString(16).padStart(40, '0')] : [],
+      subject: `Commit ${index}`, message: `Commit ${index}\n\n<script>window.commitExecuted = true</script>\n${'long '.repeat(100)}`,
+      author: { name: 'Tác giả ü', email: 'author@example.test' }, authoredAt: '2026-09-28T08:00:00+07:00',
+      committer: { name: 'Committer', email: 'committer@example.test' }, committedAt: '2026-09-28T02:00:00Z' });
+    const sha = url.pathname.split('/commits/')[1];
+    if (sha !== undefined) {
+      if (!/^[a-f0-9]{40}$/.test(sha)) return fail(400, 'INVALID_SHA');
+      const index = Number.parseInt(sha, 16);
+      if (index < 1 || index > 21) return fail(404, 'COMMIT_NOT_FOUND');
+      return response.end(JSON.stringify({ commit: makeCommit(index) }));
+    }
+    for (const name of ['ref', 'page', 'snapshot']) if (query.getAll(name).length > 1) return fail(400, name === 'page' ? 'INVALID_PAGE' : name === 'ref' ? 'INVALID_REF' : 'INVALID_SHA');
+    if (query.has('page') && (!/^[1-9][0-9]{0,3}$/.test(query.get('page')) || Number(query.get('page')) > 1000)) return fail(400, 'INVALID_PAGE');
+    if (query.has('snapshot') && !/^[a-f0-9]{40}$/.test(query.get('snapshot'))) return fail(400, 'INVALID_SHA');
+    const page = Number(query.get('page') ?? 1);
+    return response.end(JSON.stringify({ commits: Array.from({ length: 21 }, (_, i) => makeCommit(21 - i)).slice((page - 1) * 20, page * 20), page, pageSize: 20, hasMore: page === 1, snapshot: makeCommit(21).sha, ref: query.get('ref') ?? 'main', storageState: 'READY' }));
+  }
   if (request.url?.startsWith('/api/v1/repos/alice/hello-world/image?')) {
     const query = new URL(request.url, 'http://fixture').searchParams;
     if (query.getAll('path').length !== 1 || query.getAll('ref').length > 1) {

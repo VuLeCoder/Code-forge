@@ -90,6 +90,25 @@ export class RepositoriesController {
     });
   }
 
+  @Get('repos/:owner/:repo/commits')
+  @Header('Cache-Control', 'private, no-store')
+  @UseGuards(OptionalAccessTokenGuard)
+  commits(@Param('owner') owner: string, @Param('repo') repo: string,
+    @Req() request: Request & { user?: AuthPrincipal }) {
+    return this.repositories.read(owner, repo, request.user?.id, {
+      commits: true, ref: request.query.ref as string | undefined,
+      page: request.query.page as string | undefined, snapshot: request.query.snapshot as string | undefined,
+    });
+  }
+
+  @Get('repos/:owner/:repo/commits/:sha')
+  @Header('Cache-Control', 'private, no-store')
+  @UseGuards(OptionalAccessTokenGuard)
+  commit(@Param('owner') owner: string, @Param('repo') repo: string, @Param('sha') sha: string,
+    @Req() request: Request & { user?: AuthPrincipal }) {
+    return this.repositories.read(owner, repo, request.user?.id, { sha });
+  }
+
   @Delete('repos/:owner/:repo')
   @HttpCode(204)
   @UseGuards(OriginGuard, AccessTokenGuard)

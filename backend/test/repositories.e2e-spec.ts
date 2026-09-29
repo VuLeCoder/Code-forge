@@ -160,6 +160,23 @@ describe('Repository HTTP + PostgreSQL', () => {
     const imageTree = gitImage(['mktree'], `100644 blob ${imageBlob}\tlogo.png\n100644 blob ${readmeBlob}\tREADME.md\n`);
     const imageCommit = gitImage(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', imageTree, '-m', 'Feature']);
     gitImage(['update-ref', 'refs/heads/feature/readme', imageCommit]);
+    const history = await call('GET', 'repos/owner/demo/commits?ref=feature%2Freadme', ownerCookie);
+    expect(history.status).toBe(200);
+    expect(history.headers.get('cache-control')).toBe('private, no-store');
+    expect(await history.json()).toMatchObject({ ref: 'feature/readme', page: 1, snapshot: imageCommit, hasMore: false, commits: [{ sha: imageCommit, subject: 'Feature' }] });
+    const detail = await call('GET', `repos/owner/demo/commits/${imageCommit}`, ownerCookie);
+    expect(detail.status).toBe(200);
+    expect(detail.headers.get('cache-control')).toBe('private, no-store');
+    expect(await detail.json()).toMatchObject({ commit: { sha: imageCommit, parentShas: [], author: { name: 'Test' } } });
+    for (const cookies of ['', otherCookie]) {
+      for (const suffix of ['commits?page=bad', `commits/${imageCommit}`, 'commits/invalid']) expect((await call('GET', `repos/owner/demo/${suffix}`, cookies)).status).toBe(404);
+    }
+    for (const query of ['page=0', 'page=1001', 'page=1&page=2', 'ref=a&ref=b', 'snapshot=HEAD', `snapshot=${imageCommit}&snapshot=${imageCommit}`]) expect((await call('GET', `repos/owner/demo/commits?${query}`, ownerCookie)).status).toBe(400);
+    expect((await call('GET', 'repos/owner/demo/commits/invalid', ownerCookie)).status).toBe(400);
+    expect((await call('GET', `repos/owner/demo/commits/${imageBlob}`, ownerCookie)).status).toBe(404);
+    expect((await call('GET', `repos/owner/demo/commits/${'f'.repeat(40)}`, ownerCookie)).status).toBe(404);
+    expect((await call('GET', 'repos/owner/demo/commits?ref=missing', ownerCookie)).status).toBe(404);
+    expect((await call('GET', `repos/owner/demo/commits?ref=main&snapshot=${imageCommit}`, ownerCookie)).status).toBe(404);
     expect(await (await call('GET', 'repos/owner/demo/blob?ref=feature%2Freadme&path=README.md', ownerCookie)).json()).toMatchObject({ content: '# Feature README\n![logo](logo.png)', ref: 'feature/readme' });
     const imageResponse = await call('GET', 'repos/owner/demo/image?ref=feature%2Freadme&path=logo.png', ownerCookie);
     expect(imageResponse.status).toBe(200);
@@ -170,6 +187,9 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect((await call('GET', 'repos/owner/demo/image?path=logo.png', ownerCookie)).status).toBe(404);
     expect((await call('GET', 'repos/owner/demo/image?path=README.md', ownerCookie)).status).toBe(400);
     await rm(bare, { recursive: true });
+    expect((await call('GET', `repos/owner/demo/commits/${imageCommit}`, ownerCookie)).status).toBe(404);
+    expect(await (await call('GET', 'repos/owner/demo/commits', ownerCookie)).json()).toMatchObject({ commits: [], storageState: 'RESET', storageGeneration: 1 });
+    expect((await call('GET', `repos/owner/demo/commits?snapshot=${imageCommit}`, ownerCookie)).status).toBe(404);
     expect((await call('GET', 'repos/owner/demo/blob?path=README.md&ref=main', ownerCookie)).status).toBe(404);
     expect((await call('GET', 'repos/owner/demo/tree?ref=main', ownerCookie)).status).toBe(404);
     expect((await call('GET', 'repos/owner/demo/branches?ref=main', ownerCookie)).status).toBe(404);
@@ -192,6 +212,7 @@ describe('Repository HTTP + PostgreSQL', () => {
 
   it('allows anonymous public reads but rejects non-owner mutations and invalid tokens', async () => {
     expect((await create('Public', 'PUBLIC')).status).toBe(201);
+    expect(await (await call('GET', 'repos/owner/public/commits')).json()).toMatchObject({ commits: [], storageState: 'EMPTY', snapshot: null });
     expect(await (await call('GET', 'repos/owner/public/branches')).json()).toMatchObject({ branches: [], selectedBranch: null, storageState: 'EMPTY' });
     expect(await (await call('GET', 'repos/owner/public/tree')).json()).toMatchObject({ entries: [], ref: null, storageState: 'EMPTY' });
     expect((await call('GET', 'repos/owner/public/blob?path=README.md')).status).toBe(404);
@@ -201,6 +222,8 @@ describe('Repository HTTP + PostgreSQL', () => {
     const tree = git(['mktree'], `100644 blob ${blob}\tcode.txt\n`);
     const commit = git(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', tree, '-m', 'Public']);
     git(['update-ref', 'refs/heads/main', commit]);
+    expect(await (await call('GET', 'repos/owner/public/commits')).json()).toMatchObject({ commits: [{ sha: commit }], ref: 'main' });
+    expect(await (await call('GET', `repos/owner/public/commits/${commit}`)).json()).toMatchObject({ commit: { sha: commit, subject: 'Public' } });
     expect(await (await call('GET', 'repos/owner/public/blob?path=code.txt')).json()).toMatchObject({ kind: 'text', content: 'public source' });
     const publicList = await (await call('GET', 'repositories')).json();
     expect(publicList.repositories.map((repo: { name: string }) => repo.name)).toEqual(['Public']);
@@ -253,6 +276,8 @@ describe('Repository HTTP + PostgreSQL', () => {
       expect((await call('GET', 'repos/owner/renamed/tree', cookies)).status).toBe(404);
       expect((await call('GET', 'repos/owner/renamed/blob?path=README.md', cookies)).status).toBe(404);
       expect((await call('GET', 'repos/owner/renamed/image?path=logo.png', cookies)).status).toBe(404);
+      expect((await call('GET', 'repos/owner/renamed/commits', cookies)).status).toBe(404);
+      expect((await call('GET', `repos/owner/renamed/commits/${'a'.repeat(40)}`, cookies)).status).toBe(404);
     }
     expect((await call('PATCH', 'repos/owner/renamed', ownerCookie, { name: 'Restored' })).status).toBe(404);
     expect((await call('DELETE', 'repos/owner/renamed', ownerCookie)).status).toBe(404);

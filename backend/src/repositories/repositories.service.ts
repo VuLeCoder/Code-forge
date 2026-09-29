@@ -81,9 +81,12 @@ export class RepositoriesService {
     }
   }
 
-  async read(owner: string, name: string, userId?: string, branchQuery?: { ref?: string; path?: string; tree?: boolean; blob?: boolean; image?: boolean }) {
+  async read(owner: string, name: string, userId?: string, branchQuery?: { ref?: string; path?: string; tree?: boolean; blob?: boolean; image?: boolean; commits?: boolean; sha?: string; page?: string; snapshot?: string }) {
     const repo = await this.load(this.db, owner, name);
     this.policy.assertRead(repo, userId);
+    if (branchQuery?.sha !== undefined) this.storage.validateCommitSha(branchQuery.sha);
+    if (branchQuery?.snapshot !== undefined) this.storage.validateCommitSha(branchQuery.snapshot);
+    if (branchQuery?.commits) this.storage.validateCommitPage(branchQuery.page);
     if (branchQuery?.ref !== undefined) this.storage.validateRef(branchQuery.ref);
     if (branchQuery?.path !== undefined) this.storage.validateSourcePath(branchQuery.path);
     if (branchQuery?.blob && !branchQuery.path) throw new BadRequestException({ error: { code: 'INVALID_PATH', message: 'Cần đường dẫn tới file.' } });
@@ -97,7 +100,26 @@ export class RepositoriesService {
         current = await tx.repository.update({ where: { id: current.id }, data: { storageGeneration: { increment: 1 } }, include: { owner: { select: { username: true } } } });
       }
       if (branchQuery) {
+        if (branchQuery.sha !== undefined) {
+          try { return { commit: await this.storage.commit(current.storageKey, branchQuery.sha), storageGeneration: current.storageGeneration }; }
+          catch (error) { return { readError: error }; }
+        }
         const result = await this.storage.branches(current.storageKey, current.defaultBranch);
+        if (branchQuery.commits) {
+          try {
+            const selected = result.branches.find((branch) => branch.name === (branchQuery.ref ?? current.defaultBranch));
+            if (!selected && (branchQuery.ref !== undefined || result.branches.length)) {
+              throw new NotFoundException({ error: { code: 'REF_NOT_FOUND', message: 'Branch không tồn tại hoặc đã bị xóa.' } });
+            }
+            if (!selected && branchQuery.snapshot !== undefined) {
+              throw new NotFoundException({ error: { code: 'COMMIT_NOT_FOUND', message: 'Lịch sử đã thay đổi hoặc storage đã được khởi tạo lại.' } });
+            }
+            const page = this.storage.validateCommitPage(branchQuery.page);
+            return { ...(selected ? await this.storage.commits(current.storageKey, selected.commitSha, page, branchQuery.snapshot)
+              : { commits: [], page, pageSize: 20, hasMore: false, snapshot: null }),
+              ref: selected?.name ?? null, storageState: selected ? 'READY' : current.storageGeneration > 0 ? 'RESET' : 'EMPTY', storageGeneration: current.storageGeneration };
+          } catch (error) { return { readError: error }; }
+        }
         if (branchQuery.tree || branchQuery.blob) {
           // Return errors until recovery commits: filesystem creation cannot roll back with SQL.
           try {
