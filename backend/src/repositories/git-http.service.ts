@@ -1,4 +1,5 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { Transform } from 'node:stream';
 import { createGunzip } from 'node:zlib';
 import type { Request, Response } from 'express';
@@ -7,12 +8,31 @@ import { RepositoriesService } from './repositories.service';
 
 @Injectable()
 export class GitHttpService implements OnModuleDestroy {
+  private readonly logger = new Logger(GitHttpService.name);
   private readonly running = new Set<() => void>();
   readonly timeoutMs: number = 60_000;
 
   onModuleDestroy() { for (const stop of this.running) stop(); }
 
   async serve(owner: string, repository: string, advertise: boolean, req: Request, res: Response) {
+    const started = performance.now();
+    const requestId = randomUUID();
+    let reported = false;
+    let failureStatus: number | undefined;
+    const report = (aborted: boolean) => {
+      if (reported) return;
+      reported = true;
+      // Fixed fields only: never include URL, query, headers, credentials or Git output.
+      this.logger.log(JSON.stringify({ event: 'git_read', requestId,
+        operation: advertise ? 'discovery' : 'upload-pack',
+        status: failureStatus ?? res.statusCode,
+        outcome: aborted ? 'aborted' : (res.statusCode === 200 ? 'success' : 'rejected'),
+        durationMs: Math.round(performance.now() - started), activeProcesses: this.running.size,
+      }));
+    };
+    res.setHeader('X-Request-ID', requestId);
+    res.once('finish', () => report(false));
+    res.once('close', () => report(!res.writableFinished));
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     const reject = (status: number) => { res.status(status).type('text/plain').end('Git request unavailable.\n'); };
@@ -34,7 +54,9 @@ export class GitHttpService implements OnModuleDestroy {
     if (Number(req.headers['content-length'] ?? 0) > 1024 * 1024) return reject(413);
     if (this.running.size >= 4) return reject(503);
 
-    const child = this.storage.openUploadPack(key, advertise, protocol);
+    let child: ReturnType<GitStorageService['openUploadPack']>;
+    try { child = this.storage.openUploadPack(key, advertise, protocol); }
+    catch { return reject(503); }
     let stopped = false;
     let header = Buffer.alloc(0);
     let parsed = false;
@@ -43,6 +65,7 @@ export class GitHttpService implements OnModuleDestroy {
     const inputs: Transform[] = [];
     const stop = (status = 503) => {
       if (stopped) return;
+      failureStatus = status;
       stopped = true;
       req.unpipe();
       for (const stream of inputs) stream.destroy();

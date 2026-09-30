@@ -33,6 +33,8 @@ async function transport(request: NextRequest, context: Context) {
     headers.set("x-content-type-options", "nosniff");
     const challenge = upstream.headers.get("www-authenticate");
     if (challenge) headers.set("www-authenticate", challenge);
+    const requestId = upstream.headers.get("x-request-id");
+    if (requestId && /^[a-f0-9-]{36}$/.test(requestId)) headers.set("x-request-id", requestId);
     const reader = upstream.body?.getReader();
     if (!reader) { cleanup(); return new Response(null, { status: upstream.status, headers }); }
     const body = new ReadableStream<Uint8Array>({

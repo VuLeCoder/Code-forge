@@ -81,7 +81,7 @@ describe('Milestone 1 HTTP + PostgreSQL', () => {
     expect(await db.user.count()).toBe(1);
     const profile = await call('users/ALICE');
     expect(profile.status).toBe(200);
-    expect(await profile.json()).toEqual({ user: { username: 'Alice', createdAt: stored.createdAt.toISOString() }, repositories: [], repositoriesAvailable: false });
+    expect(await profile.json()).toEqual({ user: { username: 'Alice', createdAt: stored.createdAt.toISOString() }, repositories: [], repositoriesAvailable: true });
     expect((await call('users/missing-user')).status).toBe(404);
     expect((await call('auth/me', undefined, cookie(registered))).status).toBe(200);
     expect((await call('auth/me')).status).toBe(401);

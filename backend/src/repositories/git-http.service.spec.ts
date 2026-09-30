@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
 import { request } from 'node:http';
 import { gzipSync } from 'node:zlib';
-import { INestApplication } from '@nestjs/common';
+import { INestApplication, Logger } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { GitHttpController } from './git-http.controller';
 import { GitHttpService } from './git-http.service';
@@ -15,6 +15,7 @@ describe('Git HTTP process lifecycle', () => {
   let url: string;
   let script: string;
   let children: ChildProcessWithoutNullStreams[];
+  let logs: jest.SpyInstance;
   const header = 'Content-Type: application/x-git-upload-pack-advertisement\r\n\r\n';
   const start = jest.fn(() => {
     const child = spawn(process.execPath, ['-e', script], { detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
@@ -23,6 +24,7 @@ describe('Git HTTP process lifecycle', () => {
   });
 
   beforeEach(async () => {
+    logs = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
     children = [];
     start.mockClear();
     script = `process.stdout.write(${JSON.stringify(header + '0000')}); setInterval(() => {}, 1000);`;
@@ -36,7 +38,30 @@ describe('Git HTTP process lifecycle', () => {
     url = `${await app.getUrl()}/git/owner/repo.git`;
   });
 
-  afterEach(async () => { await app.close(); });
+  afterEach(async () => { await app.close(); logs.mockRestore(); });
+
+  it('records bounded operational fields without credentials, source or repository names', async () => {
+    script = `process.stdout.end(${JSON.stringify(header + '0000')});`;
+    const response = await fetch(`${url}/info/refs?service=git-upload-pack`, { headers: {
+      Authorization: 'Basic secret-canary', Cookie: 'session=secret-canary', 'X-Request-ID': 'untrusted-canary',
+    } });
+    await response.text();
+    const raw = logs.mock.calls.map(([value]) => String(value)).find((value) => value.includes('"event":"git_read"'))!;
+    const event = JSON.parse(raw) as Record<string, unknown>;
+    expect(event).toMatchObject({ event: 'git_read', requestId: response.headers.get('x-request-id'), operation: 'discovery',
+      status: 200, outcome: 'success' });
+    expect(typeof event.durationMs).toBe('number');
+    expect(typeof event.activeProcesses).toBe('number');
+    expect(raw).not.toMatch(/canary|owner|repo\.git|0000|Authorization|Cookie/);
+  });
+
+  it('rejects synchronous spawn failure with a sanitized response', async () => {
+    start.mockImplementationOnce(() => { throw new Error('private-path-secret'); });
+    const response = await fetch(`${url}/info/refs?service=git-upload-pack`);
+    expect(response.status).toBe(503);
+    expect(await response.text()).toBe('Git request unavailable.\n');
+    expect(JSON.stringify(logs.mock.calls)).not.toContain('private-path-secret');
+  });
 
   it('kills a streaming process when the response client disconnects', async () => {
     const controller = new AbortController();
