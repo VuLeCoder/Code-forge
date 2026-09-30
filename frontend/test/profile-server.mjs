@@ -19,9 +19,14 @@ let offlineRequests = 0;
 const server = createServer((request, response) => {
   if (request.url?.startsWith('/api/v1/git/')) {
     const url = new URL(request.url, 'http://fixture');
-    const advertise = url.pathname === '/api/v1/git/alice/hello-world.git/info/refs' && request.method === 'GET' && url.search === '?service=git-upload-pack';
-    const upload = url.pathname === '/api/v1/git/alice/hello-world.git/git-upload-pack' && request.method === 'POST';
-    if ((!advertise && !upload) || request.headers.cookie || request.headers.authorization) { response.statusCode = 404; return response.end(); }
+    const privateRepo = url.pathname.startsWith('/api/v1/git/alice/private.git/');
+    const root = `/api/v1/git/alice/${privateRepo ? 'private' : 'hello-world'}.git`;
+    const advertise = url.pathname === `${root}/info/refs` && request.method === 'GET' && url.search === '?service=git-upload-pack';
+    const upload = url.pathname === `${root}/git-upload-pack` && request.method === 'POST';
+    if ((!advertise && !upload) || request.headers.cookie) { response.statusCode = 404; return response.end(); }
+    if ((privateRepo || request.headers.authorization) && request.headers.authorization !== `Basic ${Buffer.from('alice:fixture-pat').toString('base64')}`) {
+      response.statusCode = 401; response.setHeader('WWW-Authenticate', 'Basic realm="Code Forge Git", charset="UTF-8"'); return response.end('Git request unavailable.\n');
+    }
     const child = execFile('git', ['http-backend'], { encoding: 'buffer', maxBuffer: 4 * 1024 * 1024,
       env: { PATH: process.env.PATH, GIT_PROJECT_ROOT: gitRoot, GIT_HTTP_EXPORT_ALL: '1',
         PATH_INFO: `/fixture.git/${advertise ? 'info/refs' : 'git-upload-pack'}`, REQUEST_METHOD: request.method,
@@ -38,6 +43,17 @@ const server = createServer((request, response) => {
     return;
   }
   response.setHeader("Content-Type", "application/json");
+  if (request.url?.startsWith('/api/v1/tokens')) {
+    if (request.headers.cookie !== 'pat-test=session') { response.statusCode = 401; return response.end('{}'); }
+    if (request.method !== 'GET' && request.headers.origin !== 'http://localhost:3111') { response.statusCode = 403; return response.end('{}'); }
+    if (request.method === 'DELETE') { response.statusCode = 204; return response.end(); }
+    if (request.method === 'POST') {
+      let body = ''; request.on('data', (chunk) => { body += chunk; });
+      request.on('end', () => { response.statusCode = 201; response.end(JSON.stringify({ token: JSON.parse(body), secret: 'fixture-only-secret' })); });
+      return;
+    }
+    return response.end(JSON.stringify({ tokens: [] }));
+  }
   if (request.url === "/health") return response.end('{}');
   if (request.url?.startsWith('/api/v1/repos/alice/hello-world/commits')) {
     const url = new URL(request.url, 'http://fixture');

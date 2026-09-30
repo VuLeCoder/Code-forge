@@ -1,0 +1,10 @@
+.manager { max-width: 48rem; margin: 2rem auto; display: grid; gap: 1.25rem; }
+.manager p { overflow-wrap: anywhere; }
+.form, .secret { display: grid; gap: .75rem; border: 1px solid var(--border); padding: 1.25rem; border-radius: 1rem; min-width: 0; }
+.manager input:not([type=checkbox]), .manager select { width: 100%; min-width: 0; padding: .7rem; border: 1px solid var(--border); border-radius: .5rem; background: var(--surface); color: var(--text); }
+.actions { display: flex; flex-wrap: wrap; gap: .75rem; }
+.list { list-style: none; padding: 0; }
+.list li { padding: 1rem 0; border-bottom: 1px solid var(--border); display: grid; gap: .6rem; }
+.dialog { margin: auto; width: min(32rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow: auto; padding: 1.5rem; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 1rem; }
+.dialog p { margin: 1rem 0; }
+.dialog::backdrop { background: rgb(0 0 0 / 45%); }

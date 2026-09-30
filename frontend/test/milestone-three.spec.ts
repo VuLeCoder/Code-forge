@@ -35,15 +35,15 @@ test('M3.6 clone dialog copies public URL, handles clipboard errors, keyboard an
     expect(await readFile(join(root, 'clone', 'README.md'), 'utf8')).toBe('Clone through Next proxy\n');
     await git('git', ['-C', join(root, 'clone'), '-c', 'protocol.version=0', 'fetch', 'origin'], { timeout: 20_000 });
   } finally { await rm(root, { recursive: true, force: true }); }
-  const response = await page.request.get(`${url}/info/refs?service=git-upload-pack`, { headers: { Cookie: 'session=do-not-forward', Authorization: 'Basic do-not-forward' } });
+  const response = await page.request.get(`${url}/info/refs?service=git-upload-pack`, { headers: { Cookie: 'session=do-not-forward' } });
   expect(response.status()).toBe(200);
   expect(response.headers()['cache-control']).toBe('private, no-store');
   expect((await page.request.post(`${url}/git-receive-pack`)).status()).toBe(404);
   expect((await page.request.get(`${url}/HEAD`)).status()).toBe(404);
-  expect((await page.request.get('/git/alice/private.git/info/refs?service=git-upload-pack')).status()).toBe(404);
+  expect((await page.request.get('/git/alice/private.git/info/refs?service=git-upload-pack')).status()).toBe(401);
 });
 
-test('M3.6 private repository explains unavailable clone without offering a usable URL', async ({ page }) => {
+test('M3.7 private repository offers a clean URL and username/PAT instructions', async ({ page }) => {
   await page.route('**/api/v1/auth/*', (route) => route.fulfill({ status: 401, json: {} }));
   await page.route('**/api/v1/repos/alice/private', (route) => route.fulfill({ json: { repository: {
     id: 'private', owner: { username: 'alice' }, name: 'private', visibility: 'PRIVATE', permissions: { canRead: true, canManage: true }, defaultBranch: 'main',
@@ -51,9 +51,9 @@ test('M3.6 private repository explains unavailable clone without offering a usab
   await page.goto('/alice/private');
   await page.getByRole('button', { name: 'Clone', exact: true }).click();
   const dialog = page.getByRole('dialog');
-  await expect(dialog).toContainText('Clone repository riêng tư chưa khả dụng');
-  await expect(dialog.getByLabel('URL clone')).toHaveCount(0);
-  await expect(dialog.getByRole('button', { name: 'Sao chép URL' })).toHaveCount(0);
+  await expect(dialog).toContainText('Khi Git hỏi mật khẩu, nhập PAT');
+  await expect(dialog.getByLabel('URL clone')).toHaveValue('http://localhost:3111/git/alice/private.git');
+  await expect(dialog.getByRole('link', { name: 'Tạo hoặc quản lý PAT' })).toHaveAttribute('href', '/settings/tokens');
 });
 
 test('M3.5 paginates through proxy, opens direct commit URLs and parents, preserves branch and fits mobile', async ({ page }) => {

@@ -19,8 +19,12 @@ export class GitHttpService implements OnModuleDestroy {
     if (!/^[a-z0-9][a-z0-9._-]{1,37}[a-z0-9]$/i.test(owner) ||
       !/^(?!.*\.\.)(?!.*\.git\.git$)[a-z0-9](?:[a-z0-9._-]{0,98}[a-z0-9])?\.git$/i.test(repository)) return reject(404);
     let key: string;
-    try { key = await this.repositories.preparePublicGit(owner, repository.slice(0, -4)); }
-    catch (error) { return reject((error as { getStatus?: () => number }).getStatus?.() === 404 ? 404 : 503); }
+    try { key = await this.repositories.prepareGit(owner, repository.slice(0, -4), req.headers.authorization); }
+    catch (error) {
+      const status = (error as { getStatus?: () => number }).getStatus?.();
+      if (status === 401) res.setHeader('WWW-Authenticate', 'Basic realm="Code Forge Git", charset="UTF-8"');
+      return reject(status === 401 || status === 404 ? status : 503);
+    }
     if (req.aborted || res.destroyed) return;
     if (advertise ? (Object.keys(req.query).length !== 1 || req.query.service !== 'git-upload-pack') : Object.keys(req.query).length !== 0) return reject(400);
     const protocol = req.headers['git-protocol'];

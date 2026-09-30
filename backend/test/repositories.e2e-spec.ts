@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { gzipSync } from 'node:zlib';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
@@ -278,8 +278,8 @@ describe('Repository HTTP + PostgreSQL', () => {
     for (const name of ['Demo', 'Missing']) {
       for (const cookie of ['', ownerCookie, otherCookie]) {
         const hidden = `${base}/git/Owner/${name}.git`;
-        expect((await fetch(`${hidden}/info/refs?service=git-upload-pack`, { headers: { Cookie: cookie } })).status).toBe(404);
-        expect((await fetch(`${hidden}/git-upload-pack`, { method: 'POST' })).status).toBe(404);
+        expect((await fetch(`${hidden}/info/refs?service=git-upload-pack`, { headers: { Cookie: cookie } })).status).toBe(401);
+        expect((await fetch(`${hidden}/git-upload-pack`, { method: 'POST' })).status).toBe(401);
       }
     }
     for (const query of ['', '?service=git-receive-pack', '?service=git-upload-pack&service=git-upload-pack']) expect((await fetch(`${url}/info/refs${query}`)).status).toBe(400);
@@ -296,14 +296,122 @@ describe('Repository HTTP + PostgreSQL', () => {
     await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/forbidden'])).rejects.toThrow();
     for (const change of [{ visibility: 'PRIVATE' as const }, { status: 'DELETED' as const }, { status: 'LOCKED' as const }]) {
       await db.repository.update({ where: { id: pub.id }, data: change });
-      expect((await fetch(`${url}/info/refs?service=git-upload-pack`)).status).toBe(404);
-      expect((await fetch(`${url}/git-upload-pack`, { method: 'POST' })).status).toBe(404);
+      expect((await fetch(`${url}/info/refs?service=git-upload-pack`)).status).toBe(401);
+      expect((await fetch(`${url}/git-upload-pack`, { method: 'POST' })).status).toBe(401);
       await db.repository.update({ where: { id: pub.id }, data: { visibility: 'PUBLIC', status: 'ACTIVE' } });
     }
     await rm(bare, { recursive: true });
     await git(['clone', url, join(storageRoot, 'empty-clone')]);
     expect((await git(['-C', join(storageRoot, 'empty-clone'), 'symbolic-ref', 'HEAD'])).stdout.trim()).toBe('refs/heads/main');
     expect((await db.repository.findUniqueOrThrow({ where: { id: pub.id } })).storageGeneration).toBe(1);
+  }, 60_000);
+
+  it('M3.7 manages PATs and enforces private Git READ/WRITE/OWNER, expiry, revocation and identity', async () => {
+    const expiresAt = new Date(Date.now() + 86400000).toISOString();
+    const input = { name: 'CLI test', scopes: ['repo:read'], expiresAt };
+    expect((await call('GET', 'tokens')).status).toBe(401);
+    expect((await call('POST', 'tokens', ownerCookie, input, 'https://evil.example')).status).toBe(403);
+    for (const body of [{ ...input, scopes: [] }, { ...input, scopes: ['admin'] }, { ...input, expiresAt: '2000-01-01' }, { ...input, expiresAt: new Date(Date.now() + 366 * 86400000).toISOString() }, { ...input, name: ' ' }]) {
+      expect((await call('POST', 'tokens', ownerCookie, body)).status).toBe(400);
+    }
+    const response = await call('POST', 'tokens', ownerCookie, input);
+    expect(response.status).toBe(201);
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    const ownerToken = await response.json();
+    expect(ownerToken.secret).toMatch(/^cfg_[a-f0-9]{16}_[a-f0-9]{64}$/);
+    const otherToken = await (await call('POST', 'tokens', otherCookie, input)).json();
+    const other = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'other' } });
+    const stored = await db.personalAccessToken.findUniqueOrThrow({ where: { id: ownerToken.token.id } });
+    expect(stored.tokenHash).not.toBe(ownerToken.secret);
+    expect(JSON.stringify(stored)).not.toContain(ownerToken.secret);
+    const list = await call('GET', 'tokens', ownerCookie);
+    expect(list.headers.get('cache-control')).toBe('private, no-store');
+    const listed = await list.text();
+    expect(listed).not.toContain(ownerToken.secret);
+    expect(listed).not.toContain('tokenHash');
+    expect(listed).not.toContain(otherToken.token.id);
+    expect((await call('DELETE', `tokens/${ownerToken.token.id}`, otherCookie)).status).toBe(404);
+    const basic = (username: string, secret: string) => `Basic ${Buffer.from(`${username}:${secret}`).toString('base64')}`;
+    const ownerAuth = basic('Owner', ownerToken.secret);
+    const otherAuth = basic('Other', otherToken.secret);
+    const url = `${base}/git/Owner/Demo.git`;
+    const request = (auth?: string, name = 'Demo', rpc = false) => fetch(`${base}/git/Owner/${name}.git/${rpc ? 'git-upload-pack' : 'info/refs?service=git-upload-pack'}`, {
+      method: rpc ? 'POST' : 'GET', headers: { ...(auth === undefined ? {} : { Authorization: auth }), 'content-type': 'application/x-git-upload-pack-request' }, ...(rpc ? { body: '0000' } : {}),
+    });
+    for (const name of ['Demo', 'Missing']) {
+      const hidden = await request(undefined, name);
+      expect(hidden.status).toBe(401);
+      expect(hidden.headers.get('www-authenticate')).toBe('Basic realm="Code Forge Git", charset="UTF-8"');
+      expect(await hidden.text()).toBe('Git request unavailable.\n');
+      expect((await request(otherAuth, name)).status).toBe(404);
+    }
+    for (const auth of [basic('Other', ownerToken.secret), basic('Owner', 'test-password-123'), 'Bearer invalid', 'Basic !!!', basic('Owner', ownerToken.secret.slice(0, -1) + (ownerToken.secret.endsWith('0') ? '1' : '0'))]) {
+      expect((await request(auth)).status).toBe(401);
+      expect((await request(auth, 'Missing')).status).toBe(401);
+    }
+    const repo = await db.repository.findFirstOrThrow({ where: { ownerId, normalizedName: 'demo' } });
+    const bare = join(storageRoot, repo.storageKey);
+    const localGit = (args: string[], input?: string) => execFileSync('git', ['--git-dir', bare, ...args], { input, encoding: 'utf8' }).trim();
+    const blob = localGit(['hash-object', '-w', '--stdin'], 'private source\n');
+    const tree = localGit(['mktree'], `100644 blob ${blob}\tprivate.txt\n`);
+    const commit = localGit(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', tree, '-m', 'Private']);
+    localGit(['update-ref', 'refs/heads/main', commit]);
+    // Git obtains username/PAT only after the HTTP challenge, not in URL or argv.
+    const askpass = join(storageRoot, 'askpass.sh');
+    await writeFile(askpass, '#!/bin/sh\ncase "$1" in *Username*) printf "%s\\n" "$TEST_GIT_USER" ;; *) printf "%s\\n" "$TEST_GIT_PAT" ;; esac\n', { mode: 0o700 });
+    const run = promisify(execFile);
+    const cli = (args: string[], username = 'Owner', secret = ownerToken.secret) => run('git', ['-c', 'credential.helper=', ...args], {
+      timeout: 20_000, env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: askpass, TEST_GIT_USER: username, TEST_GIT_PAT: secret },
+    });
+    const ownerWork = join(storageRoot, 'private-owner');
+    await cli(['-c', 'protocol.version=2', 'clone', url, ownerWork]);
+    expect(await readFile(join(ownerWork, 'private.txt'), 'utf8')).toBe('private source\n');
+    await db.user.update({ where: { id: other.id }, data: { systemRole: 'ADMIN' } });
+    expect((await request(otherAuth)).status).toBe(404);
+    for (const role of ['READ', 'WRITE'] as const) {
+      await db.repositoryMember.upsert({ where: { repositoryId_userId: { repositoryId: repo.id, userId: other.id } }, create: { repositoryId: repo.id, userId: other.id, role }, update: { role } });
+      const work = join(storageRoot, `private-${role}`);
+      await cli(['clone', url, work], 'Other', otherToken.secret);
+      await cli(['-C', work, '-c', 'protocol.version=0', 'fetch', 'origin'], 'Other', otherToken.secret);
+      expect(await readFile(join(work, 'private.txt'), 'utf8')).toBe('private source\n');
+      const metadata = await call('GET', 'repos/owner/demo', otherCookie);
+      expect(metadata.status).toBe(200);
+      expect((await metadata.json()).repository.permissions).toEqual({ canRead: true, canManage: false });
+      expect((await call('GET', 'repos/owner/demo/blob?path=private.txt', otherCookie)).status).toBe(200);
+      expect((await call('PATCH', 'repos/owner/demo', otherCookie, { description: 'No' })).status).not.toBe(200);
+      expect((await fetch(`${url}/git-receive-pack`, { method: 'POST', headers: { Authorization: otherAuth } })).status).toBe(404);
+    }
+    await db.repositoryMember.delete({ where: { repositoryId_userId: { repositoryId: repo.id, userId: other.id } } });
+    expect((await request(otherAuth)).status).toBe(404);
+    expect((await request(otherAuth, 'Demo', true)).status).toBe(404);
+    expect((await call('GET', 'repos/owner/demo', otherCookie)).status).toBe(404);
+    await db.user.update({ where: { id: other.id }, data: { systemRole: 'USER' } });
+    for (const change of [{ scopes: ['repo:write'] }, { expiresAt: new Date(Date.now() - 1000) }, { revokedAt: new Date() }]) {
+      await db.personalAccessToken.update({ where: { id: ownerToken.token.id }, data: change });
+      expect((await request(ownerAuth)).status).toBe(401);
+      expect((await request(ownerAuth, 'Demo', true)).status).toBe(401);
+      await db.personalAccessToken.update({ where: { id: ownerToken.token.id }, data: { scopes: ['repo:read'], expiresAt, revokedAt: null } });
+    }
+    await db.user.update({ where: { id: ownerId }, data: { status: 'LOCKED' } });
+    expect((await request(ownerAuth)).status).toBe(401);
+    expect((await call('GET', 'tokens', ownerCookie)).status).toBe(401);
+    await db.user.update({ where: { id: ownerId }, data: { status: 'ACTIVE' } });
+    for (const status of ['LOCKED', 'DELETED'] as const) {
+      await db.repository.update({ where: { id: repo.id }, data: { status } });
+      expect((await request(ownerAuth)).status).toBe(404);
+      expect((await request(ownerAuth, 'Demo', true)).status).toBe(404);
+    }
+    await db.repository.update({ where: { id: repo.id }, data: { status: 'ACTIVE' } });
+    await rm(bare, { recursive: true });
+    await cli(['clone', url, join(storageRoot, 'private-reset')]);
+    expect((await db.repository.findUniqueOrThrow({ where: { id: repo.id } })).storageGeneration).toBe(2);
+    expect((await db.personalAccessToken.findUniqueOrThrow({ where: { id: ownerToken.token.id } })).lastUsedAt).not.toBeNull();
+    expect((await call('DELETE', `tokens/${ownerToken.token.id}`, ownerCookie, undefined, 'https://evil.example')).status).toBe(403);
+    expect((await call('DELETE', `tokens/${ownerToken.token.id}`, ownerCookie)).status).toBe(204);
+    expect((await call('DELETE', `tokens/${ownerToken.token.id}`, ownerCookie)).status).toBe(204);
+    await expect(cli(['-C', ownerWork, 'fetch', 'origin'])).rejects.toThrow();
+    expect(await db.auditLog.count({ where: { targetId: ownerToken.token.id, action: 'TOKEN_CREATED' } })).toBe(1);
+    expect(await db.auditLog.count({ where: { targetId: ownerToken.token.id, action: 'TOKEN_REVOKED' } })).toBe(1);
   }, 60_000);
 
   it('updates metadata, clears description, normalizes rename and applies visibility immediately', async () => {

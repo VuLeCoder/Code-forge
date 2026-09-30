@@ -13,7 +13,7 @@ async function transport(request: NextRequest, context: Context) {
     return new Response("Git request unavailable.\n", { status: 404, headers });
   }
   const upstreamHeaders = new Headers();
-  for (const name of ["content-type", "content-encoding", "git-protocol"]) {
+  for (const name of ["content-type", "content-encoding", "git-protocol", "authorization"]) {
     const value = request.headers.get(name);
     if (value) upstreamHeaders.set(name, value);
   }
@@ -31,6 +31,8 @@ async function transport(request: NextRequest, context: Context) {
     const upstream = await fetch(`${(process.env.BACKEND_URL ?? "http://localhost:4000").replace(/\/$/, "")}/api/v1/git/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/${path}${request.nextUrl.search}`, init);
     headers.set("content-type", upstream.headers.get("content-type") ?? "text/plain");
     headers.set("x-content-type-options", "nosniff");
+    const challenge = upstream.headers.get("www-authenticate");
+    if (challenge) headers.set("www-authenticate", challenge);
     const reader = upstream.body?.getReader();
     if (!reader) { cleanup(); return new Response(null, { status: upstream.status, headers }); }
     const body = new ReadableStream<Uint8Array>({

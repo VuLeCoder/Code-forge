@@ -27,7 +27,7 @@ describe('Git HTTP process lifecycle', () => {
     start.mockClear();
     script = `process.stdout.write(${JSON.stringify(header + '0000')}); setInterval(() => {}, 1000);`;
     const module = await Test.createTestingModule({ controllers: [GitHttpController], providers: [GitHttpService,
-      { provide: RepositoriesService, useValue: { preparePublicGit: () => Promise.resolve('key') } },
+      { provide: RepositoriesService, useValue: { prepareGit: () => Promise.resolve('key') } },
       { provide: GitStorageService, useValue: { openUploadPack: start } },
     ] }).compile();
     app = module.createNestApplication();

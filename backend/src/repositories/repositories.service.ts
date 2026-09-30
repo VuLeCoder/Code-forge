@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma, type Repository } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { CreateRepositoryDto, UpdateRepositoryDto } from './repository.dto';
 import { RepositoryPolicy } from './repository.policy';
 import { GitStorageService } from './git-storage.service';
+import { TokensService } from '../tokens/tokens.service';
 
 @Injectable()
 export class RepositoriesService {
@@ -14,6 +15,7 @@ export class RepositoriesService {
     private readonly config: ConfigService,
     private readonly policy: RepositoryPolicy,
     private readonly storage: GitStorageService,
+    private readonly tokens: TokensService,
   ) {}
 
   private async activeOwner(tx: Prisma.TransactionClient, userId: string) {
@@ -26,10 +28,10 @@ export class RepositoriesService {
     }
   }
 
-  private async load(tx: Prisma.TransactionClient, owner: string, name: string) {
+  private async load(tx: Prisma.TransactionClient, owner: string, name: string, userId?: string) {
     return tx.repository.findFirst({
       where: { normalizedName: name.toLowerCase(), owner: { normalizedUsername: owner.toLowerCase() } },
-      include: { owner: { select: { username: true } } },
+      include: { owner: { select: { username: true } }, members: { where: { userId: userId ?? '00000000-0000-0000-0000-000000000000' } } },
     });
   }
 
@@ -82,7 +84,7 @@ export class RepositoriesService {
   }
 
   async read(owner: string, name: string, userId?: string, branchQuery?: { ref?: string; path?: string; tree?: boolean; blob?: boolean; image?: boolean; commits?: boolean; sha?: string; page?: string; snapshot?: string }) {
-    const repo = await this.load(this.db, owner, name);
+    const repo = await this.load(this.db, owner, name, userId);
     this.policy.assertRead(repo, userId);
     if (branchQuery?.sha !== undefined) this.storage.validateCommitSha(branchQuery.sha);
     if (branchQuery?.snapshot !== undefined) this.storage.validateCommitSha(branchQuery.snapshot);
@@ -93,11 +95,11 @@ export class RepositoriesService {
     // Serialize recovery so concurrent readers do not increment generation twice.
     const response = await this.db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM repositories WHERE id = ${repo.id}::uuid FOR UPDATE`;
-      let current = await tx.repository.findUniqueOrThrow({ where: { id: repo.id }, include: { owner: { select: { username: true } } } });
+      let current = await tx.repository.findUniqueOrThrow({ where: { id: repo.id }, include: { owner: { select: { username: true } }, members: { where: { userId: userId ?? '00000000-0000-0000-0000-000000000000' } } } });
       this.policy.assertRead(current, userId);
       if (!(await this.storage.exists(current.storageKey))) {
         await this.storage.create(current.storageKey, current.defaultBranch, false, current.name);
-        current = await tx.repository.update({ where: { id: current.id }, data: { storageGeneration: { increment: 1 } }, include: { owner: { select: { username: true } } } });
+        current = await tx.repository.update({ where: { id: current.id }, data: { storageGeneration: { increment: 1 } }, include: { owner: { select: { username: true } }, members: { where: { userId: userId ?? '00000000-0000-0000-0000-000000000000' } } } });
       }
       if (branchQuery) {
         if (branchQuery.sha !== undefined) {
@@ -166,13 +168,17 @@ export class RepositoriesService {
     return { repositories: rows.slice(0, 20).map((repo) => this.response(repo).repository), hasMore: rows.length > 20, page };
   }
 
-  async preparePublicGit(owner: string, name: string) {
-    const repo = await this.load(this.db, owner, name);
-    this.policy.assertRead(repo); // M3.6 is anonymous public transport, including for session owners.
+  async prepareGit(owner: string, name: string, authorization?: string) {
+    const userId = authorization === undefined ? undefined : await this.tokens.authenticate(authorization);
+    const repo = await this.load(this.db, owner, name, userId);
+    // Challenge every unavailable anonymous path identically, including missing repositories.
+    if (!userId && (!repo || !this.policy.permissions(repo).canRead)) throw new UnauthorizedException();
+    this.policy.assertRead(repo, userId);
     return this.db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM repositories WHERE id = ${repo.id}::uuid FOR UPDATE`;
-      const current = await tx.repository.findUnique({ where: { id: repo.id } });
-      this.policy.assertRead(current);
+      const current = await tx.repository.findUnique({ where: { id: repo.id }, include: { members: { where: { userId: userId ?? '00000000-0000-0000-0000-000000000000' } } } });
+      if (!userId && (!current || !this.policy.permissions(current).canRead)) throw new UnauthorizedException();
+      this.policy.assertRead(current, userId);
       if (!(await this.storage.exists(current.storageKey))) {
         await this.storage.create(current.storageKey, current.defaultBranch, false, current.name);
         await tx.repository.update({ where: { id: current.id }, data: { storageGeneration: { increment: 1 } } });
@@ -184,8 +190,8 @@ export class RepositoriesService {
   async listForOwner(ownerId: string, viewerId?: string) {
     const rows = await this.db.repository.findMany({
       where: { ownerId, status: 'ACTIVE', deletedAt: null,
-        ...(viewerId === ownerId ? {} : { visibility: 'PUBLIC' }) },
-      include: { owner: { select: { username: true } } }, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        ...(viewerId === ownerId ? {} : { OR: [{ visibility: 'PUBLIC' }, ...(viewerId ? [{ members: { some: { userId: viewerId } } }] : [])] }) },
+      include: { owner: { select: { username: true } }, members: { where: { userId: viewerId ?? '00000000-0000-0000-0000-000000000000' } } }, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
     });
     return rows.map((repo) => this.response(repo, viewerId).repository);
   }

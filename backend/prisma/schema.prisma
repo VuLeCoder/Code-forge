@@ -28,6 +28,11 @@ enum RepositoryStatus {
   DELETED
 }
 
+enum RepositoryMemberRole {
+  READ
+  WRITE
+}
+
 model User {
   id                 String       @id @default(uuid()) @db.Uuid
   username           String       @db.VarChar(39)
@@ -43,6 +48,8 @@ model User {
   updatedAt          DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
   sessions           Session[]
   repositories       Repository[]
+  tokens             PersonalAccessToken[]
+  memberships        RepositoryMember[]
 
   @@map("users")
 }
@@ -63,12 +70,55 @@ model Repository {
   deletedAt         DateTime?            @map("deleted_at") @db.Timestamptz(3)
   purgeAfter        DateTime?            @map("purge_after") @db.Timestamptz(3)
   owner             User                 @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  members           RepositoryMember[]
 
   @@unique([ownerId, normalizedName])
   @@index([ownerId, status, createdAt])
   @@index([visibility, status, createdAt])
   @@index([status, purgeAfter])
   @@map("repositories")
+}
+
+model RepositoryMember {
+  repositoryId String @map("repository_id") @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  role RepositoryMemberRole
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([repositoryId, userId])
+  @@index([userId])
+  @@map("repository_members")
+}
+
+model PersonalAccessToken {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  name String @db.VarChar(100)
+  tokenPrefix String @unique @map("token_prefix") @db.VarChar(20)
+  tokenHash String @map("token_hash") @db.VarChar(64)
+  scopes String[]
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  lastUsedAt DateTime? @map("last_used_at") @db.Timestamptz(3)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("personal_access_tokens")
+}
+
+model AuditLog {
+  id String @id @default(uuid()) @db.Uuid
+  actorId String @map("actor_id") @db.Uuid
+  action String @db.VarChar(80)
+  targetId String @map("target_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([actorId, createdAt])
+  @@map("audit_logs")
 }
 
 model Session {
