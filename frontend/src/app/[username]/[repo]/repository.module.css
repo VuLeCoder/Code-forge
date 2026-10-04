@@ -1,70 +1,597 @@
-.page { min-height: 70vh; padding-block: 38px 88px; } .page > p { color: var(--muted); margin: 14px 0 24px; line-height: 1.7; }
-.breadcrumb { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; color: var(--muted); font-size: .9rem; } .breadcrumb a { color: var(--brand-700); } .breadcrumb strong { color: var(--text); } .breadcrumb .badge { margin-left: 4px; }
-.header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; margin: 36px 0 28px; } .header h1 { font-size: clamp(1.8rem, 4vw, 2.5rem); letter-spacing: -.04em; overflow-wrap: anywhere; } .header p { color: var(--muted); margin-top: 10px; line-height: 1.7; overflow-wrap: anywhere; }
-.empty { display: grid; justify-items: center; gap: 14px; text-align: center; padding: 64px 28px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); } .icon { display: grid; place-items: center; width: 64px; height: 64px; color: var(--brand-700); background: var(--brand-50); border-radius: 18px; font-size: 1.3rem; font-weight: 800; } .empty h2 { font-size: 1.25rem; } .empty p { max-width: 520px; color: var(--muted); line-height: 1.7; } .details { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 10px; font-size: .85rem; } .details span { color: var(--muted); } .details strong { color: var(--text); }
-.breadcrumb > a, .breadcrumb > strong { min-width: 0; overflow-wrap: anywhere; }
-.bottom { display: flex; flex-wrap: wrap; overflow-wrap: anywhere; gap: 20px; margin-top: 20px; color: var(--brand-700); font-size: .85rem; font-weight: 700; }
-.notice { margin-bottom: 18px; padding: 14px 18px; border: 1px solid #f5c06a; border-radius: var(--radius-sm); background: #fff8e7; line-height: 1.6; }
-.readme { width: 100%; margin: 0; padding: 20px; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--border); border-radius: var(--radius-sm); }
-@media (max-width: 600px) { .empty { padding: 42px 20px; } }
-.branchBar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 20px 0; }
-.branchBar select { max-width: 100%; min-width: 0; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: inherit; font: inherit; }
-.source { min-width: 0; }
-.sourceTabs { display: flex; flex-wrap: wrap; gap: 20px; margin-block: 20px; border-bottom: 1px solid var(--border); }
-.sourceTabs a { padding-block: 12px; color: var(--brand-700); }
-.sourceTabs a[aria-current] { border-bottom: 3px solid var(--brand-700); font-weight: 700; }
-.commitPanel { min-width: 0; padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow-wrap: anywhere; }
-.commitPanel h2, .commitPanel h3, .commitPanel p { margin-block: 12px; }
-.commitPanel a { color: var(--brand-700); }
-.commitPanel button { margin: 12px 12px 12px 0; }
-.commitList { list-style: none; padding: 0; margin-block: 20px; }
-.commitList li { padding-block: 16px; border-bottom: 1px solid var(--border); }
-.commitList li > a { font-weight: 600; }
-.commitList p, .commitList code { color: var(--muted); font-size: .875rem; }
-.commitPagination { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 20px; }
-.commitDetails { display: grid; grid-template-columns: minmax(0, 160px) minmax(0, 1fr); gap: 12px; margin-block: 20px; }
-.commitDetails dt { color: var(--muted); }
-.commitDetails dd { margin: 0; min-width: 0; }
-.parentCommit { display: block; margin-bottom: 8px; }
-.commitMessage { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; padding: 16px; background: var(--brand-50); }
-@media (max-width: 600px) { .commitPanel { padding: 16px; } .commitDetails { grid-template-columns: minmax(0, 1fr); gap: 6px; } .commitDetails dd { margin-bottom: 10px; } }
-.source .breadcrumb { margin-bottom: 16px; overflow-wrap: anywhere; }
-.source .breadcrumb span { min-width: 0; }
-.parentLink { display: inline-block; margin-bottom: 14px; color: var(--brand-700); }
-.treeList { list-style: none; padding: 0; margin: 0 0 24px; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
-.treeList li { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
-.treeList li:last-child { border-bottom: 0; }
-.treeList a, .treeList span { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-.treeList a { color: var(--brand-700); font-weight: 600; }
-.treeList small { color: var(--muted); flex-shrink: 0; max-width: 45%; }
-.treeEmpty { padding: 24px 0; color: var(--muted); }
-.blobMeta { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; padding: 14px; border: 1px solid var(--border); overflow-wrap: anywhere; }
-.blobMeta strong { min-width: 0; } .blobMeta span, .blobMeta code { color: var(--muted); font-size: .85rem; }
-.codeScroll { max-width: 100%; overflow: auto; max-height: 75vh; border: 1px solid var(--border); border-top: 0; background: var(--surface); }
-.codeScroll:focus-visible { outline: 2px solid var(--brand-700); outline-offset: 2px; }
-.codeTable { border-collapse: collapse; width: 100%; font-size: .85rem; line-height: 1.6; text-align: left; }
-.codeTable td { white-space: pre; padding: 0 16px; vertical-align: top; tab-size: 4; }
-.lineNumber { position: sticky; left: 0; padding: 0 12px; min-width: 48px; width: 1%; text-align: right; font-weight: 400; color: var(--muted); background: var(--surface); border-right: 1px solid var(--border); user-select: none; font-family: monospace; }
-.readmePanel { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); overflow: hidden; }
-.readmePanel > p, .readmePanel > div:not(.blobMeta):not(.markdown) { padding: 18px; }
-.readmePanel .blobMeta { border: 0; border-bottom: 1px solid var(--border); }
-.readmePanel a { color: var(--brand-700); text-decoration: underline; }
-.markdown { padding: 24px; line-height: 1.7; overflow-wrap: anywhere; min-width: 0; }
-.markdown > * { margin-block: 0 16px; }
-.markdown :is(h1,h2,h3,h4,h5,h6) { margin-block: 24px 12px; line-height: 1.3; scroll-margin-top: 24px; }
-.markdown > :first-child { margin-top: 0; }
-.markdown ul, .markdown ol { padding-left: 24px; }
-.markdown pre { padding: 16px; background: var(--brand-50); overflow: auto; max-width: 100%; white-space: pre; }
-.markdown code { font-size: .9em; }
-.markdown blockquote { padding-left: 16px; border-left: 4px solid var(--border); color: var(--muted); }
-.markdown table { display: block; max-width: 100%; overflow: auto; border-collapse: collapse; }
-.markdown th, .markdown td { border: 1px solid var(--border); padding: 8px 12px; }
-.markdown img { max-width: 100%; height: auto; }
-.imageNotice { color: var(--muted); font-size: .9rem; }
-@media (max-width: 600px) { .markdown { padding: 16px; } }
-.cloneDialog { margin: auto; width: min(36rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow: auto; padding: 1.5rem; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); }
-.cloneDialog::backdrop { background: rgb(0 0 0 / 45%); }
-.cloneDialog p { margin: 1rem 0; }
-.cloneDialog label { display: block; margin-bottom: .5rem; }
-.cloneDialog input { width: 100%; min-width: 0; padding: .7rem; margin-bottom: .75rem; }
-.cloneDialog pre { padding: .75rem; overflow: auto; border: 1px solid var(--border); border-radius: 6px; }
+.page {
+  min-height: 70vh;
+  padding-block: 38px 88px;
+}
+.page > p {
+  color: var(--muted);
+  margin: 14px 0 24px;
+  line-height: 1.7;
+}
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.breadcrumb a {
+  color: var(--brand-700);
+}
+.breadcrumb strong {
+  color: var(--text);
+}
+.breadcrumb .badge {
+  margin-left: 4px;
+}
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 36px 0 28px;
+}
+.header h1 {
+  font-size: clamp(1.8rem, 4vw, 2.5rem);
+  letter-spacing: -0.04em;
+  overflow-wrap: anywhere;
+}
+.header p {
+  color: var(--muted);
+  margin-top: 10px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.empty {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  text-align: center;
+  padding: 64px 28px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.icon {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  color: var(--brand-700);
+  background: var(--brand-50);
+  border-radius: 18px;
+  font-size: 1.3rem;
+  font-weight: 800;
+}
+.empty h2 {
+  font-size: 1.25rem;
+}
+.empty p {
+  max-width: 520px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.details {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 10px;
+  font-size: 0.85rem;
+}
+.details span {
+  color: var(--muted);
+}
+.details strong {
+  color: var(--text);
+}
+.breadcrumb > a,
+.breadcrumb > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.bottom {
+  display: flex;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+  gap: 20px;
+  margin-top: 20px;
+  color: var(--brand-700);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.notice {
+  margin-bottom: 18px;
+  padding: 14px 18px;
+  border: 1px solid #f5c06a;
+  border-radius: var(--radius-sm);
+  background: #fff8e7;
+  line-height: 1.6;
+}
+.readme {
+  width: 100%;
+  margin: 0;
+  padding: 20px;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+@media (max-width: 600px) {
+  .empty {
+    padding: 42px 20px;
+  }
+}
+.branchBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 20px 0;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.branchSelectGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.branchLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+.branchIcon {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.branchBar select {
+  max-width: 100%;
+  min-width: 160px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+.branchBar select:hover:not(:disabled) {
+  border-color: var(--brand-600);
+}
+.commitBadgeGroup {
+  display: inline-flex;
+  align-items: center;
+  background: var(--brand-50);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.commitCode {
+  padding: 4px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8125rem;
+  color: var(--brand-700);
+  font-weight: 600;
+}
+.copyShaBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--border);
+  color: var(--muted);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+.copyShaBtn:hover {
+  color: var(--text);
+  background-color: var(--brand-100);
+}
+.source {
+  min-width: 0;
+}
+.sourceTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  margin-block: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.sourceTabs a {
+  padding-block: 12px;
+  color: var(--brand-700);
+}
+.sourceTabs a[aria-current] {
+  border-bottom: 3px solid var(--brand-700);
+  font-weight: 700;
+}
+.commitPanel {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+}
+.commitPanel h2,
+.commitPanel h3,
+.commitPanel p {
+  margin-block: 12px;
+}
+.commitPanel a {
+  color: var(--brand-700);
+}
+.commitPanel button {
+  margin: 12px 12px 12px 0;
+}
+.commitList {
+  list-style: none;
+  padding: 0;
+  margin-block: 20px;
+}
+.commitList li {
+  padding-block: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.commitList li > a {
+  font-weight: 600;
+}
+.commitList p,
+.commitList code {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+.commitPagination {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+}
+.commitDetails {
+  display: grid;
+  grid-template-columns: minmax(0, 160px) minmax(0, 1fr);
+  gap: 12px;
+  margin-block: 20px;
+}
+.commitDetails dt {
+  color: var(--muted);
+}
+.commitDetails dd {
+  margin: 0;
+  min-width: 0;
+}
+.parentCommit {
+  display: block;
+  margin-bottom: 8px;
+}
+.commitMessage {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+  padding: 16px;
+  background: var(--brand-50);
+}
+@media (max-width: 600px) {
+  .commitPanel {
+    padding: 16px;
+  }
+  .commitDetails {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+  .commitDetails dd {
+    margin-bottom: 10px;
+  }
+}
+.sourceNav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+  padding: 8px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+}
+.source .breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-bottom: 0;
+  overflow-wrap: anywhere;
+}
+.source .breadcrumb span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.source .breadcrumb a {
+  color: var(--brand-700);
+  font-weight: 500;
+  text-decoration: none;
+}
+.source .breadcrumb a:hover {
+  text-decoration: underline;
+}
+.source .breadcrumb strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.parentLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--brand-700);
+  font-size: 0.85rem;
+  font-weight: 500;
+  text-decoration: none;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: var(--brand-50);
+  transition: background-color 0.15s ease;
+}
+.parentLink:hover {
+  background-color: var(--brand-100);
+}
+.treeList {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface);
+}
+.treeList li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  transition: background-color 0.12s ease;
+}
+.treeList li:hover {
+  background-color: #f8fafc;
+}
+.treeList li:last-child {
+  border-bottom: 0;
+}
+.treeItemMain {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+.entryIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+}
+.folderIcon {
+  color: #3b82f6;
+}
+.fileIcon {
+  color: #64748b;
+}
+.treeList a,
+.treeList span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.treeList a {
+  color: var(--text);
+  font-weight: 500;
+  text-decoration: none;
+}
+.treeList a:hover {
+  color: var(--brand-700);
+  text-decoration: underline;
+}
+.treeList small {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  flex-shrink: 0;
+  max-width: 45%;
+}
+.treeEmpty {
+  padding: 24px 0;
+  color: var(--muted);
+}
+.blobMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: baseline;
+  padding: 14px;
+  border: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.blobMeta strong {
+  min-width: 0;
+}
+.blobMeta span,
+.blobMeta code {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.codeScroll {
+  max-width: 100%;
+  overflow: auto;
+  max-height: 75vh;
+  border: 1px solid var(--border);
+  border-top: 0;
+  background: var(--surface);
+}
+.codeScroll:focus-visible {
+  outline: 2px solid var(--brand-700);
+  outline-offset: 2px;
+}
+.codeTable {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  text-align: left;
+}
+.codeTable td {
+  white-space: pre;
+  padding: 0 16px;
+  vertical-align: top;
+  tab-size: 4;
+}
+.lineNumber {
+  position: sticky;
+  left: 0;
+  padding: 0 12px;
+  min-width: 48px;
+  width: 1%;
+  text-align: right;
+  font-weight: 400;
+  color: var(--muted);
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  user-select: none;
+  font-family: monospace;
+}
+.readmePanel {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  overflow: hidden;
+}
+.readmePanel > p,
+.readmePanel > div:not(.blobMeta):not(.markdown) {
+  padding: 18px;
+}
+.readmePanel .blobMeta {
+  border: 0;
+  border-bottom: 1px solid var(--border);
+}
+.readmePanel a {
+  color: var(--brand-700);
+  text-decoration: underline;
+}
+.markdown {
+  padding: 24px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.markdown > * {
+  margin-block: 0 16px;
+}
+.markdown :is(h1, h2, h3, h4, h5, h6) {
+  margin-block: 24px 12px;
+  line-height: 1.3;
+  scroll-margin-top: 24px;
+}
+.markdown > :first-child {
+  margin-top: 0;
+}
+.markdown ul,
+.markdown ol {
+  padding-left: 24px;
+}
+.markdown pre {
+  padding: 16px;
+  background: var(--brand-50);
+  overflow: auto;
+  max-width: 100%;
+  white-space: pre;
+}
+.markdown code {
+  font-size: 0.9em;
+}
+.markdown blockquote {
+  padding-left: 16px;
+  border-left: 4px solid var(--border);
+  color: var(--muted);
+}
+.markdown table {
+  display: block;
+  max-width: 100%;
+  overflow: auto;
+  border-collapse: collapse;
+}
+.markdown th,
+.markdown td {
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+}
+.markdown img {
+  max-width: 100%;
+  height: auto;
+}
+.imageNotice {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+@media (max-width: 600px) {
+  .markdown {
+    padding: 16px;
+  }
+}
+.cloneDialog {
+  margin: auto;
+  width: min(36rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+}
+.cloneDialog::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+.cloneDialog p {
+  margin: 1rem 0;
+}
+.cloneDialog label {
+  display: block;
+  margin-bottom: 0.5rem;
+}
+.cloneDialog input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.7rem;
+  margin-bottom: 0.75rem;
+}
+.cloneDialog pre {
+  padding: 0.75rem;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
