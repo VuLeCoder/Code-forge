@@ -9,9 +9,9 @@ Suggested comment/update:
 ```markdown
 ### Cập nhật trạng thái (2026-10-25)
 
-- Nhánh `thviet` hiện ở commit `1227730`.
+- Nhánh `thviet` có code commit mới nhất `1227730`; HEAD hiện tại là commit tài liệu `eac190c`.
 - Run `40138087574` trên `7e0aa27` trước đó pass bộ acceptance hosted.
-- Runs `40139229848` (`d1019a2`), `40140118957` (`1227730`) và `40140367864` (`269d008`, docs-only) đều fail ở bước `backend test:e2e`. Log công khai chỉ cho biết exit code 1, chưa xác định được test/cause. Không suy luận từ thời lượng chạy.
+- Runs `40139229848` (`d1019a2`), `40140118957` (`1227730`), `40140367864` (`269d008`, docs-only) và `40140645289` (`eac190c`, docs-only) đều fail ở bước `backend test:e2e`. API công khai xác nhận job lỗi mới nhất `121011483134`, nhưng tải log trả HTTP 403, nên chưa xác định được test/cause. Không suy luận từ thời lượng chạy.
 - Commit `d1019a2` thêm PostgreSQL failure injection sau khi Git ref được cập nhật, kiểm tra HTTP `202`, merge commit hai parent, reconciliation, actor attribution, một audit và retry idempotent. Test chưa được chấp nhận đến khi E2E xanh.
 - Commit `1227730` bổ sung enforce `COOKIE_SECURE=true` cho production; backend unit (14 suite/84 test), lint, typecheck, build đã đạt local.
 
@@ -36,9 +36,9 @@ Suggested comment/update:
 ```markdown
 ### Cập nhật trạng thái (2026-10-25)
 
-- Branch `thviet`, latest pushed commit `1227730`.
+- Branch `thviet`, latest pushed code commit `1227730`; docs-only HEAD is `eac190c`.
 - Hosted run `40138087574` trên `7e0aa27` đã pass toàn bộ gates của revision đó.
-- Runs `40139229848` (`d1019a2`), `40140118957` (`1227730`) và `40140367864` (`269d008`, docs-only) fail tại `backend test:e2e`. Tên test/stack trace chưa lấy được do Actions log cần phiên đăng nhập. Đây là blocker mới và cần xử lý trước khi tuyên bố CI xanh.
+- Runs `40139229848` (`d1019a2`), `40140118957` (`1227730`), `40140367864` (`269d008`, docs-only) và `40140645289` (`eac190c`, docs-only) fail tại `backend test:e2e`. API công khai xác nhận job lỗi mới nhất `121011483134`, nhưng trả HTTP 403 khi tải log; tên test/stack trace chưa biết. Đây là blocker mới và cần xử lý trước khi tuyên bố CI xanh.
 - Docker Desktop có cài nhưng dashboard hiện “Turning off the Docker Engine…”; local image/runtime smoke chưa chạy. Không reset hoặc xóa container/volume để chữa trạng thái này.
 - Chưa có smoke trên Vercel/Render/Neon; URLs, proxy headers, Render-direct Git payload và source-reset recovery đều chưa được xác minh.
 

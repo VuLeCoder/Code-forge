@@ -1,11 +1,11 @@
 # Code Forge — remaining work breakdown
 
-State date: 2026-10-25. Branch: `thviet`. Latest pushed code commit: `1227730`; current branch HEAD is docs-only commit `269d008`. This register decomposes the approved P0–P8 plan; it does not narrow or replace that scope.
+State date: 2026-10-25. Branch: `thviet`. Latest pushed code commit: `1227730`; current branch HEAD is docs-only commit `eac190c`. This register decomposes the approved P0–P8 plan; it does not narrow or replace that scope.
 
 ## Current verified state
 
 - Previous fully green hosted workflow: `40138087574` on `7e0aa27`.
-- Hosted workflows `40139229848` on `d1019a2`, `40140118957` on `1227730`, and `40140367864` on docs-only `269d008` failed at step 12 (`backend test:e2e`). Public unauthenticated output gives only exit code 1; durations are not proof of which test failed.
+- Hosted workflows `40139229848` on `d1019a2`, `40140118957` on `1227730`, `40140367864` on docs-only `269d008`, and `40140645289` on docs-only `eac190c` failed at step 12 (`backend test:e2e`). Public job metadata confirms the failed step; the latest job is `121011483134`. Log download returns HTTP 403; the exact test and stack trace remain unknown. Durations are not diagnostic evidence.
 - Local on `1227730`: backend typecheck, backend lint/build, and all unit tests (14 suites/84 tests) pass.
 - New merge-recovery E2E still requires hosted verification; the production secure-cookie validation and focused environment suite (8/8) pass locally, with hosted E2E still failing.
 - Docker Desktop is installed, but its dashboard reports “Turning off the Docker Engine…”; do not reset containers or volumes. Local image/PostgreSQL smoke remains unverified.
@@ -19,7 +19,7 @@ State date: 2026-10-25. Branch: `thviet`. Latest pushed code commit: `1227730`; 
 - **Dependency:** Start here; do not infer the failing case from run duration.
 - **Writable scope:** `backend/test/*.e2e-spec.ts` and the smallest directly implicated backend source/test files.
 - **Forbidden:** Existing dev/cloud database, secrets, broad refactors, unrelated UI or migration files.
-- **Actions:** Obtain failed-step stdout for runs `40139229848`/`40140118957`/`40140367864`, or rerun the exact E2E suite in an isolated PostgreSQL/Git environment; identify the failing test; reproduce once; make the smallest evidence-based correction.
+- **Actions:** Obtain authenticated failed-step stdout for runs `40139229848`/`40140118957`/`40140367864`/`40140645289`, or rerun the exact E2E suite in an isolated PostgreSQL/Git environment; identify the failing test; reproduce once; make the smallest evidence-based correction. Public GitHub API log download currently returns HTTP 403; `gh` is not installed and local Docker/PostgreSQL are unavailable.
 - **Acceptance:** Exact failing case and cause recorded; `corepack pnpm --filter backend test:e2e` passes against isolated test PostgreSQL and temporary Git storage on the fix commit; `git diff --check` passes.
 
 ### T1 — Accept merge ref-update / metadata-recovery path
