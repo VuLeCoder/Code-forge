@@ -48,3 +48,62 @@ describe('AdminService account locking', () => {
     expect(fixture.transaction).not.toHaveBeenCalled();
   });
 });
+
+describe('AdminService restore and audit privacy', () => {
+  const repositoryId = '33333333-3333-4333-8333-333333333333';
+  const actorId = '22222222-2222-4222-8222-222222222222';
+
+  it('rejects an expired restore without updating or auditing and releases its repository lock', async () => {
+    const release = jest.fn().mockResolvedValue(undefined);
+    const findRepository = jest.fn().mockResolvedValue({
+      id: repositoryId,
+      status: 'DELETED',
+      purgeAfter: new Date(Date.now() - 1000),
+    });
+    const updateRepository = jest.fn();
+    const createAudit = jest.fn();
+    const tx = { repository: { findUnique: findRepository, update: updateRepository }, auditLog: { create: createAudit } };
+    const db = { $transaction: jest.fn((callback: (client: unknown) => unknown) => Promise.resolve(callback(tx))) };
+    const locks = { acquire: jest.fn().mockResolvedValue({ release }) };
+    const service = new AdminService(db as unknown as PrismaService, locks as unknown as RepositoryLockService);
+
+    await expect(service.restoreRepository(actorId, repositoryId)).rejects.toThrow(ConflictException);
+
+    expect(locks.acquire).toHaveBeenCalledWith(repositoryId);
+    expect(findRepository).toHaveBeenCalledWith({ where: { id: repositoryId } });
+    expect(updateRepository).not.toHaveBeenCalled();
+    expect(createAudit).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns only allowlisted audit details and omits secret or source-like keys', async () => {
+    const db = {
+      auditLog: {
+        findMany: jest.fn().mockResolvedValue([{
+          id: 'audit-1',
+          actorId: null,
+          action: 'REPOSITORY_UPDATED',
+          targetId: repositoryId,
+          details: {
+            repositoryId,
+            role: 'WRITE',
+            token: 'cfg_sensitive',
+            password: 'sensitive-password',
+            diff: 'private source content',
+          },
+        }]),
+        count: jest.fn().mockResolvedValue(1),
+      },
+      user: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    const service = new AdminService(db as unknown as PrismaService, {} as RepositoryLockService);
+
+    const result = await service.listAudit({});
+
+    expect(result.audit).toHaveLength(1);
+    expect(result.audit[0]?.details).toEqual({ repositoryId, role: 'WRITE' });
+    expect(JSON.stringify(result.audit)).not.toContain('cfg_sensitive');
+    expect(JSON.stringify(result.audit)).not.toContain('sensitive-password');
+    expect(JSON.stringify(result.audit)).not.toContain('private source content');
+  });
+});
