@@ -23,6 +23,7 @@ export default async function setup() {
   const env: NodeJS.ProcessEnv = { ...process.env, DATABASE_URL: url.toString(), DATABASE_URL_UNPOOLED: url.toString(), GIT_STORAGE_PATH: join(root, 'git'),
     NODE_ENV: 'test', PORT: '4112', API_PREFIX: 'api/v1', FRONTEND_ORIGIN: 'http://localhost:3112',
     JWT_ACCESS_SECRET: randomBytes(32).toString('hex'), COOKIE_SECURE: 'false', COOKIE_SAME_SITE: 'lax',
+    RATE_LIMIT_PROXY_SECRET: randomBytes(32).toString('hex'),
     BACKEND_URL: 'http://127.0.0.1:4112', APP_ORIGIN: 'http://localhost:3112' };
   const children: ChildProcess[] = [];
   const logPath = join(root, 'servers.log');

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withBackendClientIp } from "@/lib/backend-client-ip";
 
 const validOwner = (value: string) => /^[a-zA-Z0-9][a-zA-Z0-9._-]{1,37}[a-zA-Z0-9]$/.test(value);
 const validRepo = (value: string) => value.length <= 100 && /^(?!.*\.\.)(?!.*\.git$)[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/i.test(value);
@@ -34,11 +35,11 @@ async function proxy(request: NextRequest, context: Context) {
       cache: "no-store",
       redirect: "error",
       signal: AbortSignal.timeout(30_000),
-      headers: {
+      headers: withBackendClientIp(request, {
         cookie: request.headers.get("cookie") ?? "",
         origin,
         ...(request.method === "POST" ? { "content-type": "application/json" } : {}),
-      },
+      }),
       ...(request.method === "POST" ? { body: await request.text() } : {}),
     });
     return new NextResponse(upstream.body, { status: upstream.status, headers });

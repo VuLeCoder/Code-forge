@@ -6,20 +6,13 @@ Tài liệu này mô tả cách dựng bản demo miễn phí bằng Vercel (fro
 
 Tạo image và chuẩn bị hướng dẫn không chứng minh dịch vụ cloud đã được provision hay smoke test. Trước khi công bố URL, điền release commit, URL thật, thời điểm và kết quả từng bước trong [cloud smoke checklist](./cloud-smoke-checklist.md). Không ghi secret vào repo, ticket hoặc output kiểm thử.
 
-### Bằng chứng hiện tại (2026-10-24)
+### Bằng chứng hiện tại
 
-Đây là kết quả của working tree local, không phải CI run hoặc release commit:
+Mã được kiểm chứng trên commit `4a88d41` của nhánh `thviet`; docs-only commit `9ab5c0f` theo sau. Hosted workflow [40129005632](https://github.com/VuLeCoder/Code-forge/actions/runs/40129005632) đạt toàn bộ bước: frozen install, Prisma generate, backend unit/E2E với PostgreSQL 17 service, lint, typecheck, build, browser/full-stack, build và contents smoke cho cả hai image, migration deploy vào database disposable và kiểm tra whitespace.
 
-- `corepack pnpm install --frozen-lockfile` bằng đúng pnpm 12.3.4: đạt.
-- Backend HTTP + PostgreSQL integration: lần chạy trước có 2 suites, 19 tests đạt trên PostgreSQL 17 disposable; test database tách riêng và không phải dữ liệu cloud. Không thể chạy lại hiện tại vì Docker/PostgreSQL không nhận kết nối.
-- Backend unit: 13 suites, 71 tests đạt trên working tree hiện tại.
-- Lint, typecheck và full workspace build: đạt trên working tree hiện tại ngày 2026-10-25.
-- Security headers: đã cấu hình; request `GET /login` được kiểm tra và response headers xác nhận.
-- Playwright browser suite: 42/42 đạt trên local Chromium đặt ở D:, gồm admin, create/compare PR, stale prevention, merge conflict và reconciliation lockout; full-stack suite chưa chạy.
-- Admin bootstrap CLI + PostgreSQL test: đã viết theo lựa chọn đã duyệt nhưng chưa chạy do Docker/PostgreSQL hiện không truy cập được.
-- Docker image build/smoke, CI run và cloud smoke: chưa chạy. CI workflow hiện build/smoke image backend chính; **chưa build hoặc smoke `backend/Dockerfile.migrate`**. Docker daemon không phản hồi trong lần kiểm tra hiện tại.
+Kiểm tra local trên working tree hiện tại: lint, typecheck, build; backend unit 14 suites / 81 tests; browser 43/43; helper ký IP 2/2. PR API/UI full-stack specs và thay đổi guard cho admin bootstrap chưa được xác minh trên PostgreSQL local; `localhost:5433` không phản hồi và Docker Desktop hiện hiển thị engine `stopping`, nên tôi giữ nguyên trạng thái đó. PostgreSQL E2E hiện chỉ được xác nhận bởi hosted CI run `40129005632` trên code commit trước đó.
 
-Chỉ chuyển trạng thái sang đạt sau khi có output mới theo release commit. Không dùng kết quả của một working tree cũ để chứng minh commit khác đã qua gate.
+Các bằng chứng này xác nhận CI và image, không chứng minh deployment cloud, nâng cấp từ snapshot production-like, proxy/TLS, Git HTTP trực tiếp Render hoặc source recovery đã được nghiệm thu. Chỉ đánh dấu cloud release đạt sau khi điền kết quả thật theo release commit vào [cloud smoke checklist](./cloud-smoke-checklist.md).
 
 ## Kiến trúc và giới hạn
 
@@ -44,13 +37,15 @@ Chỉ chuyển trạng thái sang đạt sau khi có output mới theo release c
 | `JWT_ACCESS_SECRET` | Secret ngẫu nhiên ≥32 ký tự | Dùng secret manager của host; không commit |
 | `COOKIE_SECURE` | `true` | HTTPS production |
 | `COOKIE_SAME_SITE` | `lax` | Phải cân nhắc cookie và domain thực tế trước khi đổi |
+| `TRUST_PROXY_HOPS` | `1` trên Render sau khi xác nhận topology | Số hop Express tin cậy; không bật blanket trust. Mặc định local là `0`. |
+| `RATE_LIMIT_PROXY_SECRET` | Secret ngẫu nhiên ≥32 ký tự; cùng giá trị tại Vercel và Render | Ký IP do Vercel cung cấp khi Next proxy gọi backend; chỉ lưu trong secret manager, không expose client-side. |
 | `MAX_REPOSITORIES_PER_USER` | `20` | Quota MVP toàn cục |
 | `MAX_REPOSITORY_BYTES` | `524288000` | 500 MiB |
 | `MAX_FILE_BYTES` | `26214400` | 25 MiB |
 | `MAX_PUSH_BYTES` | `104857600` | 100 MiB |
 | `SOFT_DELETE_RETENTION_DAYS` | `30` | Thời gian restore repo đã xóa mềm |
 
-Vercel cần thêm biến server-side `BACKEND_URL=https://<render-host>` (không gồm `/api/v1`, vì các Next routes tự thêm prefix). Giữ secret này ngoài client bundle.
+Vercel cần thêm biến server-side `BACKEND_URL=https://<render-host>` (không gồm `/api/v1`, vì các Next routes tự thêm prefix) và cùng `RATE_LIMIT_PROXY_SECRET` như backend. Vercel ghi đè `X-Forwarded-For` bằng IP request client ([tài liệu request headers](https://vercel.com/docs/headers/request-headers)); Next proxy chỉ gửi IP đã được ký HMAC, backend bỏ qua header giả/không hợp lệ. Giữ secrets ngoài client bundle. Nếu dùng Vercel phía sau một proxy khác, header/IP contract phải được đánh giá lại trước khi deploy.
 
 Các biến TTL mặc định hiện tại nằm trong `backend/.env.example`; chỉ override khi có acceptance test cho cấu hình mới. Không copy giá trị secret mẫu sang cloud.
 
@@ -58,7 +53,7 @@ Các biến TTL mặc định hiện tại nằm trong `backend/.env.example`; c
 
 ### 1. Chuẩn bị
 
-1. Chọn release commit đã qua CI: lint, typecheck, build, unit, HTTP integration, browser/full-stack, backend Docker image smoke và `git diff --check`. Xem run thật, không suy ra kết quả từ workflow file. Migration image hiện chưa có trong workflow; trước release phải build `backend/Dockerfile.migrate` và chạy thử với database disposable đúng phiên bản PostgreSQL.
+1. Chọn release commit đã qua CI: lint, typecheck, build, unit, HTTP integration, browser/full-stack, backend/migration Docker image smoke, migration deploy vào PostgreSQL disposable và `git diff --check`. Xem run thật, không suy ra kết quả từ workflow file. Trước release vẫn phải diễn tập backup và nâng cấp trên bản sao metadata có cấu hình/version gần với cloud đích; CI disposable không thay thế bước đó.
 2. Tạo Neon database riêng cho demo. Lưu cả pooled lẫn direct connection string trong secret manager. Không chạy migration trên database không xác định chủ sở hữu.
 3. Tạo Render backend service từ repo với Dockerfile path `backend/Dockerfile`, root/build context là thư mục gốc repo. Cấp `/data/git` làm storage path. Nếu plan không hỗ trợ persistent disk, công bố source reset ngay trong UI.
 4. Tạo Vercel project với root `frontend`. Đặt `BACKEND_URL` tới backend Render origin, không gồm `/api/v1` nếu frontend proxy tự thêm prefix.

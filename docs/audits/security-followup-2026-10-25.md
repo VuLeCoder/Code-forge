@@ -1,7 +1,7 @@
 # Security follow-up review
 
 Date: 2026-10-25
-Reviewed revision: `thviet` at `1e2a2f5` plus working-tree changes visible during review
+Reviewed revision: `thviet` at `9ab5c0f` plus working-tree changes visible during review
 Review type: static, read-only inspection. This is not a penetration test or release certification.
 
 ## Confirmed security findings
@@ -26,12 +26,14 @@ No new confirmed authentication bypass, cross-repository access, Git authorizati
 
 ## Deployment-dependent hardening to verify
 
-### Reverse-proxy-aware rate limiting is not configured in the application
+### Reverse-proxy-aware rate limiting needs cloud verification
 
-- **Severity:** Unconfirmed availability/configuration risk; no CVSS assigned.
+- **Severity:** Medium, conditional on deployment topology; estimated CVSS 5.3 for temporary availability impact.
 - **Evidence:** `backend/src/app.module.ts` installs a global Nest throttler (100 requests/minute) and `backend/src/main.ts` does not configure Express `trust proxy`. The Git HTTP handlers also share the global rate limit, with an additional four-active-process cap in `git-http.service.ts`.
 - **Inference:** If the Render deployment terminates requests through a proxy whose client address is not represented by the socket peer, the default tracker may treat many visitors as the same IP. This could cause cross-user throttling; the exact behavior depends on Render's request path and proxy headers and was not tested.
-- **Action:** On the deployed service, inspect trusted proxy behavior without logging credentials. Configure only the hosting provider's documented proxy hop count/range, or provide an explicit validated tracker. Add endpoint-specific Git and auth limits, then verify that spoofed `X-Forwarded-For` cannot evade them and independent clients do not share one bucket.
+- **Remediation in working tree:** All 17 Next API routes and the two server-rendered backend fetches sign the platform-supplied client IP with `RATE_LIMIT_PROXY_SECRET`. The backend tracker accepts only valid HMAC-SHA256 signatures and otherwise falls back to Express `req.ip`/socket peer. `TRUST_PROXY_HOPS` is explicit, bounded to 0–10, and defaults to 0; production requires a 32-character signing secret. Backend unit tests pass 81/81, frontend helper tests 2/2, and browser suite 43/43 locally. Vercel's official request-header documentation says it overwrites `X-Forwarded-For` with the client IP to prevent spoofing ([Request headers](https://vercel.com/docs/headers/request-headers)).
+- **Still required:** Set the same secret in Vercel and Render; verify through a deployed request that independent clients map to independent buckets; spoof `X-Forwarded-For` and `X-CodeForge-Client-IP` and confirm they cannot choose a bucket; measure Render's proxy path before setting trust hops. The local machine cannot establish those cloud facts.
+- **Scope note:** Direct Render API/Git requests and the local Next Git proxy are not signed by the web proxy helper; their client-IP attribution depends on the verified hosting socket/proxy topology and remains a deployment check.
 
 ## Existing controls observed
 
@@ -46,5 +48,5 @@ No new confirmed authentication bypass, cross-repository access, Git authorizati
 ## Commands and limitations
 
 - Read-only source inspection with `Get-Content`/`rg` over auth, invitations, repository policy/service, Git transport/storage/hook, PR service/controller, admin, maintenance, configuration and API exception handling.
-- No destructive payloads, real data, credentials, cloud service, Docker daemon, or production endpoint was used.
+- No destructive payloads, real data, credentials, cloud service, or production endpoint was used. A local `docker ps` probe did not return during the check window, so local PostgreSQL integration was not established.
 - PostgreSQL-backed concurrency and merge-reconciliation behavior remains unverified because the local PostgreSQL listener was unavailable. Cloud proxy/rate-limit behavior, Docker images, TLS edge headers and hosted CI remain unverified.

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withBackendClientIp } from "@/lib/backend-client-ip";
 
 type Context = { params: Promise<{ path: string[] }> };
 
@@ -20,7 +21,7 @@ async function forward(request: NextRequest, context: Context) {
       `${(process.env.BACKEND_URL ?? "http://localhost:4000").replace(/\/$/, "")}/api/v1/admin/${path}${request.nextUrl.search}`,
       {
         method: request.method,
-        headers,
+        headers: withBackendClientIp(request, headers),
         ...(request.method === "GET" ? {} : { body: await request.text() }),
         cache: "no-store",
         signal: AbortSignal.timeout(30_000),

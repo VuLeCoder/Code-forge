@@ -16,6 +16,11 @@ describe('Admin bootstrap CLI + PostgreSQL', () => {
     originalUrl = process.env.DATABASE_URL;
     originalUnpooledUrl = process.env.DATABASE_URL_UNPOOLED;
     if (!originalUrl) throw new Error('DATABASE_URL is required for integration tests');
+    const target = new URL(originalUrl);
+    const databaseName = decodeURIComponent(target.pathname.slice(1));
+    if (!['localhost', '127.0.0.1', '[::1]'].includes(target.hostname) || !databaseName.endsWith('_test')) {
+      throw new Error('Admin bootstrap integration tests require a local PostgreSQL database whose name ends in _test.');
+    }
     admin = new PrismaClient({ datasourceUrl: originalUrl });
     await admin.$executeRawUnsafe(`CREATE SCHEMA "${schema}"`);
     schemaCreated = true;

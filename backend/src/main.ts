@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 // cookie-parser exports a CommonJS function; synthetic default imports fail at runtime.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -9,9 +10,10 @@ import cookieParser = require('cookie-parser');
 import { AppModule } from './app.module';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const config = app.get(ConfigService);
 
+  app.set('trust proxy', config.getOrThrow<number>('TRUST_PROXY_HOPS'));
   app.use(cookieParser());
   const prefix = config.getOrThrow<string>('API_PREFIX');
   app.setGlobalPrefix(prefix);

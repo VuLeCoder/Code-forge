@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation";
+import { headers } from "next/headers";
 import styles from "./profile.module.css";
 import { RepositoryList } from "./repository-list";
 import type { RepositorySummary } from "@/lib/repositories";
+import { withBackendClientIp } from "@/lib/backend-client-ip";
 
 export default async function ProfilePage({ params, searchParams }: { params: Promise<{ username: string }>; searchParams: Promise<{ deleted?: string }> }) {
   const { username } = await params;
@@ -10,7 +12,7 @@ export default async function ProfilePage({ params, searchParams }: { params: Pr
   let response: Response;
   try {
     response = await fetch(`${process.env.BACKEND_URL ?? "http://localhost:4000"}/api/v1/users/${encodeURIComponent(username)}`, {
-      cache: "no-store", signal: AbortSignal.timeout(10_000),
+      headers: withBackendClientIp(await headers()), cache: "no-store", signal: AbortSignal.timeout(10_000),
     });
   } catch {
     throw new Error("Không thể tải hồ sơ lúc này.");

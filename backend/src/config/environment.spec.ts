@@ -42,6 +42,22 @@ describe('validateEnvironment', () => {
     );
   });
 
+  it('defaults proxy trust to zero and validates an explicit hop count', () => {
+    expect(validateEnvironment(validConfig).TRUST_PROXY_HOPS).toBe(0);
+    expect(validateEnvironment({ ...validConfig, TRUST_PROXY_HOPS: '2' }).TRUST_PROXY_HOPS).toBe(2);
+    expect(() => validateEnvironment({ ...validConfig, TRUST_PROXY_HOPS: '-1' })).toThrow('TRUST_PROXY_HOPS');
+    expect(() => validateEnvironment({ ...validConfig, TRUST_PROXY_HOPS: '11' })).toThrow('TRUST_PROXY_HOPS');
+    expect(() => validateEnvironment({ ...validConfig, TRUST_PROXY_HOPS: '1.5' })).toThrow('TRUST_PROXY_HOPS');
+  });
+
+  it('requires a sufficiently strong signed proxy secret only in production', () => {
+    expect(() => validateEnvironment({ ...validConfig, NODE_ENV: 'production' })).toThrow('RATE_LIMIT_PROXY_SECRET');
+    expect(() => validateEnvironment({ ...validConfig, RATE_LIMIT_PROXY_SECRET: 'too-short' })).toThrow('RATE_LIMIT_PROXY_SECRET');
+    expect(validateEnvironment({ ...validConfig, DATABASE_URL_UNPOOLED: validConfig.DATABASE_URL,
+      NODE_ENV: 'production', RATE_LIMIT_PROXY_SECRET: 'x'.repeat(32) }).RATE_LIMIT_PROXY_SECRET)
+      .toBe('x'.repeat(32));
+  });
+
   it('requires secure cookies when SameSite is none', () => {
     expect(() => validateEnvironment({ ...validConfig, COOKIE_SAME_SITE: 'none' })).toThrow(
       'COOKIE_SECURE=true',

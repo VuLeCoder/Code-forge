@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withBackendClientIp } from "@/lib/backend-client-ip";
 
 const actions = new Set(["register", "login", "refresh", "logout", "me"]);
 
@@ -30,7 +31,7 @@ async function proxy(request: NextRequest, action: string): Promise<NextResponse
   try {
     const upstream = await fetch(`${backendUrl()}/api/v1/auth/${action}`, {
       method: request.method,
-      headers,
+      headers: withBackendClientIp(request, headers),
       body: request.method === "GET" ? undefined : await request.text(),
       cache: "no-store",
       signal: AbortSignal.timeout(30_000),

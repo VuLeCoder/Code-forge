@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withBackendClientIp } from "@/lib/backend-client-ip";
 
 const validUuid = (value: string) => /^[a-f0-9-]{36}$/i.test(value);
 
@@ -28,11 +29,11 @@ async function proxy(request: NextRequest, context: Context) {
       cache: "no-store",
       redirect: "error",
       signal: AbortSignal.timeout(30_000),
-      headers: {
+      headers: withBackendClientIp(request, {
         cookie: request.headers.get("cookie") ?? "",
         origin,
         "content-type": "application/json",
-      },
+      }),
     });
     return new NextResponse(upstream.body, { status: upstream.status, headers });
   } catch {

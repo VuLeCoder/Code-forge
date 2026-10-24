@@ -58,6 +58,7 @@ function makeFixture(operation?: Partial<MergeOperation>) {
   );
   const internals = service as unknown as {
     runScheduled: () => Promise<void>;
+    reconcileMerges: () => Promise<void>;
     reconcileOperation: (operationId: string) => Promise<void>;
   };
   return { service, internals, db, tx, locks, lock, storage, purge, operation: current };
@@ -129,6 +130,67 @@ describe('MaintenanceJobsService', () => {
       data: { status: 'NEEDS_RECONCILIATION', errorCode: 'REF_OUTCOME_UNKNOWN' } });
     expect(fixture.storage.commit).not.toHaveBeenCalled();
     expect(fixture.db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('does not repeat metadata or audit writes when reconciliation is invoked after completion', async () => {
+    const fixture = makeFixture();
+    fixture.db.pullRequestMergeOperation.findUnique
+      .mockResolvedValueOnce(fixture.operation)
+      .mockResolvedValueOnce({ ...fixture.operation, status: 'COMPLETED' });
+
+    await fixture.internals.reconcileOperation(fixture.operation.operationId);
+    await fixture.internals.reconcileOperation(fixture.operation.operationId);
+
+    expect(fixture.db.$transaction).toHaveBeenCalledTimes(1);
+    expect(fixture.tx.pullRequest.updateMany).toHaveBeenCalledTimes(1);
+    expect(fixture.tx.pullRequestMergeOperation.update).toHaveBeenCalledTimes(1);
+    expect(fixture.tx.auditLog.create).toHaveBeenCalledTimes(1);
+    expect(fixture.storage.branchSha).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks a storage-read failure retryable and releases the repository lock without changing Git refs', async () => {
+    const fixture = makeFixture();
+    fixture.db.pullRequestMergeOperation.findMany.mockResolvedValue([
+      { operationId: fixture.operation.operationId, repositoryId: fixture.operation.repositoryId },
+    ]);
+    fixture.storage.branchSha.mockRejectedValueOnce(new Error('temporary Git storage failure'));
+
+    await fixture.internals.reconcileMerges();
+
+    expect(fixture.db.pullRequestMergeOperation.updateMany).toHaveBeenCalledWith({
+      where: { operationId: 'operation-1', status: { in: ['PENDING', 'NEEDS_RECONCILIATION'] } },
+      data: { status: 'NEEDS_RECONCILIATION', errorCode: 'RECONCILIATION_UNAVAILABLE' },
+    });
+    expect(fixture.db.$transaction).not.toHaveBeenCalled();
+    expect(fixture.lock.release).toHaveBeenCalledTimes(1);
+    expect(fixture.storage.branchSha).toHaveBeenCalledTimes(1);
+    expect(fixture.storage.isAncestor).not.toHaveBeenCalled();
+  });
+
+  it('retries a transaction failure on the next reconciliation run and audits only the successful attempt', async () => {
+    const fixture = makeFixture();
+    fixture.db.pullRequestMergeOperation.findMany.mockResolvedValue([
+      { operationId: fixture.operation.operationId, repositoryId: fixture.operation.repositoryId },
+    ]);
+    fixture.db.pullRequestMergeOperation.findUnique
+      .mockResolvedValueOnce(fixture.operation)
+      .mockResolvedValueOnce({ ...fixture.operation, status: 'NEEDS_RECONCILIATION' });
+    fixture.db.$transaction.mockRejectedValueOnce(new Error('temporary database failure'));
+
+    await fixture.internals.reconcileMerges();
+    expect(fixture.db.pullRequestMergeOperation.updateMany).toHaveBeenCalledWith({
+      where: { operationId: 'operation-1', status: { in: ['PENDING', 'NEEDS_RECONCILIATION'] } },
+      data: { status: 'NEEDS_RECONCILIATION', errorCode: 'RECONCILIATION_UNAVAILABLE' },
+    });
+    expect(fixture.tx.auditLog.create).not.toHaveBeenCalled();
+    expect(fixture.lock.release).toHaveBeenCalledTimes(1);
+
+    await fixture.internals.reconcileMerges();
+
+    expect(fixture.db.$transaction).toHaveBeenCalledTimes(2);
+    expect(fixture.tx.pullRequestMergeOperation.update).toHaveBeenCalledTimes(1);
+    expect(fixture.tx.auditLog.create).toHaveBeenCalledTimes(1);
+    expect(fixture.lock.release).toHaveBeenCalledTimes(2);
   });
 
   it('completes metadata and audit only for a verified two-parent merge commit', async () => {

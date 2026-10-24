@@ -40,6 +40,17 @@ class EnvironmentVariables {
   @MinLength(32)
   JWT_ACCESS_SECRET!: string;
 
+  @IsOptional()
+  @IsString()
+  @MinLength(32)
+  RATE_LIMIT_PROXY_SECRET?: string;
+
+  @IsInt()
+  @Min(0)
+  @Max(10)
+  @Type(() => Number)
+  TRUST_PROXY_HOPS = 0;
+
   @IsInt()
   @Min(60)
   @Max(3600)
@@ -98,6 +109,9 @@ export function validateEnvironment(config: Record<string, unknown>): Environmen
   }
   if (validated.COOKIE_SAME_SITE === 'none' && !validated.COOKIE_SECURE) {
     throw new Error('Cấu hình môi trường không hợp lệ: COOKIE_SAME_SITE=none yêu cầu COOKIE_SECURE=true');
+  }
+  if (validated.NODE_ENV === 'production' && !validated.RATE_LIMIT_PROXY_SECRET) {
+    throw new Error('Cấu hình môi trường không hợp lệ: production cần RATE_LIMIT_PROXY_SECRET dài tối thiểu 32 ký tự');
   }
   if (validated.MAX_FILE_BYTES > validated.MAX_REPOSITORY_BYTES) {
     throw new Error('Cấu hình môi trường không hợp lệ: MAX_FILE_BYTES không được lớn hơn MAX_REPOSITORY_BYTES');

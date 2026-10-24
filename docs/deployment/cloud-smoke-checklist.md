@@ -15,6 +15,7 @@ Chưa có cloud smoke nào được thực hiện; bảng và mọi mục cloud 
 ## Tài khoản và quyền truy cập
 
 - [ ] Frontend HTTPS tải được; `GET /api/v1/health/ready` trả trạng thái database, Git executable và khả năng ghi storage đều khỏe.
+- [ ] Kiểm tra rate limit qua Render với hai client độc lập; gửi `X-Forwarded-For`/`CF-Connecting-IP` và `X-CodeForge-Client-IP`/signature giả từ client, xác minh không chia sẻ bucket sai hoặc vượt giới hạn. Ghi lại số trusted proxy hop thực tế; backend phải bỏ qua IP chưa ký hợp lệ.
 - [ ] Đăng ký hoặc đăng nhập, refresh, logout; sau logout request API dùng access token cũ bị từ chối.
 - [ ] Tạo repository public và private, xác minh URL clone trả về Render trực tiếp.
 - [ ] Anonymous đọc public được, không đọc được private; unauthorized response không phân biệt thông tin repo private.

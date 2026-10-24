@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import styles from "./page.module.css";
 import { repositoryPath, type RepositorySummary } from "@/lib/repositories";
+import { withBackendClientIp } from "@/lib/backend-client-ip";
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ q?: string; page?: string }> }) {
   const params = await searchParams;
@@ -13,7 +15,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ q
     const query = new URLSearchParams({ page: String(page) });
     if (q) query.set("q", q);
     const response = await fetch(`${(process.env.BACKEND_URL ?? "http://localhost:4000").replace(/\/$/, "")}/api/v1/repositories?${query}`, {
-      cache: "no-store", signal: AbortSignal.timeout(10_000),
+      headers: withBackendClientIp(await headers()), cache: "no-store", signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) throw new Error("Không thể tải repository.");
     ({ repositories, hasMore } = await response.json() as { repositories: RepositorySummary[]; hasMore: boolean });

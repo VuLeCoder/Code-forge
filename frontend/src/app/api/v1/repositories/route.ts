@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withBackendClientIp } from "@/lib/backend-client-ip";
 
 export async function POST(request: NextRequest) {
   const appOrigin = (process.env.APP_ORIGIN ?? request.nextUrl.origin).replace(/\/$/, "");
@@ -10,7 +11,7 @@ export async function POST(request: NextRequest) {
   if (cookie) headers.set("cookie", cookie);
   try {
     const upstream = await fetch(`${(process.env.BACKEND_URL ?? "http://localhost:4000").replace(/\/$/, "")}/api/v1/repositories`, {
-      method: "POST", headers, body: await request.text(), cache: "no-store", signal: AbortSignal.timeout(30_000),
+      method: "POST", headers: withBackendClientIp(request, headers), body: await request.text(), cache: "no-store", signal: AbortSignal.timeout(30_000),
     });
     return new NextResponse(upstream.body, { status: upstream.status, headers: { "content-type": upstream.headers.get("content-type") ?? "application/json", "cache-control": "private, no-store" } });
   } catch {

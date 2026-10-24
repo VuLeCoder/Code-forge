@@ -19,6 +19,7 @@ export default defineConfig({
       env: {
         BACKEND_URL: "http://127.0.0.1:4111",
         APP_ORIGIN: "http://localhost:3111",
+        RATE_LIMIT_PROXY_SECRET: "playwright-only-signing-secret-at-least-32-characters",
       },
     },
   ],

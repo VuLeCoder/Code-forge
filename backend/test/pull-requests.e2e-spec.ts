@@ -1,13 +1,16 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { execFile, execFileSync } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
+// cookie-parser is CommonJS; its default import is undefined at runtime in this test runner.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 import cookieParser = require('cookie-parser');
 
 const requireFromBackend = createRequire(__filename);
@@ -24,6 +27,7 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
   let base: string;
   let origin: string;
   let ownerCookie: string;
+  let writerCookie: string;
   let originalUrl: string | undefined;
   let originalUnpooledUrl: string | undefined;
   let originalStorage: string | undefined;
@@ -32,9 +36,9 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
 
   const cookie = (response: Response) => response.headers.getSetCookie()
     .map((value) => value.split(';')[0]).join('; ');
-  const call = (method: string, path: string, body?: unknown) => fetch(`${base}/${path}`, {
+  const call = (method: string, path: string, body?: unknown, cookies = ownerCookie) => fetch(`${base}/${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json', Origin: origin, ...(ownerCookie ? { Cookie: ownerCookie } : {}) },
+    headers: { 'Content-Type': 'application/json', Origin: origin, ...(cookies ? { Cookie: cookies } : {}) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 
@@ -95,6 +99,12 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     expect(registered.status).toBe(201);
     ownerCookie = cookie(registered);
 
+    const writerRegistered = await call('POST', 'auth/register', {
+      username: 'PullWriter', email: 'pull-writer@example.test', password: 'test-password-123',
+    }, '');
+    expect(writerRegistered.status).toBe(201);
+    writerCookie = cookie(writerRegistered);
+
     const createdRepo = await call('POST', 'repositories', {
       name: 'PullDemo', visibility: 'PRIVATE', initializeReadme: true,
     });
@@ -102,24 +112,53 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     const { repository } = await responseJson<{ repository: { id: string } }>(createdRepo);
     const storedRepo = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
     const bare = join(storageRoot, storedRepo.storageKey);
-    const git = (args: string[], input?: string) => execFileSync('git', ['--git-dir', bare, ...args], {
-      encoding: 'utf8', ...(input === undefined ? {} : { input }),
-    }).trim();
+    const inviteResponse = await call('POST', 'repos/pullowner/pulldemo/invitations', {
+      username: 'PullWriter', role: 'WRITE',
+    });
+    expect(inviteResponse.status).toBe(201);
+    const invite = await responseJson<{ invitation: { id: string; role: string } }>(inviteResponse);
+    expect(invite.invitation.role).toBe('WRITE');
+    const acceptedResponse = await call('POST', `invitations/${invite.invitation.id}/accept`, undefined, writerCookie);
+    expect(acceptedResponse.status).toBe(201);
+    expect(await responseJson<{ success: boolean; role: string }>(acceptedResponse)).toMatchObject({ success: true, role: 'WRITE' });
 
-    // Seed a feature commit directly in this test-owned bare repository. This bypasses
-    // receive-pack only for deterministic fixture setup; all PR behavior below uses HTTP.
-    const targetSha = git(['rev-parse', 'refs/heads/main']);
-    const readmeSha = git(['rev-parse', `${targetSha}:README.md`]);
-    const featureBlob = git(['hash-object', '-w', '--stdin'], 'button: enabled\n');
-    const featureTree = git(['mktree'], `100644 blob ${readmeSha}\tREADME.md\n100644 blob ${featureBlob}\tfeature.txt\n`);
-    const sourceSha = execFileSync('git', ['--git-dir', bare, '-c', 'user.name=Test', '-c', 'user.email=test@example.test',
-      'commit-tree', featureTree, '-p', targetSha, '-m', 'Add feature'], { encoding: 'utf8' }).trim();
-    git(['update-ref', 'refs/heads/feature/add-button', sourceSha]);
+    const tokenResponse = await call('POST', 'tokens', {
+      name: 'PR E2E', scopes: ['repo:read', 'repo:write'],
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+    }, writerCookie);
+    expect(tokenResponse.status).toBe(201);
+    const token = await responseJson<{ token: { id: string }; secret: string }>(tokenResponse);
+    expect(token.secret).toMatch(/^cfg_[a-f0-9]{16}_[a-f0-9]{64}$/);
+    const storedToken = await db.personalAccessToken.findUniqueOrThrow({ where: { id: token.token.id } });
+    expect(storedToken.tokenHash).not.toBe(token.secret);
+
+    const askpass = join(storageRoot, 'git-askpass.sh');
+    await writeFile(askpass,
+      '#!/bin/sh\ncase "$1" in *Username*) printf "%s\\n" "$TEST_GIT_USER" ;; *) printf "%s\\n" "$TEST_GIT_PAT" ;; esac\n',
+      { mode: 0o700 });
+    const runGit = promisify(execFile);
+    const git = (args: string[]) => runGit('git', ['-c', 'credential.helper=', ...args], {
+      timeout: 20_000,
+      env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(storageRoot, 'empty-git-config'),
+        GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: askpass, TEST_GIT_USER: 'PullWriter', TEST_GIT_PAT: token.secret },
+    });
+    const repoUrl = `${base}/git/PullOwner/PullDemo.git`;
+    const writerWork = join(storageRoot, 'writer-clone');
+    await git(['clone', repoUrl, writerWork]);
+    await git(['-C', writerWork, 'config', 'user.name', 'Pull Writer']);
+    await git(['-C', writerWork, 'config', 'user.email', 'pull-writer@example.test']);
+    await git(['-C', writerWork, 'switch', '-c', 'feature/ui/add-button']);
+    await writeFile(join(writerWork, 'feature.txt'), 'button: enabled\n');
+    await git(['-C', writerWork, 'add', 'feature.txt']);
+    await git(['-C', writerWork, 'commit', '-m', 'Add feature']);
+    const sourceSha = (await git(['-C', writerWork, 'rev-parse', 'HEAD'])).stdout.trim();
+    await git(['-C', writerWork, 'push', '--set-upstream', 'origin', 'feature/ui/add-button']);
+    const targetSha = (await git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).stdout.trim();
 
     const repoPath = 'repos/pullowner/pulldemo/pulls';
     const created = await call('POST', repoPath, {
       title: 'Add feature', description: 'Exercise the server-backed PR flow.',
-      sourceBranch: 'feature/add-button', targetBranch: 'main',
+      sourceBranch: 'feature/ui/add-button', targetBranch: 'main',
     });
     expect(created.status).toBe(201);
     const creation = await responseJson<{ pullRequest: { number: number }; permissions: { canCreate: boolean; canEdit: boolean; canMerge: boolean } }>(created);
@@ -159,8 +198,8 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     });
     expect(merged.status).toBe('MERGED');
     expect(merged.mergeCommitSha).toMatch(/^[a-f0-9]{40,64}$/);
-    expect(git(['rev-parse', 'refs/heads/main'])).toBe(merged.mergeCommitSha);
-    const parents = git(['rev-list', '--parents', '-n', '1', merged.mergeCommitSha]).split(' ');
+    expect((await git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).stdout.trim()).toBe(merged.mergeCommitSha);
+    const parents = (await git(['--git-dir', bare, 'rev-list', '--parents', '-n', '1', merged.mergeCommitSha])).stdout.trim().split(' ');
     expect(parents).toHaveLength(3);
     expect(parents.slice(1).sort()).toEqual([targetSha, sourceSha].sort());
 
@@ -170,13 +209,17 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     expect(finalDetail.mergeOperation).toMatchObject({ status: 'COMPLETED' });
     expect(await db.auditLog.count({ where: { targetId: detail.pullRequest.id, action: 'PULL_REQUEST_MERGED' } })).toBe(1);
 
+    await git(['-C', writerWork, 'fetch', 'origin', 'main']);
+    expect((await git(['-C', writerWork, 'rev-parse', 'refs/remotes/origin/main'])).stdout.trim()).toBe(merged.mergeCommitSha);
+    expect((await git(['-C', writerWork, 'show', 'refs/remotes/origin/main:feature.txt'])).stdout).toBe('button: enabled\n');
+
     const replay = await call('POST', `${repoPath}/${number}/merge`, {
       operationId, expectedSourceSha: sourceSha, expectedTargetSha: targetSha,
       storageGeneration: storedRepo.storageGeneration, version: detail.pullRequest.version,
     });
     expect(replay.status).toBe(200);
     expect(await responseJson(replay)).toMatchObject({ status: 'MERGED', mergeCommitSha: merged.mergeCommitSha });
-    expect(git(['rev-parse', 'refs/heads/main'])).toBe(merged.mergeCommitSha);
+    expect((await git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).stdout.trim()).toBe(merged.mergeCommitSha);
     expect(await db.auditLog.count({ where: { targetId: detail.pullRequest.id, action: 'PULL_REQUEST_MERGED' } })).toBe(1);
   }, 60_000);
 });
