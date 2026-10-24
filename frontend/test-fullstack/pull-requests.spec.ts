@@ -119,7 +119,7 @@ test('WRITE collaborator accepts invite, pushes a feature branch, and owner merg
 
     await page.getByRole('button', { name: 'Merge pull request' }).click();
     await page.getByRole('button', { name: 'Xác nhận merge' }).click();
-    await expect(page.getByText(/Đã merge/)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('status').filter({ hasText: /^Đã merge/ })).toBeVisible({ timeout: 15_000 });
 
     await git(['-C', work, 'fetch', 'origin', 'main'], credentials);
     const fetchedSha = (await git(['-C', work, 'rev-parse', 'FETCH_HEAD'])).stdout.trim();

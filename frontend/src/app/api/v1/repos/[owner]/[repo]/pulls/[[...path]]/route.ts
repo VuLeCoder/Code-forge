@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { withBackendClientIp } from "@/lib/backend-client-ip";
 
@@ -5,6 +6,13 @@ type Context = { params: Promise<{ owner: string; repo: string; path?: string[] 
 
 const validOwner = (value: string) => /^[a-zA-Z0-9][a-zA-Z0-9._-]{1,37}[a-zA-Z0-9]$/.test(value);
 const validRepo = (value: string) => value.length <= 100 && /^(?!.*\.\.)(?!.*\.git$)[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/i.test(value);
+const errorResponse = (status: number, code: string, message: string) => {
+  const requestId = randomUUID();
+  return NextResponse.json({ error: { code, message, details: null }, requestId }, {
+    status,
+    headers: { "cache-control": "private, no-store", "x-request-id": requestId },
+  });
+};
 
 function allowedRoute(method: string, path: string[]) {
   const number = /^\d{1,9}$/.test(path[0] ?? "") && Number(path[0]) > 0;
@@ -17,14 +25,13 @@ function allowedRoute(method: string, path: string[]) {
 
 async function proxy(request: NextRequest, context: Context) {
   const { owner, repo, path = [] } = await context.params;
-  const responseHeaders = { "content-type": "application/json", "cache-control": "private, no-store" };
   if (!validOwner(owner) || !validRepo(repo) || !allowedRoute(request.method, path)) {
-    return NextResponse.json({ error: { code: "NOT_FOUND", message: "Không tìm thấy endpoint." } }, { status: 404, headers: responseHeaders });
+    return errorResponse(404, "NOT_FOUND", "Không tìm thấy endpoint.");
   }
 
   const appOrigin = (process.env.APP_ORIGIN ?? request.nextUrl.origin).replace(/\/$/, "");
   if (request.method !== "GET" && request.headers.get("origin") !== appOrigin) {
-    return NextResponse.json({ error: { code: "ORIGIN_NOT_ALLOWED", message: "Nguồn gửi yêu cầu không được phép." } }, { status: 403, headers: responseHeaders });
+    return errorResponse(403, "ORIGIN_NOT_ALLOWED", "Nguồn gửi yêu cầu không được phép.");
   }
 
   const headers = new Headers({ accept: "application/json", origin: appOrigin });
@@ -47,9 +54,12 @@ async function proxy(request: NextRequest, context: Context) {
         signal: AbortSignal.timeout(30_000),
       },
     );
+    const responseHeaders = new Headers({ "content-type": "application/json", "cache-control": "private, no-store" });
+    const requestId = upstream.headers.get("x-request-id");
+    if (requestId && /^[a-f0-9-]{36}$/i.test(requestId)) responseHeaders.set("x-request-id", requestId);
     return new NextResponse(upstream.body, { status: upstream.status, headers: responseHeaders });
   } catch {
-    return NextResponse.json({ error: { code: "BACKEND_UNAVAILABLE", message: "Backend tạm thời không thể kết nối." } }, { status: 503, headers: responseHeaders });
+    return errorResponse(503, "BACKEND_UNAVAILABLE", "Backend tạm thời không thể kết nối.");
   }
 }
 
