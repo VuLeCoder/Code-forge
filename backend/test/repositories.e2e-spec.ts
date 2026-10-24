@@ -474,6 +474,27 @@ describe('Repository HTTP + PostgreSQL', () => {
     await git(['-C', work, 'push', '-u', 'origin', 'main']);
     expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(first);
 
+    const concurrentPushes: { directory: string; branch: string; file: string; content: string; sha: string }[] = [
+      { directory: join(storageRoot, 'm4-push-race-a'), branch: 'parallel/race-a', file: 'parallel-a.txt', content: 'push A\n', sha: '' },
+      { directory: join(storageRoot, 'm4-push-race-b'), branch: 'parallel/race-b', file: 'parallel-b.txt', content: 'push B\n', sha: '' },
+    ];
+    for (const candidate of concurrentPushes) {
+      await git(['clone', url, candidate.directory]);
+      await git(['-C', candidate.directory, 'config', 'user.name', 'M4 Race Tester']);
+      await git(['-C', candidate.directory, 'config', 'user.email', 'm4-race@example.test']);
+      await writeFile(join(candidate.directory, candidate.file), candidate.content);
+      await git(['-C', candidate.directory, 'add', candidate.file]);
+      await git(['-C', candidate.directory, 'commit', '-m', `Concurrent push ${candidate.branch}`]);
+      candidate.sha = (await git(['-C', candidate.directory, 'rev-parse', 'HEAD'])).stdout.trim();
+    }
+    await Promise.all(concurrentPushes.map((candidate) =>
+      git(['-C', candidate.directory, 'push', 'origin', `HEAD:refs/heads/${candidate.branch}`]),
+    ));
+    for (const candidate of concurrentPushes) {
+      expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', `refs/heads/${candidate.branch}`], { encoding: 'utf8' }).trim()).toBe(candidate.sha);
+    }
+    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(first);
+
     await writeFile(join(work, 'code.txt'), 'second\n');
     await git(['-C', work, 'add', 'code.txt']);
     await git(['-C', work, 'commit', '-m', 'Feature change']);

@@ -71,6 +71,38 @@ test("stale compare prevents owner merge and displays a refresh warning", async 
   await expect(page.getByRole("button", { name: "Merge pull request" })).toBeDisabled();
 });
 
+test("PR detail announces a backend failure and recovers through keyboard retry without a reload", async ({ page }) => {
+  await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { user: owner } }));
+  let detailCalls = 0;
+  let compareCalls = 0;
+  await page.route("**/api/v1/repos/alice/project/pulls/1", (route) => {
+    detailCalls += 1;
+    return detailCalls === 1
+      ? route.fulfill({ status: 503, json: { error: { code: "BACKEND_UNAVAILABLE", message: "Backend tạm thời không thể kết nối." } } })
+      : route.fulfill({ json: { pullRequest, permissions: { canCreate: true, canEdit: true, canMerge: true }, mergeOperation: null } });
+  });
+  await page.route("**/api/v1/repos/alice/project/pulls/1/compare", (route) => {
+    compareCalls += 1;
+    return route.fulfill({ json: compare });
+  });
+
+  await page.goto("/alice/project/pulls/1");
+  const error = page.locator("p[role=alert]");
+  await expect(error).toContainText("Backend tạm thời không thể kết nối.");
+  await expect(page.getByText("Không tìm thấy pull request.", { exact: true })).toHaveCount(0);
+  const retry = page.getByRole("button", { name: "Thử lại" });
+  await retry.focus();
+  await retry.press("Enter");
+
+  await expect(page.getByRole("heading", { name: /Add greeting/ })).toBeVisible();
+  await expect(page.getByLabel("Nội dung diff dạng văn bản")).toContainText("Hello from Code Forge");
+  await expect(page.getByRole("button", { name: "Merge pull request" })).toBeEnabled();
+  await expect(page.getByText("Không có commit mới trong snapshot này.", { exact: true })).toHaveCount(0);
+  expect(detailCalls).toBe(2);
+  expect(compareCalls).toBe(2);
+  await expect(page).toHaveURL(/\/alice\/project\/pulls\/1$/);
+});
+
 test("owner confirms merge with the displayed snapshot and sees a stale conflict", async ({ page }) => {
   await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { user: owner } }));
   await page.route("**/api/v1/repos/alice/project/pulls/1", (route) =>

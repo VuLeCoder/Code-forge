@@ -1,9 +1,11 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
+// cookie-parser is CommonJS; this import form works in the Jest runtime.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 import cookieParser = require('cookie-parser');
 
 // Each run owns a fresh schema. Never reset or truncate the development schema.
@@ -18,6 +20,8 @@ describe('Milestone 1 HTTP + PostgreSQL', () => {
   let originalDatabaseUrlUnpooled: string | undefined;
   const account = { username: 'Alice', email: 'alice@example.test', password: 'test-password-123' };
   const cookie = (response: Response) => response.headers.getSetCookie().map((value) => value.split(';')[0]).join('; ');
+  const refreshToken = (response: Response) => response.headers.getSetCookie()
+    .map((value) => value.split(';')[0] ?? '').find((value) => value.startsWith('code_forge_refresh='))?.slice('code_forge_refresh='.length);
   const call = (path: string, body?: unknown, cookies?: string, requestOrigin = origin) => fetch(`${url}/${path}`, {
     method: body === undefined ? 'GET' : 'POST',
     headers: { Origin: requestOrigin, 'Content-Type': 'application/json', ...(cookies ? { Cookie: cookies } : {}) },
@@ -73,7 +77,7 @@ describe('Milestone 1 HTTP + PostgreSQL', () => {
   it('registers, sets HttpOnly cookies, rejects normalized duplicates and exposes only public profile fields', async () => {
     const registered = await call('auth/register', account);
     expect(registered.status).toBe(201);
-    const body = await registered.json();
+    const body = await registered.json() as { user: { username: string; passwordHash?: string }; accessToken?: string };
     expect(body.user.username).toBe('Alice');
     expect(body.user.passwordHash).toBeUndefined();
     expect(body.accessToken).toBeUndefined();
@@ -103,6 +107,35 @@ describe('Milestone 1 HTTP + PostgreSQL', () => {
     expect(newCookie).not.toBe(oldCookie);
     expect((await call('auth/refresh', {}, oldCookie)).status).toBe(401);
     expect((await call('auth/refresh', {}, newCookie)).status).toBe(401);
+  });
+
+  it('revokes the rotated session family when the same refresh token is used concurrently', async () => {
+    const loggedIn = await call('auth/login', { login: 'alice', password: account.password });
+    expect(loggedIn.status).toBe(200);
+    const originalRefreshToken = refreshToken(loggedIn);
+    expect(originalRefreshToken).toBeTruthy();
+    const oldSession = await db.session.findUniqueOrThrow({ where: {
+      tokenHash: createHash('sha256').update(originalRefreshToken!).digest('hex'),
+    } });
+
+    const [first, second] = await Promise.all([
+      call('auth/refresh', {}, cookie(loggedIn)),
+      call('auth/refresh', {}, cookie(loggedIn)),
+    ]);
+    expect([first.status, second.status].sort()).toEqual([200, 401]);
+
+    const rotated = first.status === 200 ? first : second;
+    const rotatedRefreshToken = refreshToken(rotated);
+    expect(rotatedRefreshToken).toBeTruthy();
+    const rotatedSession = await db.session.findUniqueOrThrow({ where: {
+      tokenHash: createHash('sha256').update(rotatedRefreshToken!).digest('hex'),
+    } });
+    expect(rotatedSession.familyId).toBe(oldSession.familyId);
+    expect(rotatedSession.revokedAt).not.toBeNull();
+    const family = await db.session.findMany({ where: { familyId: oldSession.familyId } });
+    expect(family.length).toBeGreaterThanOrEqual(2);
+    expect(family.every((session) => session.revokedAt !== null)).toBe(true);
+    expect((await call('auth/me', undefined, cookie(rotated))).status).toBe(401);
   });
 
   it('revokes refresh on logout and rejects locked users at login, me and refresh', async () => {
