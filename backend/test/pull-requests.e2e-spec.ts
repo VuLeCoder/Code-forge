@@ -183,6 +183,35 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     expect(comparison.files.map((file: { path: string }) => file.path)).toContain('feature.txt');
     expect(comparison.diff).toContain('button: enabled');
 
+    const unresolvedOperationId = randomUUID();
+    const owner = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'pullowner' } });
+    await db.pullRequestMergeOperation.create({ data: {
+      operationId: unresolvedOperationId,
+      repositoryId: storedRepo.id,
+      pullRequestId: detail.pullRequest.id,
+      actorId: owner.id,
+      storageGeneration: storedRepo.storageGeneration,
+      expectedSourceSha: sourceSha,
+      expectedTargetSha: targetSha,
+      oldTargetSha: targetSha,
+      status: 'NEEDS_RECONCILIATION',
+      errorCode: 'TEST_PENDING_RECONCILIATION',
+    } });
+    try {
+      const blockedResponse = await call('POST', `${repoPath}/${number}/merge`, {
+        operationId: randomUUID(), expectedSourceSha: sourceSha, expectedTargetSha: targetSha,
+        storageGeneration: storedRepo.storageGeneration, version: detail.pullRequest.version,
+      });
+      expect(blockedResponse.status).toBe(409);
+      expect(await responseJson<{ error: { code: string } }>(blockedResponse)).toMatchObject({
+        error: { code: 'MERGE_RECONCILIATION_REQUIRED' },
+      });
+      expect((await git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).stdout.trim()).toBe(targetSha);
+      expect(await db.auditLog.count({ where: { targetId: detail.pullRequest.id, action: 'PULL_REQUEST_MERGED' } })).toBe(0);
+    } finally {
+      await db.pullRequestMergeOperation.deleteMany({ where: { operationId: unresolvedOperationId } });
+    }
+
     const operationId = randomUUID();
     const mergeRequest = { operationId, expectedSourceSha: sourceSha, expectedTargetSha: targetSha,
       storageGeneration: storedRepo.storageGeneration, version: detail.pullRequest.version };
