@@ -259,5 +259,76 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     expect(await responseJson(replay)).toMatchObject({ status: 'MERGED', mergeCommitSha: merged.mergeCommitSha });
     expect((await git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).stdout.trim()).toBe(merged.mergeCommitSha);
     expect(await db.auditLog.count({ where: { targetId: detail.pullRequest.id, action: 'PULL_REQUEST_MERGED' } })).toBe(1);
+
+    // Exercise the shared repository lock across two different lifecycle mutations.
+    await git(['-C', writerWork, 'checkout', '-B', 'main', 'refs/remotes/origin/main']);
+    await git(['-C', writerWork, 'checkout', '-b', 'feature/delete-race']);
+    await writeFile(join(writerWork, 'delete-race.txt'), 'second feature\n');
+    await git(['-C', writerWork, 'add', 'delete-race.txt']);
+    await git(['-C', writerWork, 'commit', '-m', 'Add feature for merge-delete race']);
+    const raceSourceSha = (await git(['-C', writerWork, 'rev-parse', 'HEAD'])).stdout.trim();
+    await git(['-C', writerWork, 'push', '--set-upstream', 'origin', 'feature/delete-race']);
+    const raceCreated = await call('POST', repoPath, {
+      title: 'Race merge against repository deletion',
+      description: 'Verify merge and soft-delete serialize on the repository lock.',
+      sourceBranch: 'feature/delete-race', targetBranch: 'main',
+    });
+    expect(raceCreated.status).toBe(201);
+    const racePullRequest = await responseJson<{ pullRequest: { id: string; number: number } }>(raceCreated);
+    const raceDetailResponse = await call('GET', `${repoPath}/${racePullRequest.pullRequest.number}`);
+    expect(raceDetailResponse.status).toBe(200);
+    const raceDetail = await responseJson<{ pullRequest: { version: number; status: string } }>(raceDetailResponse);
+    expect(raceDetail.pullRequest.status).toBe('OPEN');
+    const raceComparisonResponse = await call('GET', `${repoPath}/${racePullRequest.pullRequest.number}/compare`);
+    expect(raceComparisonResponse.status).toBe(200);
+    const raceComparison = await responseJson<{ sourceSha: string; targetSha: string; storageGeneration: number;
+      state: string; stale: boolean }>(raceComparisonResponse);
+    expect(raceComparison).toMatchObject({ sourceSha: raceSourceSha, targetSha: merged.mergeCommitSha,
+      storageGeneration: storedRepo.storageGeneration, state: 'READY', stale: false });
+
+    const raceOperationId = randomUUID();
+    const [raceMergeResponse, deleteResponse] = await Promise.all([
+      call('POST', `${repoPath}/${racePullRequest.pullRequest.number}/merge`, {
+        operationId: raceOperationId, expectedSourceSha: raceComparison.sourceSha,
+        expectedTargetSha: raceComparison.targetSha, storageGeneration: raceComparison.storageGeneration,
+        version: raceDetail.pullRequest.version,
+      }),
+      call('DELETE', 'repos/pullowner/pulldemo'),
+    ]);
+    expect(deleteResponse.status).toBe(204);
+    expect([200, 403, 404]).toContain(raceMergeResponse.status);
+
+    const deletedRepository = await db.repository.findUniqueOrThrow({ where: { id: storedRepo.id } });
+    expect(deletedRepository.status).toBe('DELETED');
+    expect(await db.auditLog.count({ where: { targetId: storedRepo.id, action: 'REPOSITORY_SOFT_DELETED' } })).toBe(1);
+    const finalRaceTargetSha = (await git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).stdout.trim();
+    const raceDbPullRequest = await db.pullRequest.findUniqueOrThrow({ where: { id: racePullRequest.pullRequest.id } });
+    const raceMergeOperations = await db.pullRequestMergeOperation.findMany({
+      where: { pullRequestId: racePullRequest.pullRequest.id },
+    });
+    const raceMergeAudits = await db.auditLog.count({
+      where: { targetId: racePullRequest.pullRequest.id, action: 'PULL_REQUEST_MERGED' },
+    });
+
+    if (raceMergeResponse.status === 200) {
+      const raceMerged = await responseJson<{ status: string; operationId: string; mergeCommitSha: string }>(raceMergeResponse);
+      expect(raceMerged).toMatchObject({ status: 'MERGED', operationId: raceOperationId });
+      expect(raceMerged.mergeCommitSha).toMatch(/^[a-f0-9]{40,64}$/);
+      expect(finalRaceTargetSha).toBe(raceMerged.mergeCommitSha);
+      const raceParents = (await git(['--git-dir', bare, 'rev-list', '--parents', '-n', '1', raceMerged.mergeCommitSha]))
+        .stdout.trim().split(' ');
+      expect(raceParents).toHaveLength(3);
+      expect(raceParents.slice(1).sort()).toEqual([raceComparison.targetSha, raceComparison.sourceSha].sort());
+      expect(raceDbPullRequest).toMatchObject({ status: 'MERGED', mergeCommitSha: raceMerged.mergeCommitSha });
+      expect(raceMergeOperations).toHaveLength(1);
+      expect(raceMergeOperations[0]).toMatchObject({ operationId: raceOperationId, status: 'COMPLETED',
+        resultingSha: raceMerged.mergeCommitSha });
+      expect(raceMergeAudits).toBe(1);
+    } else {
+      expect(finalRaceTargetSha).toBe(raceComparison.targetSha);
+      expect(raceDbPullRequest).toMatchObject({ status: 'OPEN', mergeCommitSha: null });
+      expect(raceMergeOperations).toHaveLength(0);
+      expect(raceMergeAudits).toBe(0);
+    }
   }, 60_000);
 });
