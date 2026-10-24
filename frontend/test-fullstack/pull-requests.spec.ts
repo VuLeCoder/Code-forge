@@ -101,7 +101,9 @@ test('WRITE collaborator accepts invite, pushes a feature branch, and owner merg
     await git(['-C', work, 'push', '-u', 'origin', 'HEAD:refs/heads/feature/pull-flow'], credentials);
 
     await collaboratorPage.goto(`/${ownerName}/${repositoryName}/pulls`);
-    await collaboratorPage.getByRole('button', { name: 'Tạo pull request', exact: true }).first().click();
+    const createPullRequest = collaboratorPage.getByRole('button', { name: 'Tạo pull request', exact: true }).first();
+    await expect(createPullRequest, 'Collaborator can create PR and the same-origin API returned its permissions.').toBeVisible({ timeout: 15_000 });
+    await createPullRequest.click();
     await collaboratorPage.getByLabel('Tiêu đề').fill('Review collaborator change');
     await collaboratorPage.getByLabel('Branch nguồn').selectOption('feature/pull-flow');
     await collaboratorPage.getByLabel('Mô tả').fill('A complete owner and collaborator flow.');
