@@ -121,6 +121,8 @@ test('public profile is accessible anonymously and fits a mobile viewport', asyn
 test('explore lists public repositories and searches real API results', async ({ page }) => {
   await anonymous(page);
   await page.goto('/');
+  await expect(page.getByText('Lần mở đầu có thể chậm khi máy chủ vừa thức dậy.', { exact: false })).toBeVisible();
+  await expect(page.getByText('Git storage không bền vững', { exact: false })).toBeVisible();
   await expect(page.getByRole('link', { name: 'alice / hello-world' })).toBeVisible();
   await page.getByRole('searchbox', { name: 'Tìm repository' }).fill('khong-co');
   await page.getByRole('button', { name: 'Tìm kiếm' }).click();

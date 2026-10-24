@@ -60,7 +60,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ q
             ))}
           </div>
           {!loadError && (page > 1 || hasMore) && <nav className={styles.pagination} aria-label="Trang repository">{page > 1 && <Link href={pageHref(page - 1)}>Trang trước</Link>}<span>Trang {page}</span>{hasMore && <Link href={pageHref(page + 1)}>Trang sau</Link>}</nav>}
-          <div className={styles.demoNote}><span aria-hidden="true">ⓘ</span><p><strong>Đây là môi trường demo.</strong> Mã nguồn repository có thể được khởi tạo lại sau khi máy chủ nghỉ.</p></div>
+          <div className={styles.demoNote}><span aria-hidden="true">ⓘ</span><p><strong>Đây là môi trường demo.</strong> Lần mở đầu có thể chậm khi máy chủ vừa thức dậy. Git storage không bền vững, nên mã nguồn repository có thể bị khởi tạo lại.</p></div>
         </div>
       </section>
     </main>
