@@ -4,7 +4,7 @@ import { PrismaService } from '../database/prisma.service';
 import { AdminListQueryDto } from './admin.dto';
 import { RepositoryLockService } from '../repositories/repository-lock.service';
 
-const DETAIL_KEYS = new Set(['repositoryId', 'number', 'operationId', 'mergeCommitSha', 'from', 'to', 'invitationId', 'memberId', 'role']);
+const DETAIL_KEYS = new Set(['repositoryId', 'number', 'operationId', 'mergeCommitSha', 'from', 'to', 'invitationId', 'memberId', 'role', 'channel']);
 
 @Injectable()
 export class AdminService {
@@ -71,10 +71,10 @@ export class AdminService {
     const [rows, total] = await Promise.all([this.db.auditLog.findMany({ where,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], skip: (page - 1) * 20, take: 21 }), this.db.auditLog.count({ where })]);
     const selected = rows.slice(0, 20);
-    const actorIds = [...new Set(selected.map((row) => row.actorId))];
+    const actorIds = [...new Set(selected.flatMap((row) => row.actorId ? [row.actorId] : []))];
     const actors = await this.db.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, username: true } });
     const actorById = new Map(actors.map((actor) => [actor.id, actor]));
-    const audit = selected.map((row) => ({ ...row, actor: actorById.get(row.actorId) ?? null, details: this.safeDetails(row.details) }));
+    const audit = selected.map((row) => ({ ...row, actor: row.actorId ? actorById.get(row.actorId) ?? null : null, details: this.safeDetails(row.details) }));
     return { audit, page, pageSize: 20, total, hasMore: rows.length > 20 };
   }
 

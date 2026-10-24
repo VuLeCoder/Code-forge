@@ -64,6 +64,9 @@ describe('Admin bootstrap CLI + PostgreSQL', () => {
     expect(user).toMatchObject({ systemRole: 'ADMIN', status: 'ACTIVE', lockedAt: null });
     expect(user.passwordHash).not.toBe(password);
     expect(await argon2.verify(user.passwordHash, password)).toBe(true);
+    await expect(db.auditLog.findMany({ where: { targetId: user.id } })).resolves.toEqual([
+      expect.objectContaining({ actorId: null, action: 'SYSTEM_ADMIN_CREATED', details: { channel: 'bootstrap_cli' } }),
+    ]);
   });
 
   it('promotes an existing account without replacing its password', async () => {
@@ -82,5 +85,8 @@ describe('Admin bootstrap CLI + PostgreSQL', () => {
     const user = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'existingadmin' } });
     expect(user.systemRole).toBe('ADMIN');
     expect(user.passwordHash).toBe(passwordHash);
+    await expect(db.auditLog.findMany({ where: { targetId: user.id } })).resolves.toEqual([
+      expect.objectContaining({ actorId: null, action: 'SYSTEM_ADMIN_PROMOTED', details: { channel: 'bootstrap_cli' } }),
+    ]);
   });
 });

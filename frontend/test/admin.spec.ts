@@ -34,9 +34,13 @@ test("admin can inspect users, repositories and audit, then confirm a restore", 
       return route.fulfill({ json: { repository: { id: "repo-1", status: repositoryStatus }, sourceMayBeReset: true } });
     }
     if (url.pathname.endsWith("/audit")) return route.fulfill({ json: {
-      audit: [{ id: "audit-1", actorId: admin.id, actor: { id: admin.id, username: admin.username }, action: "ADMIN_REPOSITORY_RESTORED",
-        targetId: "repo-1", details: { from: "DELETED", to: "ACTIVE" }, createdAt: user.createdAt }],
-      page: 1, pageSize: 20, total: 1, hasMore: false,
+      audit: [
+        { id: "audit-1", actorId: admin.id, actor: { id: admin.id, username: admin.username }, action: "ADMIN_REPOSITORY_RESTORED",
+          targetId: "repo-1", details: { from: "DELETED", to: "ACTIVE" }, createdAt: user.createdAt },
+        { id: "audit-2", actorId: null, actor: null, action: "SYSTEM_ADMIN_CREATED",
+          targetId: admin.id, details: { channel: "bootstrap_cli" }, createdAt: user.createdAt },
+      ],
+      page: 1, pageSize: 20, total: 2, hasMore: false,
     } });
     return route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND", message: "Không tìm thấy API fixture." } } });
   });
@@ -58,6 +62,7 @@ test("admin can inspect users, repositories and audit, then confirm a restore", 
 
   await page.getByRole("button", { name: "Nhật ký" }).click();
   await expect(page.getByText("ADMIN_REPOSITORY_RESTORED")).toBeVisible();
+  await expect(page.getByText("Hệ thống (bootstrap CLI)")).toBeVisible();
   await expect(page.getByRole("table").getByText("PRIVATE SOURCE CONTENT", { exact: false })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

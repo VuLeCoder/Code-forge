@@ -52,7 +52,7 @@ jobs:
       - run: docker build -f backend/Dockerfile.migrate -t code-forge-migrate .
       - run: docker run --rm --entrypoint sh code-forge-migrate -c 'pnpm --filter backend exec prisma --version && cd backend && node -e "require.resolve(\"@prisma/client\")"'
       - name: Apply migrations with the migration image
-        run: docker run --rm -e DATABASE_URL -e DATABASE_URL_UNPOOLED code-forge-migrate
+        run: docker run --rm --network host -e DATABASE_URL -e DATABASE_URL_UNPOOLED code-forge-migrate
       - name: Check submitted diff whitespace
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then

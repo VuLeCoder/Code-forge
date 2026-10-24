@@ -99,7 +99,15 @@ export async function bootstrapAdmin() {
         stdout.write(`Tài khoản ${existing.username} đã có quyền ADMIN.\n`);
         return;
       }
-      await db.user.update({ where: { id: existing.id }, data: { systemRole: SystemRole.ADMIN } });
+      await db.$transaction(async (tx) => {
+        await tx.user.update({ where: { id: existing.id }, data: { systemRole: SystemRole.ADMIN } });
+        await tx.auditLog.create({ data: {
+          actorId: null,
+          action: 'SYSTEM_ADMIN_PROMOTED',
+          targetId: existing.id,
+          details: { channel: 'bootstrap_cli' },
+        } });
+      });
       stdout.write(`Đã cấp quyền ADMIN cho ${existing.username}; trạng thái và mật khẩu hiện tại được giữ nguyên.\n`);
       return;
     }
@@ -114,16 +122,25 @@ export async function bootstrapAdmin() {
       timeCost: 2,
       parallelism: 1,
     });
-    const user = await db.user.create({ data: {
-      username,
-      normalizedUsername,
-      email,
-      normalizedEmail,
-      passwordHash,
-      systemRole: SystemRole.ADMIN,
-      status: UserStatus.ACTIVE,
-      lockedAt: null,
-    }, select: { id: true, username: true } });
+    const user = await db.$transaction(async (tx) => {
+      const created = await tx.user.create({ data: {
+        username,
+        normalizedUsername,
+        email,
+        normalizedEmail,
+        passwordHash,
+        systemRole: SystemRole.ADMIN,
+        status: UserStatus.ACTIVE,
+        lockedAt: null,
+      }, select: { id: true, username: true } });
+      await tx.auditLog.create({ data: {
+        actorId: null,
+        action: 'SYSTEM_ADMIN_CREATED',
+        targetId: created.id,
+        details: { channel: 'bootstrap_cli' },
+      } });
+      return created;
+    });
     stdout.write(`Đã tạo tài khoản ADMIN ${user.username}.\n`);
   } finally {
     await db.$disconnect();
