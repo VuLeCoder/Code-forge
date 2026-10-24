@@ -8,9 +8,9 @@ Tạo image và chuẩn bị hướng dẫn không chứng minh dịch vụ clou
 
 ### Bằng chứng hiện tại
 
-Mã được kiểm chứng trên commit `db2041d` của nhánh `thviet`. Hosted workflow [40136064222](https://github.com/VuLeCoder/Code-forge/actions/runs/40136064222) đạt toàn bộ bước: frozen install, Prisma generate, backend unit/E2E với PostgreSQL 17 service, lint, typecheck, build, browser (48/48), full-stack PR journey, build và contents smoke cho cả hai image, migration deploy vào database disposable và kiểm tra whitespace. Các E2E cạnh tranh push–push, merge–delete, refresh-token reuse và PR error retry đều nằm trong run này.
+Mã được kiểm chứng trên commit `d2577fb` của nhánh `thviet`. Hosted workflow [40137272731](https://github.com/VuLeCoder/Code-forge/actions/runs/40137272731) đạt toàn bộ bước: frozen install, Prisma generate, Compose backend-config validation, backend unit/E2E với PostgreSQL 17 service, lint, typecheck, build, browser (48/48), full-stack PR journey, build và contents smoke cho cả hai image, migration deploy vào database disposable và kiểm tra whitespace. Các E2E cạnh tranh push–push, push–merge, merge–delete, concurrent reset-read, refresh-token reuse và PR error retry đều nằm trong run này.
 
-Trên local Windows, backend typecheck, ESLint cho test merge–delete và `git diff --check` đạt. PostgreSQL tại `localhost:5433` không phản hồi và Docker Engine chưa đáp ứng lệnh; vì vậy chưa có local container runtime smoke. Hosted PostgreSQL/Git E2E và image checks được xác nhận bởi run trên, không suy ra từ kết quả local.
+Trên local Windows, workspace lint/typecheck/build, backend unit (14 suites / 82 tests), targeted ESLint, và `git diff --check` đạt; `docker compose config` cùng kiểm tra các biến backend bắt buộc cũng đạt. PostgreSQL tại `localhost:5433` không phản hồi và Docker Engine chưa đáp ứng lệnh; vì vậy chưa có local container runtime smoke. Hosted PostgreSQL/Git E2E và image checks được xác nhận bởi run trên, không suy ra từ kết quả local.
 
 Các bằng chứng này xác nhận CI và image, không chứng minh deployment cloud, nâng cấp từ snapshot production-like, proxy/TLS, Git HTTP trực tiếp Render hoặc source recovery đã được nghiệm thu. Chỉ đánh dấu cloud release đạt sau khi điền kết quả thật theo release commit vào [cloud smoke checklist](./cloud-smoke-checklist.md).
 
