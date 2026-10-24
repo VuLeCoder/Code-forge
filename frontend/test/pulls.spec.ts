@@ -165,8 +165,41 @@ test("pull request form announces validation, restores focus, and fits a 375px v
 
   await page.getByRole("button", { name: "Hủy" }).click();
   await expect(toggle).toBeFocused();
+  const emptyStateToggle = page.getByRole("button", { name: "Tạo pull request", exact: true }).last();
+  await emptyStateToggle.focus();
+  await emptyStateToggle.press("Enter");
+  await expect(page.getByLabel("Tiêu đề")).toBeFocused();
+  await page.getByRole("button", { name: "Hủy" }).click();
+  await expect(emptyStateToggle).toBeFocused();
   const widths = await page.evaluate(() => ({ viewport: window.innerWidth, document: document.documentElement.scrollWidth }));
   expect(widths.document).toBeLessThanOrEqual(widths.viewport);
+});
+
+test("branch loading error is distinct from an empty list and can be retried", async ({ page }) => {
+  await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { user: owner } }));
+  let branchCalls = 0;
+  await page.route("**/api/v1/repos/alice/project/branches", (route) => {
+    branchCalls += 1;
+    return branchCalls === 1
+      ? route.fulfill({ status: 503, json: { error: { code: "BACKEND_UNAVAILABLE", message: "Unavailable" } } })
+      : route.fulfill({ json: { branches: [{ name: "main" }, { name: "feature/recovered" }] } });
+  });
+  await page.route("**/api/v1/repos/alice/project/pulls*", (route) =>
+    route.fulfill({ json: { pullRequests: [], page: 1, hasMore: false, permissions: { canCreate: true } } }),
+  );
+
+  await page.goto("/alice/project/pulls");
+  await page.getByRole("button", { name: "Tạo pull request", exact: true }).first().click();
+  const branchError = page.getByRole("alert").filter({ hasText: "Không thể tải danh sách branch." });
+  await expect(branchError).toBeVisible();
+  await expect(page.getByLabel("Branch nguồn")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Tạo pull request", exact: true }).last()).toBeDisabled();
+
+  await page.getByRole("button", { name: "Thử tải lại branch" }).click();
+  await expect(page.getByLabel("Branch nguồn")).toHaveValue("");
+  await expect(page.getByLabel("Branch đích")).toHaveValue("main");
+  await expect(branchError).toHaveCount(0);
+  expect(branchCalls).toBe(2);
 });
 
 test("long PR labels and diff stay contained at 375px while review controls remain keyboard accessible", async ({ page }) => {
