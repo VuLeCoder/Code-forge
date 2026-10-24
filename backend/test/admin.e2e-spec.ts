@@ -187,10 +187,10 @@ describe('Admin HTTP + isolated PostgreSQL + Git', () => {
     const tokenSecret = 'cfg_test_admin_audit_secret';
     const privateSource = 'private-source-audit-fixture';
     await db!.auditLog.create({ data: {
-      actorId: repositoryOwner.userId, action: 'ADMIN_AUDIT_PRIVACY_FIXTURE', targetId: repository.id,
+      actorId: repositoryOwner.userId, action: 'AUDIT_PRIVACY_FIX', targetId: repository.id,
       details: { repositoryId: repository.id, role: 'WRITE', token: tokenSecret, password: 'password-fixture', diff: privateSource },
     } });
-    const auditResponse = await call('GET', 'admin/audit?action=ADMIN_AUDIT_PRIVACY_FIXTURE', admin.cookie);
+    const auditResponse = await call('GET', 'admin/audit?action=AUDIT_PRIVACY_FIX', admin.cookie);
     expect(auditResponse.status).toBe(200);
     const auditBody = await auditResponse.json() as { audit: Array<{ details: Record<string, unknown> }> };
     expect(auditBody.audit).toHaveLength(1);

@@ -263,17 +263,20 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
 
     // Exercise the shared repository lock across two different lifecycle mutations.
     await git(['-C', writerWork, 'checkout', '-B', 'main', 'refs/remotes/origin/main']);
+    const sameOperationTargetBranch = 'merge/same-operation-target';
+    await git(['-C', writerWork, 'checkout', '-b', sameOperationTargetBranch]);
+    await git(['-C', writerWork, 'push', '--set-upstream', 'origin', sameOperationTargetBranch]);
     await git(['-C', writerWork, 'checkout', '-b', 'feature/same-operation-retry']);
     await writeFile(join(writerWork, 'same-operation.txt'), 'merge exactly once\n');
     await git(['-C', writerWork, 'add', 'same-operation.txt']);
     await git(['-C', writerWork, 'commit', '-m', 'Add same-operation test feature']);
     const sameOperationSourceSha = (await git(['-C', writerWork, 'rev-parse', 'HEAD'])).stdout.trim();
     await git(['-C', writerWork, 'push', '--set-upstream', 'origin', 'feature/same-operation-retry']);
-    const sameOperationTargetSha = (await git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).stdout.trim();
+    const sameOperationTargetSha = (await git(['--git-dir', bare, 'rev-parse', `refs/heads/${sameOperationTargetBranch}`])).stdout.trim();
     const sameOperationCreated = await call('POST', repoPath, {
       title: 'Merge same operation ID concurrently',
       description: 'Concurrent retries with one operation ID must share one merge result.',
-      sourceBranch: 'feature/same-operation-retry', targetBranch: 'main',
+      sourceBranch: 'feature/same-operation-retry', targetBranch: sameOperationTargetBranch,
     });
     expect(sameOperationCreated.status).toBe(201);
     const sameOperationPull = await responseJson<{ pullRequest: { id: string; number: number } }>(sameOperationCreated);
@@ -302,7 +305,8 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     expect(sameOperationResults[1]).toEqual(sameOperationResults[0]);
     const sameOperationMergeSha = sameOperationResults[0]!.mergeCommitSha;
     expect(sameOperationMergeSha).not.toBe(sameOperationTargetSha);
-    expect((await git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).stdout.trim()).toBe(sameOperationMergeSha);
+    expect((await git(['--git-dir', bare, 'rev-parse', `refs/heads/${sameOperationTargetBranch}`])).stdout.trim())
+      .toBe(sameOperationMergeSha);
     const sameOperationParents = (await git(['--git-dir', bare, 'rev-list', '--parents', '-n', '1', sameOperationMergeSha]))
       .stdout.trim().split(' ');
     expect(sameOperationParents).toHaveLength(3);
