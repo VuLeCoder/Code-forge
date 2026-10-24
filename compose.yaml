@@ -22,9 +22,11 @@ services:
       PORT: 4000
       API_PREFIX: api/v1
       DATABASE_URL: postgresql://code_forge:code_forge@postgres:5432/code_forge?schema=public
+      DATABASE_URL_UNPOOLED: postgresql://code_forge:code_forge@postgres:5432/code_forge?schema=public
       GIT_STORAGE_PATH: /data/git
       FRONTEND_ORIGIN: http://localhost:3000
       JWT_ACCESS_SECRET: local-only-change-this-secret-at-least-32-chars
+      RATE_LIMIT_PROXY_SECRET: local-only-change-this-proxy-secret-at-least-32-chars
       ACCESS_TOKEN_TTL_SECONDS: 900
       REFRESH_TOKEN_TTL_DAYS: 30
       COOKIE_SECURE: "false"

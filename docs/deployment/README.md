@@ -8,9 +8,9 @@ Tạo image và chuẩn bị hướng dẫn không chứng minh dịch vụ clou
 
 ### Bằng chứng hiện tại
 
-Mã được kiểm chứng trên commit `4a88d41` của nhánh `thviet`; docs-only commit `9ab5c0f` theo sau. Hosted workflow [40129005632](https://github.com/VuLeCoder/Code-forge/actions/runs/40129005632) đạt toàn bộ bước: frozen install, Prisma generate, backend unit/E2E với PostgreSQL 17 service, lint, typecheck, build, browser/full-stack, build và contents smoke cho cả hai image, migration deploy vào database disposable và kiểm tra whitespace.
+Mã được kiểm chứng trên commit `db2041d` của nhánh `thviet`. Hosted workflow [40136064222](https://github.com/VuLeCoder/Code-forge/actions/runs/40136064222) đạt toàn bộ bước: frozen install, Prisma generate, backend unit/E2E với PostgreSQL 17 service, lint, typecheck, build, browser (48/48), full-stack PR journey, build và contents smoke cho cả hai image, migration deploy vào database disposable và kiểm tra whitespace. Các E2E cạnh tranh push–push, merge–delete, refresh-token reuse và PR error retry đều nằm trong run này.
 
-Kiểm tra local trên working tree hiện tại: lint, typecheck, build; backend unit 14 suites / 81 tests; browser 43/43; helper ký IP 2/2. PR API/UI full-stack specs và thay đổi guard cho admin bootstrap chưa được xác minh trên PostgreSQL local; `localhost:5433` không phản hồi và Docker Desktop hiện hiển thị engine `stopping`, nên tôi giữ nguyên trạng thái đó. PostgreSQL E2E hiện chỉ được xác nhận bởi hosted CI run `40129005632` trên code commit trước đó.
+Trên local Windows, backend typecheck, ESLint cho test merge–delete và `git diff --check` đạt. PostgreSQL tại `localhost:5433` không phản hồi và Docker Engine chưa đáp ứng lệnh; vì vậy chưa có local container runtime smoke. Hosted PostgreSQL/Git E2E và image checks được xác nhận bởi run trên, không suy ra từ kết quả local.
 
 Các bằng chứng này xác nhận CI và image, không chứng minh deployment cloud, nâng cấp từ snapshot production-like, proxy/TLS, Git HTTP trực tiếp Render hoặc source recovery đã được nghiệm thu. Chỉ đánh dấu cloud release đạt sau khi điền kết quả thật theo release commit vào [cloud smoke checklist](./cloud-smoke-checklist.md).
 
@@ -48,6 +48,8 @@ Các bằng chứng này xác nhận CI và image, không chứng minh deploymen
 Vercel cần thêm biến server-side `BACKEND_URL=https://<render-host>` (không gồm `/api/v1`, vì các Next routes tự thêm prefix) và cùng `RATE_LIMIT_PROXY_SECRET` như backend. Vercel ghi đè `X-Forwarded-For` bằng IP request client ([tài liệu request headers](https://vercel.com/docs/headers/request-headers)); Next proxy chỉ gửi IP đã được ký HMAC, backend bỏ qua header giả/không hợp lệ. Giữ secrets ngoài client bundle. Nếu dùng Vercel phía sau một proxy khác, header/IP contract phải được đánh giá lại trước khi deploy.
 
 Các biến TTL mặc định hiện tại nằm trong `backend/.env.example`; chỉ override khi có acceptance test cho cấu hình mới. Không copy giá trị secret mẫu sang cloud.
+
+`compose.yaml` chỉ dành cho local: dùng PostgreSQL trực tiếp và các secret đánh dấu `local-only-*`, không dùng các giá trị đó cho cloud hoặc môi trường public. Các port host chỉ bind loopback. Compose truyền `DATABASE_URL_UNPOOLED` và `RATE_LIMIT_PROXY_SECRET` để qua kiểm tra cấu hình `NODE_ENV=production`; cần chạy runtime smoke trên máy có Docker Engine trước khi coi cấu hình local đã được nghiệm thu.
 
 ## Trình tự release
 
