@@ -1,13 +1,13 @@
 # Code Forge — remaining work breakdown
 
-State date: 2026-10-25. Branch: `thviet`. Latest pushed commit at audit start: `d1019a2`. This register decomposes the approved P0–P8 plan; it does not narrow or replace that scope.
+State date: 2026-10-25. Branch: `thviet`. Latest pushed commit: `1227730`. This register decomposes the approved P0–P8 plan; it does not narrow or replace that scope.
 
 ## Current verified state
 
 - Previous fully green hosted workflow: `40138087574` on `7e0aa27`.
-- Latest hosted workflow: `40139229848` on `d1019a2`; step 12 (`backend test:e2e`) failed. Public unauthenticated output gives only exit code 1. The 23-second duration is not proof of which test failed.
-- Local after `d1019a2` plus the current uncommitted cookie guard: backend typecheck, backend lint/build, and all unit tests (14 suites/84 tests) pass.
-- New merge-recovery E2E still requires hosted verification; the production secure-cookie validation and focused environment suite (8/8) pass locally, with hosted verification pending.
+- Latest hosted workflows: `40139229848` on `d1019a2` and `40140118957` on `1227730`; both failed at step 12 (`backend test:e2e`). Public unauthenticated output gives only exit code 1. The 23/24-second durations are not proof of which test failed.
+- Local on `1227730`: backend typecheck, backend lint/build, and all unit tests (14 suites/84 tests) pass.
+- New merge-recovery E2E still requires hosted verification; the production secure-cookie validation and focused environment suite (8/8) pass locally, with hosted E2E still failing.
 - Docker Desktop is installed, but its dashboard reports “Turning off the Docker Engine…”; do not reset containers or volumes. Local image/PostgreSQL smoke remains unverified.
 - Public issue pages identify issues #3 (PR/Git race/recovery) and #4 (Docker/CI/cloud release) as open at the time checked. Update those existing issues rather than duplicate them after authenticated access is available.
 
