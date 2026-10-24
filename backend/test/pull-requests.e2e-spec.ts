@@ -413,18 +413,23 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     const maintenance = app.get(MaintenanceJobsService);
     let recovered = false;
     let recoveredDetailResponse: Response | undefined;
+    type RecoveredPullRequestDetail = {
+      pullRequest: { status: string; mergedById: string | null; mergeCommitSha: string | null };
+      mergeOperation: { status: string; resultingSha: string | null } | null;
+    };
+    let recoveredDetail: RecoveredPullRequestDetail | undefined;
     for (let attempt = 0; attempt < 20; attempt += 1) {
       await maintenance.runOnce();
       recoveredDetailResponse = await call('GET', `${repoPath}/${pullRequest.number}`, undefined, recoveryCookie);
-      const current = await responseJson<{ pullRequest: { status: string } }>(recoveredDetailResponse);
+      const current = await responseJson<RecoveredPullRequestDetail>(recoveredDetailResponse);
+      recoveredDetail = current;
       if (current.pullRequest.status === 'MERGED') { recovered = true; break; }
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     expect(recovered).toBe(true);
 
     expect(recoveredDetailResponse?.status).toBe(200);
-    expect(await responseJson<{ pullRequest: { status: string; mergedById: string; mergeCommitSha: string };
-      mergeOperation: { status: string; resultingSha: string } }>(recoveredDetailResponse!)).toMatchObject({
+    expect(recoveredDetail).toMatchObject({
       pullRequest: { status: 'MERGED', mergedById: (await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'recoveryowner' } })).id,
         mergeCommitSha: candidateSha },
       mergeOperation: { status: 'COMPLETED', resultingSha: candidateSha },
