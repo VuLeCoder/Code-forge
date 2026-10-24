@@ -366,7 +366,7 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
     }, raceWriterCookie);
     expect(tokenResponse.status).toBe(201);
-    const { token } = await responseJson<{ token: { secret: string } }>(tokenResponse);
+    const token = await responseJson<{ token: { id: string }; secret: string }>(tokenResponse);
 
     const askpass = join(storageRoot, 'git-race-askpass.sh');
     await writeFile(askpass,
