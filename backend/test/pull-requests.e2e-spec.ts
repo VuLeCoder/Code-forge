@@ -263,6 +263,61 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
 
     // Exercise the shared repository lock across two different lifecycle mutations.
     await git(['-C', writerWork, 'checkout', '-B', 'main', 'refs/remotes/origin/main']);
+    await git(['-C', writerWork, 'checkout', '-b', 'feature/same-operation-retry']);
+    await writeFile(join(writerWork, 'same-operation.txt'), 'merge exactly once\n');
+    await git(['-C', writerWork, 'add', 'same-operation.txt']);
+    await git(['-C', writerWork, 'commit', '-m', 'Add same-operation test feature']);
+    const sameOperationSourceSha = (await git(['-C', writerWork, 'rev-parse', 'HEAD'])).stdout.trim();
+    await git(['-C', writerWork, 'push', '--set-upstream', 'origin', 'feature/same-operation-retry']);
+    const sameOperationTargetSha = (await git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).stdout.trim();
+    const sameOperationCreated = await call('POST', repoPath, {
+      title: 'Merge same operation ID concurrently',
+      description: 'Concurrent retries with one operation ID must share one merge result.',
+      sourceBranch: 'feature/same-operation-retry', targetBranch: 'main',
+    });
+    expect(sameOperationCreated.status).toBe(201);
+    const sameOperationPull = await responseJson<{ pullRequest: { id: string; number: number } }>(sameOperationCreated);
+    const sameOperationDetailResponse = await call('GET', `${repoPath}/${sameOperationPull.pullRequest.number}`);
+    expect(sameOperationDetailResponse.status).toBe(200);
+    const sameOperationDetail = await responseJson<{ pullRequest: { version: number } }>(sameOperationDetailResponse);
+    const sameOperationCompareResponse = await call('GET', `${repoPath}/${sameOperationPull.pullRequest.number}/compare`);
+    expect(sameOperationCompareResponse.status).toBe(200);
+    const sameOperationCompare = await responseJson<{ state: string; sourceSha: string; targetSha: string;
+      storageGeneration: number }>(sameOperationCompareResponse);
+    expect(sameOperationCompare).toMatchObject({ state: 'READY', sourceSha: sameOperationSourceSha,
+      targetSha: sameOperationTargetSha, storageGeneration: storedRepo.storageGeneration });
+
+    const sameOperationId = randomUUID();
+    const sameOperationRequest = { operationId: sameOperationId, expectedSourceSha: sameOperationCompare.sourceSha,
+      expectedTargetSha: sameOperationCompare.targetSha, storageGeneration: sameOperationCompare.storageGeneration,
+      version: sameOperationDetail.pullRequest.version };
+    const sameOperationResponses = await Promise.all([
+      call('POST', `${repoPath}/${sameOperationPull.pullRequest.number}/merge`, sameOperationRequest),
+      call('POST', `${repoPath}/${sameOperationPull.pullRequest.number}/merge`, sameOperationRequest),
+    ]);
+    expect(sameOperationResponses.map((response) => response.status)).toEqual([200, 200]);
+    const sameOperationResults = await Promise.all(sameOperationResponses.map((response) =>
+      responseJson<{ status: string; operationId: string; mergeCommitSha: string }>(response)));
+    expect(sameOperationResults[0]).toMatchObject({ status: 'MERGED', operationId: sameOperationId });
+    expect(sameOperationResults[1]).toEqual(sameOperationResults[0]);
+    const sameOperationMergeSha = sameOperationResults[0]!.mergeCommitSha;
+    expect(sameOperationMergeSha).not.toBe(sameOperationTargetSha);
+    expect((await git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).stdout.trim()).toBe(sameOperationMergeSha);
+    const sameOperationParents = (await git(['--git-dir', bare, 'rev-list', '--parents', '-n', '1', sameOperationMergeSha]))
+      .stdout.trim().split(' ');
+    expect(sameOperationParents).toHaveLength(3);
+    expect(sameOperationParents.slice(1).sort()).toEqual([sameOperationTargetSha, sameOperationSourceSha].sort());
+    const sameOperationRows = await db.pullRequestMergeOperation.findMany({
+      where: { pullRequestId: sameOperationPull.pullRequest.id },
+    });
+    expect(sameOperationRows).toHaveLength(1);
+    expect(sameOperationRows[0]).toMatchObject({ operationId: sameOperationId, status: 'COMPLETED',
+      resultingSha: sameOperationMergeSha });
+    expect(await db.auditLog.count({ where: { targetId: sameOperationPull.pullRequest.id, action: 'PULL_REQUEST_MERGED' } }))
+      .toBe(1);
+
+    await git(['-C', writerWork, 'fetch', 'origin', 'main']);
+    await git(['-C', writerWork, 'checkout', '-B', 'main', 'refs/remotes/origin/main']);
     await git(['-C', writerWork, 'checkout', '-b', 'feature/delete-race']);
     await writeFile(join(writerWork, 'delete-race.txt'), 'second feature\n');
     await git(['-C', writerWork, 'add', 'delete-race.txt']);
