@@ -20,7 +20,7 @@ export default async function setup() {
   const root = await mkdtemp(join(tmpdir(), 'code-forge-m38-'));
   const url = new URL(process.env.DATABASE_URL);
   url.searchParams.set('schema', schema);
-  const env: NodeJS.ProcessEnv = { ...process.env, DATABASE_URL: url.toString(), GIT_STORAGE_PATH: join(root, 'git'),
+  const env: NodeJS.ProcessEnv = { ...process.env, DATABASE_URL: url.toString(), DATABASE_URL_UNPOOLED: url.toString(), GIT_STORAGE_PATH: join(root, 'git'),
     NODE_ENV: 'test', PORT: '4112', API_PREFIX: 'api/v1', FRONTEND_ORIGIN: 'http://localhost:3112',
     JWT_ACCESS_SECRET: randomBytes(32).toString('hex'), COOKIE_SECURE: 'false', COOKIE_SAME_SITE: 'lax',
     BACKEND_URL: 'http://127.0.0.1:4112', APP_ORIGIN: 'http://localhost:3112' };

@@ -31,6 +31,7 @@ export function SiteHeader() {
       {loading ? <span className="sessionSkeleton" aria-label="Đang kiểm tra phiên" /> : user ? <>
         <Link className="textLink" href="/invitations">Lời mời</Link>
         <Link className="textLink" href="/settings/tokens">PAT</Link>
+        {user.systemRole === "ADMIN" && <Link className="textLink" href="/admin">Admin</Link>}
         <Link className="userBadge" href={`/${encodeURIComponent(user.username)}`} aria-label={`Hồ sơ ${user.username}`}><span aria-hidden="true">{user.username.slice(0, 1).toUpperCase()}</span><strong>{user.username}</strong></Link>
         <button className="textButton" type="button" onClick={handleLogout} disabled={loggingOut}>{loggingOut ? "Đang thoát…" : "Đăng xuất"}</button>
       </> : <>

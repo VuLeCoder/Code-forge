@@ -1,0 +1,59 @@
+import { BadRequestException, Body, Controller, Get, HttpCode, Param, ParseIntPipe, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
+import type { PullRequestStatus } from '@prisma/client';
+import type { Request, Response } from 'express';
+import { AccessTokenGuard } from '../auth/access-token.guard';
+import { OriginGuard } from '../auth/origin.guard';
+import type { AuthenticatedRequest, AuthPrincipal } from '../auth/auth.types';
+import { OptionalAccessTokenGuard } from './optional-access-token.guard';
+import { CreatePullRequestDto, MergePullRequestDto, UpdatePullRequestDto } from './pull-request.dto';
+import { PullRequestsService } from './pull-requests.service';
+
+@Controller('repos/:owner/:repo/pulls')
+export class PullRequestsController {
+  constructor(private readonly pulls: PullRequestsService) {}
+
+  @Get()
+  @UseGuards(OptionalAccessTokenGuard)
+  list(@Param('owner') owner: string, @Param('repo') repo: string, @Req() request: Request & { user?: AuthPrincipal },
+    @Query('page') page?: string, @Query('status') status?: string) {
+    if (status !== undefined && !['OPEN', 'CLOSED', 'MERGED'].includes(status)) throw new BadRequestException('Trạng thái pull request không hợp lệ.');
+    return this.pulls.list(owner, repo, request.user?.id, page, status as PullRequestStatus | undefined);
+  }
+
+  @Post()
+  @UseGuards(OriginGuard, AccessTokenGuard)
+  create(@Param('owner') owner: string, @Param('repo') repo: string, @Req() request: AuthenticatedRequest, @Body() dto: CreatePullRequestDto) {
+    return this.pulls.create(owner, repo, request.user.id, dto);
+  }
+
+  @Get(':number')
+  @UseGuards(OptionalAccessTokenGuard)
+  detail(@Param('owner') owner: string, @Param('repo') repo: string, @Param('number', ParseIntPipe) number: number,
+    @Req() request: Request & { user?: AuthPrincipal }) {
+    return this.pulls.detail(owner, repo, request.user?.id, number);
+  }
+
+  @Get(':number/compare')
+  @UseGuards(OptionalAccessTokenGuard)
+  compare(@Param('owner') owner: string, @Param('repo') repo: string, @Param('number', ParseIntPipe) number: number,
+    @Req() request: Request & { user?: AuthPrincipal }) {
+    return this.pulls.compare(owner, repo, request.user?.id, number);
+  }
+
+  @Patch(':number')
+  @UseGuards(OriginGuard, AccessTokenGuard)
+  update(@Param('owner') owner: string, @Param('repo') repo: string, @Param('number', ParseIntPipe) number: number,
+    @Req() request: AuthenticatedRequest, @Body() dto: UpdatePullRequestDto) {
+    return this.pulls.update(owner, repo, request.user.id, number, dto);
+  }
+
+  @Post(':number/merge')
+  @HttpCode(200)
+  @UseGuards(OriginGuard, AccessTokenGuard)
+  async merge(@Param('owner') owner: string, @Param('repo') repo: string, @Param('number', ParseIntPipe) number: number,
+    @Req() request: AuthenticatedRequest, @Body() dto: MergePullRequestDto, @Res({ passthrough: true }) response: Response) {
+    const result = await this.pulls.merge(owner, repo, request.user.id, number, dto);
+    if (result.status === 'RECONCILING') response.status(202);
+    return result;
+  }
+}

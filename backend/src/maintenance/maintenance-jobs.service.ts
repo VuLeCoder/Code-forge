@@ -1,0 +1,116 @@
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { PrismaService } from '../database/prisma.service';
+import { GitStorageService } from '../repositories/git-storage.service';
+import { RepositoryLockService } from '../repositories/repository-lock.service';
+import { RepositoryPurgeService } from '../repositories/repository-purge.service';
+
+@Injectable()
+export class MaintenanceJobsService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(MaintenanceJobsService.name);
+  private timer?: NodeJS.Timeout;
+  private running = false;
+
+  constructor(private readonly db: PrismaService, private readonly locks: RepositoryLockService,
+    private readonly storage: GitStorageService, private readonly purge: RepositoryPurgeService) {}
+
+  onModuleInit() {
+    this.timer = setInterval(() => void this.runScheduled(), 60_000);
+    this.timer.unref();
+    void this.runScheduled();
+  }
+
+  onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
+
+  private async runScheduled() {
+    if (this.running) return;
+    this.running = true;
+    let jobLock: Awaited<ReturnType<RepositoryLockService['acquire']>> | undefined;
+    try {
+      jobLock = await this.locks.acquire('code-forge-maintenance-jobs');
+      await this.expireInvitations();
+      await this.cleanupExpiredCredentials();
+      await this.reconcileMerges();
+      await this.purge.purgeDue(50);
+    } catch {
+      // Logs identify only the job and never include database URLs or row data.
+      this.logger.warn('Maintenance batch failed; it will retry on the next run.');
+    } finally {
+      if (jobLock) await jobLock.release();
+      this.running = false;
+    }
+  }
+
+  private async expireInvitations() {
+    await this.db.$executeRaw`
+      UPDATE invitations SET status = 'EXPIRED', updated_at = NOW()
+      WHERE id IN (
+        SELECT id FROM invitations
+        WHERE status = 'PENDING' AND expires_at <= NOW()
+        ORDER BY expires_at, id LIMIT 100 FOR UPDATE SKIP LOCKED
+      )`;
+  }
+
+  private async cleanupExpiredCredentials() {
+    await this.db.$executeRaw`
+      DELETE FROM sessions WHERE id IN (
+        SELECT id FROM sessions
+        WHERE (expires_at < NOW() - INTERVAL '30 days') OR (revoked_at < NOW() - INTERVAL '30 days')
+        ORDER BY expires_at, id LIMIT 100 FOR UPDATE SKIP LOCKED
+      )`;
+    await this.db.$executeRaw`
+      DELETE FROM personal_access_tokens WHERE id IN (
+        SELECT id FROM personal_access_tokens
+        WHERE (expires_at < NOW() - INTERVAL '90 days') OR (revoked_at < NOW() - INTERVAL '90 days')
+        ORDER BY expires_at, id LIMIT 100 FOR UPDATE SKIP LOCKED
+      )`;
+  }
+
+  private async reconcileMerges() {
+    const candidates = await this.db.pullRequestMergeOperation.findMany({
+      where: { status: { in: ['PENDING', 'NEEDS_RECONCILIATION'] } },
+      orderBy: [{ updatedAt: 'asc' }, { operationId: 'asc' }], take: 25,
+      select: { operationId: true, repositoryId: true },
+    });
+    for (const candidate of candidates) {
+      const lock = await this.locks.acquire(candidate.repositoryId);
+      try { await this.reconcileOperation(candidate.operationId); }
+      catch {
+        await this.db.pullRequestMergeOperation.updateMany({ where: { operationId: candidate.operationId,
+          status: { in: ['PENDING', 'NEEDS_RECONCILIATION'] } },
+          data: { status: 'NEEDS_RECONCILIATION', errorCode: 'RECONCILIATION_UNAVAILABLE' } }).catch(() => undefined);
+      } finally { await lock.release(); }
+    }
+  }
+
+  private async reconcileOperation(operationId: string) {
+    const operation = await this.db.pullRequestMergeOperation.findUnique({ where: { operationId }, include: { repository: true, pullRequest: true } });
+    if (!operation || !['PENDING', 'NEEDS_RECONCILIATION'].includes(operation.status)) return;
+    if (operation.storageGeneration !== operation.repository.storageGeneration) {
+      await this.db.pullRequestMergeOperation.update({ where: { operationId }, data: { status: 'NEEDS_RECONCILIATION', errorCode: 'STORAGE_GENERATION_CHANGED' } });
+      return;
+    }
+    const actualTarget = await this.storage.branchSha(operation.repository.storageKey, operation.pullRequest.targetBranch);
+    if (actualTarget === operation.oldTargetSha) {
+      await this.db.pullRequestMergeOperation.update({ where: { operationId }, data: { status: 'FAILED', errorCode: 'REF_NOT_UPDATED' } });
+      return;
+    }
+    if (!operation.candidateSha || !actualTarget || !(await this.storage.isAncestor(operation.repository.storageKey, operation.candidateSha, actualTarget))) {
+      await this.db.pullRequestMergeOperation.update({ where: { operationId }, data: { status: 'NEEDS_RECONCILIATION', errorCode: 'REF_OUTCOME_UNKNOWN' } });
+      return;
+    }
+    const candidate = await this.storage.commit(operation.repository.storageKey, operation.candidateSha);
+    if (candidate.parentShas.length !== 2 || candidate.parentShas[0] !== operation.oldTargetSha || candidate.parentShas[1] !== operation.expectedSourceSha) {
+      await this.db.pullRequestMergeOperation.update({ where: { operationId }, data: { status: 'NEEDS_RECONCILIATION', errorCode: 'CANDIDATE_PARENT_MISMATCH' } });
+      return;
+    }
+    await this.db.$transaction(async (tx) => {
+      await tx.pullRequest.updateMany({ where: { id: operation.pullRequestId, status: { not: 'MERGED' } },
+        data: { status: 'MERGED', version: { increment: 1 }, mergedById: operation.pullRequest.mergedById,
+          mergedAt: new Date(), mergeCommitSha: operation.candidateSha } });
+      await tx.pullRequestMergeOperation.update({ where: { operationId }, data: { status: 'COMPLETED', resultingSha: operation.candidateSha, errorCode: null } });
+      await tx.auditLog.create({ data: { actorId: operation.actorId,
+        action: 'PULL_REQUEST_MERGE_RECONCILED', targetId: operation.pullRequestId,
+        details: { repositoryId: operation.repositoryId, number: operation.pullRequest.number, operationId, mergeCommitSha: operation.candidateSha } } });
+    });
+  }
+}

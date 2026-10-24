@@ -41,7 +41,7 @@ export default function RepositoryPage() {
   const repo = result.repository;
   return <main className={`container ${styles.page}`}>
     <div className={styles.breadcrumb}><Link href={`/${encodeURIComponent(repo.owner.username)}`}>{repo.owner.username}</Link><span>/</span><strong>{repo.name}</strong><span className="badge">{repo.visibility === "PRIVATE" ? "Riêng tư" : "Công khai"}</span></div>
-    <div className={styles.header}><div><span className="eyebrow">Repository</span><h1>{repo.name}</h1>{repo.description && <p>{repo.description}</p>}</div>{repo.permissions?.canManage && <Link className="button buttonSecondary" href={`${repositoryPath(repo)}/settings`}>Cài đặt</Link>}</div>
+    <div className={styles.header}><div><span className="eyebrow">Repository</span><h1>{repo.name}</h1>{repo.description && <p>{repo.description}</p>}</div><div className={styles.actions}><Link className="button buttonSecondary" href={`${repositoryPath(repo)}/pulls`}>Pull requests</Link>{repo.permissions?.canManage && <Link className="button buttonSecondary" href={`${repositoryPath(repo)}/settings`}>Cài đặt</Link>}</div></div>
     {repo.storageState === "RESET" && <div className={styles.notice} role="status">Mã nguồn của repository demo đã bị reset. Bare repository rỗng đã được tạo lại; lịch sử commit trước đó không thể khôi phục.</div>}
     <CloneDialog key={`${repo.id}/${repo.name}/${repo.visibility}`} repository={repo} />
     <Suspense fallback={<p role="status">Đang tải branch…</p>}><SourceBrowser endpoint={`/api/v1/repos/${encodeURIComponent(params.username)}/${encodeURIComponent(params.repo)}`}>

@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { BadRequestException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 const runFile = promisify(execFile);
@@ -13,10 +13,12 @@ const runFile = promisify(execFile);
 export class GitStorageService {
   constructor(private readonly config: ConfigService) {}
 
-  openPack(key: string, defaultBranch: string, service: 'git-upload-pack' | 'git-receive-pack', advertise: boolean, protocol?: string) {
+  openPack(key: string, defaultBranch: string, service: 'git-upload-pack' | 'git-receive-pack', advertise: boolean,
+    protocol?: string, actorIsOwner = false) {
     this.path(key); // Only server-owned UUID keys may enter the CGI environment.
     const write = service === 'git-receive-pack';
     return spawn('git', [
+      ...(process.platform === 'win32' ? ['-c', 'core.longpaths=true'] : []),
       '-c', `http.receivepack=${write}`,
       '-c', 'http.getanyfile=false',
       '-c', `http.uploadpack=${!write}`,
@@ -33,6 +35,7 @@ export class GitStorageService {
         CONTENT_TYPE: advertise ? '' : `application/x-${service}-request`,
         ...(write ? {
           CODE_FORGE_DEFAULT_BRANCH: defaultBranch,
+          CODE_FORGE_ALLOW_DEFAULT_BRANCH_INITIALIZATION: String(actorIsOwner),
           CODE_FORGE_MAX_FILE_BYTES: String(this.config.getOrThrow<number>('MAX_FILE_BYTES')),
           CODE_FORGE_MAX_REPOSITORY_BYTES: String(this.config.getOrThrow<number>('MAX_REPOSITORY_BYTES')),
         } : {}),
@@ -119,6 +122,174 @@ export class GitStorageService {
     }
   }
 
+  async compare(key: string, sourceBranch: string, targetBranch: string, signal?: AbortSignal) {
+    this.validateRef(sourceBranch);
+    this.validateRef(targetBranch);
+    const branches = await this.branches(key, targetBranch, undefined, signal);
+    const source = branches.branches.find((branch) => branch.name === sourceBranch);
+    const target = branches.branches.find((branch) => branch.name === targetBranch);
+    if (!source || !target) throw new NotFoundException({ error: { code: 'REF_NOT_FOUND', message: 'Branch nguồn hoặc đích không tồn tại.' } });
+    const args = ['--git-dir', this.path(key)];
+    let mergeBase: string;
+    try { mergeBase = (await this.git([...args, 'merge-base', target.commitSha, source.commitSha], undefined, 128 * 1024, signal)).stdout.trim(); }
+    catch (error) {
+      if ([1, 128].includes((error as { code: number }).code)) {
+        return { state: 'NO_MERGE_BASE' as const, sourceSha: source.commitSha, targetSha: target.commitSha,
+          mergeBase: null, commits: [], files: [], diff: '', diffTruncated: false };
+      }
+      throw new ServiceUnavailableException({ error: { code: 'GIT_COMPARE_UNAVAILABLE', message: 'Không thể so sánh hai branch.' } });
+    }
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(mergeBase)) throw this.commitUnavailable();
+    try {
+      const commitOutput = (await this.git([...args, 'log', '--topo-order', '--no-notes', '-z',
+        `--format=format:${this.commitFormat}`, '--max-count=201', `${target.commitSha}..${source.commitSha}`, '--'], undefined, 128 * 1024, signal)).stdout;
+      const commits = this.parseCommits(commitOutput);
+      const rawFiles = (await this.git([...args, 'diff', '--name-status', '-z', '--find-renames', mergeBase, source.commitSha], undefined, 128 * 1024, signal)).stdout;
+      const tokens = rawFiles.split('\0').filter(Boolean);
+      const files: { status: string; path: string; previousPath?: string }[] = [];
+      for (let i = 0; i < tokens.length;) {
+        const status = tokens[i++]!;
+        if (/^R\d+$/.test(status) || /^C\d+$/.test(status)) {
+          const previousPath = tokens[i++]; const path = tokens[i++];
+          if (!previousPath || !path) throw this.commitUnavailable();
+          files.push({ status: status[0]!, previousPath, path });
+        } else {
+          const path = tokens[i++];
+          if (!path || !/^[A-Z]$/.test(status)) throw this.commitUnavailable();
+          files.push({ status, path });
+        }
+      }
+      if (commits.length > 200 || files.length > 200) throw new ServiceUnavailableException({ error: { code: 'GIT_COMPARE_LIMIT_EXCEEDED', message: 'So sánh vượt giới hạn 200 commit hoặc 200 file.' } });
+      const { stdout: rawDiff } = await this.git([...args, 'diff', '--no-ext-diff', '--no-color', '--no-textconv', '--unified=3', mergeBase, source.commitSha], undefined, 1024 * 1024 + 1, signal);
+      const sections = rawDiff.split(/(?=^diff --git )/m);
+      const kept: string[] = [];
+      let usedBytes = 0;
+      let diffTruncated = false;
+      for (const section of sections) {
+        const bytes = Buffer.from(section);
+        if (usedBytes >= 1024 * 1024) { diffTruncated = true; break; }
+        const fileLimit = Math.min(bytes.length, 128 * 1024, 1024 * 1024 - usedBytes);
+        if (fileLimit < bytes.length) diffTruncated = true;
+        kept.push(bytes.subarray(0, fileLimit).toString('utf8'));
+        usedBytes += fileLimit;
+      }
+      if (sections.length > kept.length) diffTruncated = true;
+      const diff = kept.join('');
+      return { state: commits.length ? 'READY' as const : 'ALREADY_MERGED' as const,
+        sourceSha: source.commitSha, targetSha: target.commitSha, mergeBase, commits, files,
+        diff, diffTruncated };
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof ServiceUnavailableException) throw error;
+      throw new ServiceUnavailableException({ error: { code: 'GIT_COMPARE_UNAVAILABLE', message: 'Không thể so sánh hai branch trong giới hạn cho phép.' } });
+    }
+  }
+
+  async createMergeCandidate(key: string, targetBranch: string, targetSha: string, sourceSha: string, pullRequestNumber: number, signal?: AbortSignal) {
+    this.validateRef(targetBranch);
+    this.validateCommitSha(targetSha);
+    this.validateCommitSha(sourceSha);
+    if (!Number.isSafeInteger(pullRequestNumber) || pullRequestNumber < 1) throw new BadRequestException();
+    const args = ['--git-dir', this.path(key)];
+    const target = (await this.git([...args, 'rev-parse', '--verify', `refs/heads/${targetBranch}^{commit}`], undefined, 128 * 1024, signal)).stdout.trim();
+    if (target !== targetSha) throw new ConflictException({ error: { code: 'STALE_COMPARE', message: 'Branch đích đã thay đổi.' } });
+    let tree: string;
+    try {
+      tree = (await this.git([...args, 'merge-tree', '--write-tree', targetSha, sourceSha], undefined, 128 * 1024, signal)).stdout.split('\n')[0]!.trim();
+    } catch (error) {
+      if ([1, 128].includes((error as { code: number }).code)) throw new ConflictException({ error: { code: 'MERGE_CONFLICT', message: 'Các thay đổi có xung đột và chưa được áp dụng.' } });
+      throw new ServiceUnavailableException({ error: { code: 'MERGE_UNAVAILABLE', message: 'Không thể tạo merge candidate.' } });
+    }
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(tree)) throw new ServiceUnavailableException({ error: { code: 'MERGE_UNAVAILABLE', message: 'Git trả về tree không hợp lệ.' } });
+    const message = `Merge pull request #${pullRequestNumber}`;
+    try {
+      const commit = (await this.git([...args, '-c', 'user.name=Code Forge', '-c', 'user.email=system@codeforge.invalid',
+        'commit-tree', tree, '-p', targetSha, '-p', sourceSha, '-m', message], undefined, 128 * 1024, signal)).stdout.trim();
+      this.validateCommitSha(commit);
+      return commit;
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      throw new ServiceUnavailableException({ error: { code: 'MERGE_UNAVAILABLE', message: 'Không thể tạo merge commit.' } });
+    }
+  }
+
+  async assertMergeCandidateQuota(key: string, candidateSha: string, signal?: AbortSignal) {
+    this.validateCommitSha(candidateSha);
+    const maxFileBytes = this.config.getOrThrow<number>('MAX_FILE_BYTES');
+    const maxRepositoryBytes = this.config.getOrThrow<number>('MAX_REPOSITORY_BYTES');
+    const args = ['--git-dir', this.path(key)];
+    let listed: string;
+    try {
+      listed = (await this.git([...args, 'rev-list', '--objects', '--all', candidateSha], undefined, 64 * 1024 * 1024, signal)).stdout;
+    } catch {
+      throw new ServiceUnavailableException({ error: { code: 'MERGE_QUOTA_CHECK_FAILED', message: 'Không thể kiểm tra quota của pull request.' } });
+    }
+    const ids = [...new Set(listed.split('\n').filter(Boolean).map((line) => line.split(' ')[0]))];
+    if (ids.length > 1_000_000 || ids.some((id) => !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(id ?? ''))) {
+      throw new ServiceUnavailableException({ error: { code: 'MERGE_QUOTA_CHECK_FAILED', message: 'Danh sách object merge vượt giới hạn kiểm tra.' } });
+    }
+    let details: string;
+    try {
+      details = ids.length
+        ? (await this.gitWithInput([...args, 'cat-file', '--batch-check=%(objectname) %(objecttype) %(objectsize)'],
+          `${ids.join('\n')}\n`, 64 * 1024 * 1024, signal)).stdout
+        : '';
+    } catch {
+      throw new ServiceUnavailableException({ error: { code: 'MERGE_QUOTA_CHECK_FAILED', message: 'Không thể đo quota của pull request.' } });
+    }
+    let logicalBytes = 0;
+    for (const line of details.split('\n').filter(Boolean)) {
+      const [id, type, rawSize] = line.split(' ');
+      const size = Number(rawSize);
+      if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(id ?? '') ||
+        !['blob', 'tree', 'commit', 'tag'].includes(type ?? '') || !Number.isSafeInteger(size) || size < 0) {
+        throw new ServiceUnavailableException({ error: { code: 'MERGE_QUOTA_CHECK_FAILED', message: 'Metadata object merge không hợp lệ.' } });
+      }
+      if (type === 'blob' && size > maxFileBytes) {
+        throw new ConflictException({ error: { code: 'MERGE_FILE_QUOTA_EXCEEDED', message: 'Merge có file vượt giới hạn kích thước.' } });
+      }
+      logicalBytes += size;
+      if (logicalBytes > maxRepositoryBytes) {
+        throw new ConflictException({ error: { code: 'MERGE_REPOSITORY_QUOTA_EXCEEDED', message: 'Merge vượt giới hạn dung lượng repository.' } });
+      }
+    }
+  }
+
+  async compareAndSwapBranch(key: string, branch: string, nextSha: string, expectedSha: string, signal?: AbortSignal) {
+    this.validateRef(branch);
+    this.validateCommitSha(nextSha);
+    this.validateCommitSha(expectedSha);
+    try {
+      await this.git(['--git-dir', this.path(key), 'update-ref', `refs/heads/${branch}`, nextSha, expectedSha], undefined, 128 * 1024, signal);
+    } catch (error) {
+      if ([1, 128].includes((error as { code: number }).code)) throw new ConflictException({ error: { code: 'STALE_COMPARE', message: 'Branch đích đã thay đổi.' } });
+      throw new ServiceUnavailableException({ error: { code: 'MERGE_REF_UPDATE_FAILED', message: 'Không thể cập nhật branch đích.' } });
+    }
+  }
+
+  async branchSha(key: string, branch: string) {
+    this.validateRef(branch);
+    try {
+      const sha = (await this.git(['--git-dir', this.path(key), 'rev-parse', '--verify', `refs/heads/${branch}^{commit}`])).stdout.trim();
+      this.validateCommitSha(sha);
+      return sha;
+    } catch (error) {
+      if ([1, 128].includes((error as { code: number }).code)) return null;
+      throw new ServiceUnavailableException({ error: { code: 'GIT_REF_UNAVAILABLE', message: 'Không thể xác minh branch sau thao tác Git.' } });
+    }
+  }
+
+  async isAncestor(key: string, ancestorSha: string, descendantSha: string) {
+    this.validateCommitSha(ancestorSha);
+    this.validateCommitSha(descendantSha);
+    try {
+      await this.git(['--git-dir', this.path(key), 'merge-base', '--is-ancestor', ancestorSha, descendantSha]);
+      return true;
+    } catch (error) {
+      if ((error as { code: number }).code === 1) return false;
+      throw new ServiceUnavailableException({ error: { code: 'GIT_ANCESTRY_UNAVAILABLE', message: 'Không thể xác minh lịch sử merge.' } });
+    }
+  }
+
   validateRef(ref: string) {
     if (typeof ref !== 'string' || Buffer.byteLength(ref) > 255 || !ref ||
       [...ref].some((char) => char.charCodeAt(0) <= 32 || char.charCodeAt(0) === 127 || '~^:?*[\\'.includes(char)) || ref.includes('..') || ref.includes('@{') ||
@@ -135,12 +306,12 @@ export class GitStorageService {
     }
   }
 
-  async branches(key: string, defaultBranch: string, ref?: string) {
+  async branches(key: string, defaultBranch: string, ref?: string, signal?: AbortSignal) {
     if (ref !== undefined) this.validateRef(ref);
     let stdout: string;
     try {
       ({ stdout } = await this.git(['--git-dir', this.path(key), 'for-each-ref', '--sort=refname',
-        '--count=1001', '--format=%(refname)%09%(objectname)', 'refs/heads/']));
+        '--count=1001', '--format=%(refname)%09%(objectname)', 'refs/heads/'], undefined, 128 * 1024, signal));
     } catch {
       throw new ServiceUnavailableException({ error: { code: 'GIT_READ_UNAVAILABLE', message: 'Không thể đọc danh sách branch trong giới hạn cho phép.' } });
     }
@@ -249,8 +420,74 @@ export class GitStorageService {
     return join(this.root(), key);
   }
 
-  private async git(args: string[], env?: NodeJS.ProcessEnv) {
-    return runFile('git', args, { timeout: 15_000, maxBuffer: 128 * 1024, env: { ...process.env, ...env } });
+  private async git(args: string[], env?: NodeJS.ProcessEnv, maxBuffer = 128 * 1024, signal?: AbortSignal) {
+    return runFile('git', [...(process.platform === 'win32' ? ['-c', 'core.longpaths=true'] : []), ...args],
+      { timeout: 15_000, maxBuffer, signal, env: { ...process.env, ...env } });
+  }
+
+  private async gitWithInput(args: string[], input: string, maxBuffer: number, signal?: AbortSignal) {
+    return new Promise<{ stdout: string; stderr: string }>((resolveResult, rejectResult) => {
+      const child = spawn('git', [...(process.platform === 'win32' ? ['-c', 'core.longpaths=true'] : []), ...args], {
+        env: process.env, stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      const stdout: Buffer[] = [];
+      const stderr: Buffer[] = [];
+      let outputBytes = 0;
+      let settled = false;
+      const finish = (error?: Error, value?: { stdout: string; stderr: string }) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', abort);
+        if (error) rejectResult(error);
+        else resolveResult(value!);
+      };
+      const abort = () => {
+        child.kill('SIGKILL');
+        finish(signal?.reason instanceof Error ? signal.reason : new Error('Git operation aborted'));
+      };
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL');
+        finish(Object.assign(new Error('Git operation timed out'), { code: 'ETIMEDOUT' }));
+      }, 15_000);
+      child.once('error', (error) => finish(error));
+      child.stdout.on('data', (chunk: Buffer) => {
+        outputBytes += chunk.length;
+        if (outputBytes > maxBuffer) {
+          child.kill('SIGKILL');
+          finish(Object.assign(new Error('Git output exceeded the configured limit'), { code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' }));
+          return;
+        }
+        stdout.push(chunk);
+      });
+      child.stderr.on('data', (chunk: Buffer) => {
+        outputBytes += chunk.length;
+        if (outputBytes > maxBuffer) {
+          child.kill('SIGKILL');
+          finish(Object.assign(new Error('Git output exceeded the configured limit'), { code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' }));
+          return;
+        }
+        stderr.push(chunk);
+      });
+      child.once('close', (code) => {
+        if (code !== 0) return finish(Object.assign(new Error(Buffer.concat(stderr).toString('utf8') || 'Git command failed'), { code }));
+        finish(undefined, { stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') });
+      });
+      if (signal?.aborted) abort();
+      else signal?.addEventListener('abort', abort, { once: true });
+      if (!settled) child.stdin.end(input);
+    });
+  }
+
+  private async renameStage(stage: string, target: string) {
+    for (let attempt = 0; ; attempt++) {
+      try { await rename(stage, target); return; }
+      catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (process.platform !== 'win32' || attempt >= 3 || !['EPERM', 'EBUSY', 'EACCES'].includes(code ?? '')) throw error;
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 40 * (attempt + 1)));
+      }
+    }
   }
 
   async exists(key: string) {
@@ -276,7 +513,7 @@ export class GitStorageService {
         });
         await this.git(['-C', work, 'push', stage, `HEAD:refs/heads/${branch}`]);
       }
-      await rename(stage, target);
+      await this.renameStage(stage, target);
     } catch (error) {
       throw new ServiceUnavailableException({ error: { code: 'GIT_STORAGE_UNAVAILABLE', message: 'Không thể khởi tạo Git storage.' } }, { cause: error });
     } finally {

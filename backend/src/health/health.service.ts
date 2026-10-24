@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { execFile } from 'node:child_process';
-import { access, mkdir } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { PrismaService } from '../database/prisma.service';
 
@@ -12,7 +14,7 @@ export type ReadinessResult = {
   checks: {
     database: { status: 'up' | 'down' };
     git: { status: 'up' | 'down'; version?: string };
-    storage: { status: 'up' | 'down'; path: string };
+    storage: { status: 'up' | 'down' };
   };
 };
 
@@ -28,7 +30,7 @@ export class HealthService {
     const checks: ReadinessResult['checks'] = {
       database: { status: 'down' },
       git: { status: 'down' },
-      storage: { status: 'down', path: storagePath },
+      storage: { status: 'down' },
     };
 
     try {
@@ -45,12 +47,15 @@ export class HealthService {
       // Keep the default down state; readiness returns the aggregate result.
     }
 
+    const probe = join(storagePath, `.health-${randomUUID()}`);
     try {
       await mkdir(storagePath, { recursive: true });
-      await access(storagePath);
-      checks.storage = { status: 'up', path: storagePath };
+      await writeFile(probe, 'ok', { flag: 'wx', mode: 0o600 });
+      checks.storage = { status: 'up' };
     } catch {
       // Keep the default down state; readiness returns the aggregate result.
+    } finally {
+      await rm(probe, { force: true }).catch(() => {});
     }
 
     const ready = Object.values(checks).every((check) => check.status === 'up');

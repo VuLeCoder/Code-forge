@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import type { Request } from 'express';
 import { UsersService } from '../users/users.service';
+import { PrismaService } from '../database/prisma.service';
 import { toPublicUser } from '../users/user-public';
 import { ACCESS_COOKIE } from './auth.constants';
 import { AuthError } from './auth-error';
@@ -14,6 +15,7 @@ export class AccessTokenGuard implements CanActivate {
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
     private readonly users: UsersService,
+    private readonly db: PrismaService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -39,6 +41,11 @@ export class AccessTokenGuard implements CanActivate {
     if (!user || user.status === 'LOCKED') {
       throw new AuthError(HttpStatus.UNAUTHORIZED, 'ACCOUNT_UNAVAILABLE', 'Tài khoản không khả dụng.');
     }
+    const session = await this.db.session.findFirst({
+      where: { id: payload.sessionId, userId: user.id, revokedAt: null, expiresAt: { gt: new Date() } },
+      select: { id: true },
+    });
+    if (!session) throw new AuthError(HttpStatus.UNAUTHORIZED, 'ACCESS_TOKEN_INVALID', 'Phiên đăng nhập đã hết hạn hoặc bị thu hồi.');
     (request as AuthenticatedRequest).user = { ...toPublicUser(user), sessionId: payload.sessionId };
     return true;
   }

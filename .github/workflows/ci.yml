@@ -1,0 +1,52 @@
+name: MVP verification
+on: [push, pull_request]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: code_forge_test
+          POSTGRES_USER: code_forge
+          POSTGRES_PASSWORD: local-ci-only
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U code_forge -d code_forge_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://code_forge:local-ci-only@localhost:5432/code_forge_test?schema=public
+      DATABASE_URL_UNPOOLED: postgresql://code_forge:local-ci-only@localhost:5432/code_forge_test?schema=public
+      JWT_ACCESS_SECRET: ci-only-secret-at-least-thirty-two-characters
+      FRONTEND_ORIGIN: http://localhost:3000
+      GIT_STORAGE_PATH: /tmp/code-forge-ci-git
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: corepack enable
+      - run: corepack pnpm install --frozen-lockfile
+      - run: corepack pnpm db:generate
+      - run: corepack pnpm --filter frontend exec playwright install --with-deps chromium
+      - run: corepack pnpm --filter backend test
+      - run: corepack pnpm --filter backend test:e2e
+      - run: corepack pnpm lint
+      - run: corepack pnpm typecheck
+      - run: corepack pnpm build
+      - run: corepack pnpm --filter frontend test:e2e
+      - run: corepack pnpm --filter frontend test:fullstack
+      - run: docker build -f backend/Dockerfile -t code-forge-api .
+      - run: docker run --rm --entrypoint sh code-forge-api -c 'git --version && test -x dist/repositories/pre-receive && node -e "require(\"@prisma/client\")"'
+      - run: docker build -f backend/Dockerfile.migrate -t code-forge-migrate .
+      - run: docker run --rm --entrypoint sh code-forge-migrate -c 'pnpm --filter backend exec prisma --version && node -e "require.resolve(\"@prisma/client\")"'
+      - name: Check submitted diff whitespace
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git diff --check "${{ github.event.pull_request.base.sha }}...HEAD"
+          else
+            git show --check --oneline HEAD
+          fi

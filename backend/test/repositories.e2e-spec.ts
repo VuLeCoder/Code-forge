@@ -24,6 +24,7 @@ describe('Repository HTTP + PostgreSQL', () => {
   let otherCookie: string;
   let ownerId: string;
   let originalUrl: string | undefined;
+  let originalUrlUnpooled: string | undefined;
   let originalQuota: string | undefined;
   let originalRetention: string | undefined;
   let originalStorage: string | undefined;
@@ -42,6 +43,7 @@ describe('Repository HTTP + PostgreSQL', () => {
   beforeAll(async () => {
     await ConfigModule.forRoot({ envFilePath: '.env' });
     originalUrl = process.env.DATABASE_URL;
+    originalUrlUnpooled = process.env.DATABASE_URL_UNPOOLED;
     originalQuota = process.env.MAX_REPOSITORIES_PER_USER;
     originalRetention = process.env.SOFT_DELETE_RETENTION_DAYS;
     originalStorage = process.env.GIT_STORAGE_PATH;
@@ -56,6 +58,7 @@ describe('Repository HTTP + PostgreSQL', () => {
     const url = new URL(originalUrl);
     url.searchParams.set('schema', schema);
     process.env.DATABASE_URL = url.toString();
+    process.env.DATABASE_URL_UNPOOLED = url.toString();
     process.env.MAX_REPOSITORIES_PER_USER = '3';
     process.env.SOFT_DELETE_RETENTION_DAYS = '7';
     process.env.MAX_REPOSITORY_BYTES = String(32 * 1024);
@@ -96,6 +99,7 @@ describe('Repository HTTP + PostgreSQL', () => {
     }
     for (const [key, value] of Object.entries({
       DATABASE_URL: originalUrl, MAX_REPOSITORIES_PER_USER: originalQuota,
+      DATABASE_URL_UNPOOLED: originalUrlUnpooled,
       SOFT_DELETE_RETENTION_DAYS: originalRetention,
       GIT_STORAGE_PATH: originalStorage,
       MAX_REPOSITORY_BYTES: originalMaxRepositoryBytes,
@@ -129,6 +133,7 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect(repository.owner.email).toBeUndefined();
     const stored = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
     expect(stored.storageKey).toBe(`${repository.id}.git`);
+    expect(await db.auditLog.count({ where: { targetId: repository.id, action: 'REPOSITORY_CREATED' } })).toBe(1);
     const bare = join(storageRoot, stored.storageKey);
     expect(execFileSync('git', ['--git-dir', bare, 'symbolic-ref', 'HEAD'], { encoding: 'utf8' }).trim()).toBe('refs/heads/main');
     expect(execFileSync('git', ['--git-dir', bare, 'show', 'HEAD:README.md'], { encoding: 'utf8' })).toBe('# Demo\n');
@@ -216,7 +221,9 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect((await call('GET', 'repos/OWNER/DEMO', ownerCookie)).status).toBe(200);
     const hidden = await call('GET', 'repos/owner/demo', otherCookie);
     expect(hidden.status).toBe(404);
-    expect(await hidden.json()).toEqual(await (await call('GET', 'repos/owner/missing', otherCookie)).json());
+    const hiddenBody = await hidden.json();
+    const missingBody = await (await call('GET', 'repos/owner/missing', otherCookie)).json();
+    expect(hiddenBody.error).toEqual(missingBody.error);
     expect((await call('GET', 'repos/owner/demo')).status).toBe(404);
     expect((await call('PATCH', 'repos/owner/demo', otherCookie, { name: 'Stolen' })).status).toBe(404);
     expect((await call('DELETE', 'repos/owner/demo', otherCookie)).status).toBe(404);
@@ -364,6 +371,7 @@ describe('Repository HTTP + PostgreSQL', () => {
     }
     const repo = await db.repository.findFirstOrThrow({ where: { ownerId, normalizedName: 'demo' } });
     const bare = join(storageRoot, repo.storageKey);
+    execFileSync('git', ['--git-dir', bare, 'update-ref', '-d', 'refs/heads/main']);
     const localGit = (args: string[], input?: string) => execFileSync('git', ['--git-dir', bare, ...args], { input, encoding: 'utf8' }).trim();
     const blob = localGit(['hash-object', '-w', '--stdin'], 'private source\n');
     const tree = localGit(['mktree'], `100644 blob ${blob}\tprivate.txt\n`);
@@ -466,6 +474,13 @@ describe('Repository HTTP + PostgreSQL', () => {
     await git(['-C', work, 'push', '-u', 'origin', 'main']);
     expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(first);
 
+    await writeFile(join(work, 'code.txt'), 'second\n');
+    await git(['-C', work, 'add', 'code.txt']);
+    await git(['-C', work, 'commit', '-m', 'Feature change']);
+    const second = (await git(['-C', work, 'rev-parse', 'HEAD'])).stdout.trim();
+    await expect(git(['-C', work, 'push', 'origin', 'main'])).rejects.toThrow();
+    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(first);
+
     await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/read-token-denied'], 'Owner', readToken.secret)).rejects.toThrow();
     await db.repositoryMember.upsert({
       where: { repositoryId_userId: { repositoryId: repo.id, userId: other.id } },
@@ -473,6 +488,8 @@ describe('Repository HTTP + PostgreSQL', () => {
     });
     await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/member-denied'], 'Other', writeOnlyToken.secret)).rejects.toThrow();
     await db.repositoryMember.update({ where: { repositoryId_userId: { repositoryId: repo.id, userId: other.id } }, data: { role: 'WRITE' } });
+    await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/main'], 'Other', writeOnlyToken.secret)).rejects.toThrow();
+    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(first);
     await git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/member-write'], 'Other', writeOnlyToken.secret);
     expect((await fetch(`${url}/info/refs?service=git-upload-pack`, { headers: { Authorization: basic('Other', writeOnlyToken.secret) } })).status).toBe(401);
     await git(['-C', work, 'push', 'origin', ':member-write'], 'Other', writeOnlyToken.secret);
@@ -480,17 +497,12 @@ describe('Repository HTTP + PostgreSQL', () => {
     await db.repositoryMember.delete({ where: { repositoryId_userId: { repositoryId: repo.id, userId: other.id } } });
     await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/member-revoked'], 'Other', writeOnlyToken.secret)).rejects.toThrow();
 
-    await writeFile(join(work, 'code.txt'), 'second\n');
-    await git(['-C', work, 'add', 'code.txt']);
-    await git(['-C', work, 'commit', '-m', 'Fast forward']);
-    const second = (await git(['-C', work, 'rev-parse', 'HEAD'])).stdout.trim();
-    await git(['-C', work, 'push', 'origin', 'main']);
     await git(['-C', work, 'reset', '--hard', first]);
     await writeFile(join(work, 'code.txt'), 'divergent\n');
     await git(['-C', work, 'add', 'code.txt']);
     await git(['-C', work, 'commit', '-m', 'Divergent']);
-    await expect(git(['-C', work, 'push', '--force', 'origin', 'main'])).rejects.toThrow();
-    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(second);
+    await expect(git(['-C', work, 'push', '--force', 'origin', 'HEAD:refs/heads/member-write'])).rejects.toThrow();
+    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/member-write'], { encoding: 'utf8' }).trim()).toBe(second);
     await git(['-C', work, 'reset', '--hard', second]);
     await expect(git(['-C', work, 'push', 'origin', ':main'])).rejects.toThrow();
     await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/tags/not-allowed'])).rejects.toThrow();
@@ -498,15 +510,15 @@ describe('Repository HTTP + PostgreSQL', () => {
     await writeFile(join(work, 'too-large.bin'), randomBytes(1025));
     await git(['-C', work, 'add', 'too-large.bin']);
     await git(['-C', work, 'commit', '-m', 'Oversized file']);
-    await expect(git(['-C', work, 'push', 'origin', 'main'])).rejects.toThrow();
-    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(second);
+    await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/feature/oversized'])).rejects.toThrow();
+    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(first);
     await git(['-C', work, 'reset', '--hard', second]);
 
     for (let index = 0; index < 40; index++) await writeFile(join(work, `quota-${index}.bin`), randomBytes(900));
     await git(['-C', work, 'add', '.']);
     await git(['-C', work, 'commit', '-m', 'Repository quota']);
-    await expect(git(['-C', work, 'push', 'origin', 'main'])).rejects.toThrow();
-    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(second);
+    await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/feature/quota'])).rejects.toThrow();
+    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(first);
 
     const oversizedRequest = await fetch(`${url}/git-receive-pack`, {
       method: 'POST', headers: { Authorization: basic('Owner', ownerToken.secret), 'content-type': 'application/x-git-receive-pack-request' },
@@ -534,6 +546,7 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect((await call('PATCH', 'repos/owner/renamed', ownerCookie, { visibility: 'PRIVATE' })).status).toBe(200);
     expect((await call('GET', 'repos/owner/renamed')).status).toBe(404);
     expect((await db.repository.findUniqueOrThrow({ where: { id: before.id } })).storageKey).toBe(before.storageKey);
+    expect(await db.auditLog.count({ where: { targetId: before.id, action: 'REPOSITORY_UPDATED' } })).toBe(2);
   });
 
   it('soft-deletes, computes configured retention and reserves the deleted name', async () => {
@@ -541,6 +554,7 @@ describe('Repository HTTP + PostgreSQL', () => {
     const deleted = await db.repository.findFirstOrThrow({ where: { ownerId, normalizedName: 'renamed' } });
     expect(deleted.status).toBe('DELETED');
     expect(deleted.purgeAfter!.getTime() - deleted.deletedAt!.getTime()).toBe(7 * 86400000);
+    expect(await db.auditLog.count({ where: { targetId: deleted.id, action: 'REPOSITORY_SOFT_DELETED' } })).toBe(1);
     for (const cookies of ['', ownerCookie, otherCookie]) {
       expect((await call('GET', 'repos/owner/renamed', cookies)).status).toBe(404);
       expect((await call('GET', 'repos/owner/renamed/branches', cookies)).status).toBe(404);
@@ -570,6 +584,8 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect(restored.status).toBe(201);
     expect((await restored.json()).repository).toMatchObject({ name: 'Renamed', status: 'ACTIVE' });
     expect((await call('GET', 'repos/owner/renamed', ownerCookie)).status).toBe(200);
+    expect(await db.auditLog.count({ where: { targetId: (await db.repository.findFirstOrThrow({ where: { ownerId, normalizedName: 'renamed' } })).id,
+      action: 'REPOSITORY_RESTORED' } })).toBe(1);
     expect((await (await call('GET', 'repositories/deleted', ownerCookie)).json()).repositories).toEqual([]);
     expect((await call('POST', path, ownerCookie)).status).toBe(404);
     expect((await call('DELETE', 'repos/owner/renamed', ownerCookie)).status).toBe(204);

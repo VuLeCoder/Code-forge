@@ -7,11 +7,14 @@ import { ConfigService } from '@nestjs/config';
 import { GitStorageService } from './git-storage.service';
 
 describe('GitStorageService with real Git', () => {
+  // Spawning Git repeatedly is substantially slower on Windows hosts.
+  jest.setTimeout(60_000);
   let root: string;
   let storage: GitStorageService;
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'code-forge-storage-test-'));
-    storage = new GitStorageService({ getOrThrow: () => root } as unknown as ConfigService);
+    storage = new GitStorageService({ getOrThrow: (key: string) => key === 'GIT_STORAGE_PATH' ? root
+      : key === 'MAX_FILE_BYTES' ? 25 * 1024 * 1024 : 500 * 1024 * 1024 } as unknown as ConfigService);
   });
   afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
@@ -97,6 +100,64 @@ describe('GitStorageService with real Git', () => {
     await expect(storage.branches('../escape.git', 'main')).rejects.toThrow();
   });
 
+  it('pins a compare snapshot to exact branch commits and returns bounded text diff data', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'main', true, 'Compare');
+    const git = (args: string[], input?: string) => execFileSync('git', ['--git-dir', join(root, key), ...args], { encoding: 'utf8', input }).trim();
+    const base = git(['rev-parse', 'refs/heads/main']);
+    const entries = ['README.md', 'feature.txt'].map((name, index) => {
+      const content = index ? 'added line\n' : '# Compare changed\n';
+      const sha = git(['hash-object', '-w', '--stdin'], content);
+      return `100644 blob ${sha}\t${name}\0`;
+    }).join('');
+    const tree = git(['mktree', '-z'], entries);
+    const source = git(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', tree, '-p', base, '-m', 'Compare changes']);
+    git(['update-ref', 'refs/heads/feature/compare', source]);
+    const result = await storage.compare(key, 'feature/compare', 'main');
+    expect(result).toMatchObject({ state: 'READY', sourceSha: source, targetSha: base, mergeBase: base, diffTruncated: false });
+    expect(result.commits.map((commit) => commit.sha)).toEqual([source]);
+    expect(result.files).toEqual(expect.arrayContaining([{ status: 'M', path: 'README.md' }, { status: 'A', path: 'feature.txt' }]));
+    expect(result.diff).toContain('+added line');
+  });
+
+  it('rejects a merge candidate containing a file above the configured file quota', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'main', true, 'Quota');
+    const git = (args: string[], input?: string) => execFileSync('git', ['--git-dir', join(root, key), ...args], { encoding: 'utf8', input }).trim();
+    const base = git(['rev-parse', 'refs/heads/main']);
+    const blob = git(['hash-object', '-w', '--stdin'], 'x'.repeat(1025));
+    const tree = git(['mktree', '-z'], `100644 blob ${blob}\toversized.bin\0`);
+    const source = git(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', tree, '-p', base, '-m', 'Oversized source']);
+    git(['update-ref', 'refs/heads/feature/quota', source]);
+    const candidate = await storage.createMergeCandidate(key, 'main', base, source, 1);
+    const limited = new GitStorageService({ getOrThrow: (name: string) => name === 'GIT_STORAGE_PATH' ? root
+      : name === 'MAX_FILE_BYTES' ? 1024 : 32 * 1024 } as unknown as ConfigService);
+
+    await expect(limited.assertMergeCandidateQuota(key, candidate)).rejects.toMatchObject({
+      response: { error: { code: 'MERGE_FILE_QUOTA_EXCEEDED' } },
+    });
+    expect(await storage.branchSha(key, 'main')).toBe(base);
+  });
+
+  it('rejects a merge candidate whose reachable objects exceed the repository quota', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'main', true, 'Quota');
+    const git = (args: string[], input?: string) => execFileSync('git', ['--git-dir', join(root, key), ...args], { encoding: 'utf8', input }).trim();
+    const base = git(['rev-parse', 'refs/heads/main']);
+    const blob = git(['hash-object', '-w', '--stdin'], 'feature data');
+    const tree = git(['mktree', '-z'], `100644 blob ${blob}\tfeature.txt\0`);
+    const source = git(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', tree, '-p', base, '-m', 'Source']);
+    git(['update-ref', 'refs/heads/feature/quota', source]);
+    const candidate = await storage.createMergeCandidate(key, 'main', base, source, 1);
+    const limited = new GitStorageService({ getOrThrow: (name: string) => name === 'GIT_STORAGE_PATH' ? root
+      : name === 'MAX_FILE_BYTES' ? 1024 : 1 } as unknown as ConfigService);
+
+    await expect(limited.assertMergeCandidateQuota(key, candidate)).rejects.toMatchObject({
+      response: { error: { code: 'MERGE_REPOSITORY_QUOTA_EXCEEDED' } },
+    });
+    expect(await storage.branchSha(key, 'main')).toBe(base);
+  });
+
   it('returns no branches for unborn HEAD and rejects unsafe refs/paths', async () => {
     const key = `${randomUUID()}.git`;
     await storage.create(key, 'main', false, 'Empty');
@@ -114,7 +175,7 @@ describe('GitStorageService with real Git', () => {
   it('fails closed when branch count or output exceeds the read limit', async () => {
     const key = `${randomUUID()}.git`;
     await storage.create(key, 'main', true, 'Limits');
-    const args = ['--git-dir', join(root, key)];
+    const args = ['-c', 'core.longpaths=true', '--git-dir', join(root, key)];
     const sha = execFileSync('git', [...args, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     execFileSync('git', [...args, 'update-ref', '--stdin'], {
       input: Array.from({ length: 1000 }, (_, i) => `create refs/heads/branch-${i} ${sha}\n`).join(''),

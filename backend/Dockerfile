@@ -1,6 +1,9 @@
 FROM node:24-bookworm-slim AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
+RUN apt-get update \
+  && apt-get install --no-install-recommends -y openssl \
+  && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
 WORKDIR /app
 
@@ -19,7 +22,7 @@ RUN pnpm deploy --filter backend --prod /app/release
 FROM node:24-bookworm-slim AS runner
 ENV NODE_ENV=production
 RUN apt-get update \
-  && apt-get install --no-install-recommends -y git ca-certificates \
+  && apt-get install --no-install-recommends -y git ca-certificates openssl \
   && rm -rf /var/lib/apt/lists/* \
   && groupadd --system --gid 1001 nodejs \
   && useradd --system --uid 1001 --gid nodejs api \

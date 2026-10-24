@@ -15,6 +15,7 @@ describe('Milestone 1 HTTP + PostgreSQL', () => {
   let origin: string;
   let url: string;
   let originalDatabaseUrl: string | undefined;
+  let originalDatabaseUrlUnpooled: string | undefined;
   const account = { username: 'Alice', email: 'alice@example.test', password: 'test-password-123' };
   const cookie = (response: Response) => response.headers.getSetCookie().map((value) => value.split(';')[0]).join('; ');
   const call = (path: string, body?: unknown, cookies?: string, requestOrigin = origin) => fetch(`${url}/${path}`, {
@@ -26,14 +27,16 @@ describe('Milestone 1 HTTP + PostgreSQL', () => {
   beforeAll(async () => {
     await ConfigModule.forRoot({ envFilePath: '.env' });
     originalDatabaseUrl = process.env.DATABASE_URL;
+    originalDatabaseUrlUnpooled = process.env.DATABASE_URL_UNPOOLED;
     if (!originalDatabaseUrl) throw new Error('DATABASE_URL is required for integration tests');
     admin = new PrismaClient({ datasourceUrl: originalDatabaseUrl });
     await admin.$executeRawUnsafe(`CREATE SCHEMA "${schema}"`);
     const isolatedUrl = new URL(originalDatabaseUrl);
     isolatedUrl.searchParams.set('schema', schema);
     process.env.DATABASE_URL = isolatedUrl.toString();
+    process.env.DATABASE_URL_UNPOOLED = isolatedUrl.toString();
     execFileSync(process.execPath, [require.resolve('prisma/build/index.js'), 'migrate', 'deploy'], {
-      env: { ...process.env, DATABASE_URL: isolatedUrl.toString() }, stdio: 'pipe', timeout: 30_000,
+      env: { ...process.env, DATABASE_URL: isolatedUrl.toString(), DATABASE_URL_UNPOOLED: isolatedUrl.toString() }, stdio: 'pipe', timeout: 30_000,
     });
     db = new PrismaClient({ datasourceUrl: isolatedUrl.toString() });
     const { AppModule } = await import('../src/app.module');
@@ -55,6 +58,8 @@ describe('Milestone 1 HTTP + PostgreSQL', () => {
       await admin.$disconnect();
     }
     if (originalDatabaseUrl) process.env.DATABASE_URL = originalDatabaseUrl;
+    if (originalDatabaseUrlUnpooled) process.env.DATABASE_URL_UNPOOLED = originalDatabaseUrlUnpooled;
+    else delete process.env.DATABASE_URL_UNPOOLED;
   });
 
   it('validates origin/input and reserves application routes', async () => {
