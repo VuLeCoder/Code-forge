@@ -10,7 +10,27 @@ import styles from "./settings.module.css";
 
 const namePattern = /^(?!.*\.\.)(?!.*\.git$)[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/i;
 type Repository = RepositorySummary & { status: string };
-type ApiBody = { repository?: Repository; error?: { code?: string; message?: string } };
+type Member = {
+  userId: string;
+  role: "READ" | "WRITE";
+  createdAt: string;
+  updatedAt: string;
+  user: { id: string; username: string };
+};
+type RepoInvitation = {
+  id: string;
+  role: "READ" | "WRITE";
+  status: string;
+  expiresAt: string;
+  createdAt: string;
+  invitee: { id: string; username: string };
+};
+type ApiBody = {
+  repository?: Repository;
+  members?: Member[];
+  invitations?: RepoInvitation[];
+  error?: { code?: string; message?: string };
+};
 
 function errorMessage(body: ApiBody, fallback: string) {
   const messages: Record<string, string> = {
@@ -18,6 +38,14 @@ function errorMessage(body: ApiBody, fallback: string) {
     AUTH_REQUIRED: "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.",
     ACCESS_TOKEN_INVALID: "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.",
     REPOSITORY_NOT_FOUND: "Repository không còn khả dụng hoặc bạn không có quyền quản lý.",
+    USER_NOT_FOUND: "Không tìm thấy người dùng hoặc tài khoản bị khóa.",
+    CANNOT_INVITE_OWNER: "Không thể mời chính chủ sở hữu repository.",
+    ALREADY_MEMBER: "Người dùng này đã là thành viên của repository.",
+    INVITATION_ALREADY_EXISTS: "Đã có lời mời đang chờ gửi tới người dùng này.",
+    INVITATION_NOT_FOUND: "Không tìm thấy lời mời.",
+    INVITATION_NOT_PENDING: "Lời mời không còn ở trạng thái chờ.",
+    MEMBER_NOT_FOUND: "Thành viên không tồn tại trong repository.",
+    CANNOT_MODIFY_OWNER: "Không thể thay đổi vai trò hoặc xóa chủ sở hữu repository.",
     BACKEND_UNAVAILABLE: "Máy chủ đang tạm thời gián đoạn. Vui lòng thử lại sau.",
   };
   return messages[body.error?.code ?? ""] ?? body.error?.message ?? fallback;
@@ -40,6 +68,10 @@ export default function RepositorySettingsPage() {
   const [failure, setFailure] = useState("");
   const [desiredVisibility, setDesiredVisibility] = useState<"PUBLIC" | "PRIVATE">("PUBLIC");
   const [confirmation, setConfirmation] = useState("");
+  const [members, setMembers] = useState<Member[]>([]);
+  const [invitations, setInvitations] = useState<RepoInvitation[]>([]);
+  const [inviteUsername, setInviteUsername] = useState("");
+  const [inviteRole, setInviteRole] = useState<"READ" | "WRITE">("READ");
   const visibilityDialog = useRef<HTMLDialogElement>(null);
   const deleteDialog = useRef<HTMLDialogElement>(null);
 
@@ -51,7 +83,25 @@ export default function RepositorySettingsPage() {
       if (!response.ok) throw new Error("Không thể tải cài đặt.");
       const body = await readBody(response);
       return { key: routeKey, repository: body.repository ?? null, error: null };
-    }).then((next) => { if (active) setResult(next); })
+    }).then(async (next) => {
+      if (active) {
+        setResult(next);
+        if (next.repository?.permissions?.canManage) {
+          const [mRes, iRes] = await Promise.all([
+            sessionFetch(`${path}/members`, { cache: "no-store" }),
+            sessionFetch(`${path}/invitations`, { cache: "no-store" }),
+          ]);
+          if (active && mRes.ok) {
+            const mData = await readBody(mRes);
+            if (mData.members) setMembers(mData.members);
+          }
+          if (active && iRes.ok) {
+            const iData = await readBody(iRes);
+            if (iData.invitations) setInvitations(iData.invitations);
+          }
+        }
+      }
+    })
       .catch(() => { if (active) setResult({ key: routeKey, repository: null, error: "unavailable" }); });
     return () => { active = false; };
   }, [loading, path, routeKey, attempt]);
@@ -64,6 +114,84 @@ export default function RepositorySettingsPage() {
     const body = await readBody(response);
     if (!response.ok || !body.repository) throw new Error(errorMessage(body, fallback));
     return body.repository;
+  }
+
+  async function sendInvitation(event: FormEvent) {
+    event.preventDefault();
+    if (!inviteUsername.trim() || pending) return;
+    setPending(true); setFailure(""); setMessage("");
+    try {
+      const response = await sessionFetch(`${path}/invitations`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username: inviteUsername.trim(), role: inviteRole }),
+      });
+      const data = await readBody(response);
+      if (!response.ok) {
+        throw new Error(errorMessage(data, "Không thể gửi lời mời."));
+      }
+      const newInv = (data as { invitation: RepoInvitation }).invitation;
+      setInvitations((prev) => [newInv, ...prev]);
+      setInviteUsername("");
+      setMessage(`Đã gửi lời mời tới ${newInv.invitee.username}.`);
+    } catch (e) {
+      setFailure(e instanceof Error ? e.message : "Không thể gửi lời mời.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function handleRevokeInvitation(id: string) {
+    if (pending) return;
+    setPending(true); setFailure(""); setMessage("");
+    try {
+      const response = await sessionFetch(`${path}/invitations/${id}`, { method: "DELETE" });
+      const data = await readBody(response);
+      if (!response.ok) throw new Error(errorMessage(data, "Không thể thu hồi lời mời."));
+      setInvitations((prev) => prev.filter((item) => item.id !== id));
+      setMessage("Đã thu hồi lời mời.");
+    } catch (e) {
+      setFailure(e instanceof Error ? e.message : "Không thể thu hồi lời mời.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function handleUpdateMemberRole(memberUserId: string, newRole: "READ" | "WRITE") {
+    if (pending) return;
+    setPending(true); setFailure(""); setMessage("");
+    try {
+      const response = await sessionFetch(`${path}/members/${memberUserId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ role: newRole }),
+      });
+      const data = await readBody(response);
+      if (!response.ok) throw new Error(errorMessage(data, "Không thể đổi quyền thành viên."));
+      const updatedMember = (data as { member: Member }).member;
+      setMembers((prev) => prev.map((m) => m.userId === memberUserId ? updatedMember : m));
+      setMessage(`Đã cập nhật quyền thành ${newRole === "WRITE" ? "Ghi (WRITE)" : "Đọc (READ)"}.`);
+    } catch (e) {
+      setFailure(e instanceof Error ? e.message : "Không thể đổi quyền.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function handleRemoveMember(memberUserId: string, memberUsername: string) {
+    if (pending) return;
+    setPending(true); setFailure(""); setMessage("");
+    try {
+      const response = await sessionFetch(`${path}/members/${memberUserId}`, { method: "DELETE" });
+      const data = await readBody(response);
+      if (!response.ok) throw new Error(errorMessage(data, "Không thể xóa thành viên."));
+      setMembers((prev) => prev.filter((m) => m.userId !== memberUserId));
+      setMessage(`Đã xóa thành viên ${memberUsername} khỏi repository.`);
+    } catch (e) {
+      setFailure(e instanceof Error ? e.message : "Không thể xóa thành viên.");
+    } finally {
+      setPending(false);
+    }
   }
 
   async function saveInfo(event: FormEvent<HTMLFormElement>) {
@@ -136,6 +264,99 @@ export default function RepositorySettingsPage() {
       <p>Hiện tại: <strong>{repo.visibility === "PUBLIC" ? "Công khai" : "Riêng tư"}</strong></p>
       <p>{repo.visibility === "PUBLIC" ? "Mọi người có thể xem repository." : "Chỉ bạn có thể xem repository."}</p>
       <button className="button buttonSecondary" type="button" disabled={pending} onClick={() => { setDesiredVisibility(repo.visibility === "PUBLIC" ? "PRIVATE" : "PUBLIC"); visibilityDialog.current?.showModal(); }}>Đổi quyền xem</button>
+    </section>
+    <section className={styles.card} aria-labelledby="access-title">
+      <h2 id="access-title">Thành viên và cộng tác</h2>
+      <p>Quản lý người dùng có quyền đọc hoặc ghi mã nguồn trong repository.</p>
+
+      <h3>Gửi lời mời mới</h3>
+      <form onSubmit={sendInvitation} className={styles.inviteForm} aria-busy={pending}>
+        <input
+          name="username"
+          placeholder="Tên người dùng (username)"
+          value={inviteUsername}
+          onChange={(e) => setInviteUsername(e.target.value)}
+          required
+          maxLength={39}
+          aria-label="Tên người dùng muốn mời"
+        />
+        <select
+          value={inviteRole}
+          onChange={(e) => setInviteRole(e.target.value as "READ" | "WRITE")}
+          className={styles.roleSelect}
+          aria-label="Vai trò muốn mời"
+        >
+          <option value="READ">Đọc (READ)</option>
+          <option value="WRITE">Ghi (WRITE)</option>
+        </select>
+        <button className="button buttonPrimary buttonSmall" type="submit" disabled={pending || !inviteUsername.trim()}>
+          {pending ? "Đang gửi…" : "Gửi lời mời"}
+        </button>
+      </form>
+
+      <h3 style={{ marginTop: "16px" }}>Thành viên hiện tại</h3>
+      {members.length === 0 ? (
+        <p className={styles.emptyHint}>Chưa có thành viên cộng tác nào.</p>
+      ) : (
+        <ul className={styles.memberList}>
+          {members.map((m) => (
+            <li key={m.userId} className={styles.memberItem}>
+              <div className={styles.memberInfo}>
+                <Link href={`/${encodeURIComponent(m.user.username)}`}><strong>{m.user.username}</strong></Link>
+              </div>
+              <div className={styles.memberActions}>
+                <select
+                  value={m.role}
+                  onChange={(e) => handleUpdateMemberRole(m.userId, e.target.value as "READ" | "WRITE")}
+                  className={styles.roleSelect}
+                  disabled={pending}
+                  aria-label={`Vai trò của ${m.user.username}`}
+                >
+                  <option value="READ">Đọc (READ)</option>
+                  <option value="WRITE">Ghi (WRITE)</option>
+                </select>
+                <button
+                  type="button"
+                  className={styles.removeBtn}
+                  disabled={pending}
+                  onClick={() => handleRemoveMember(m.userId, m.user.username)}
+                  aria-label={`Xóa thành viên ${m.user.username}`}
+                >
+                  Xóa
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {invitations.length > 0 && (
+        <>
+          <h3 style={{ marginTop: "16px" }}>Lời mời đang chờ</h3>
+          <ul className={styles.memberList}>
+            {invitations.map((inv) => (
+              <li key={inv.id} className={styles.memberItem}>
+                <div className={styles.memberInfo}>
+                  <strong>{inv.invitee.username}</strong>
+                  <span className="badge">Quyền {inv.role === "WRITE" ? "Ghi" : "Đọc"}</span>
+                  <span className={styles.hint}>Hết hạn: {new Date(inv.expiresAt).toLocaleDateString("vi-VN")}</span>
+                </div>
+                <div className={styles.memberActions}>
+                  <button
+                    type="button"
+                    className={styles.revokeBtn}
+                    disabled={pending}
+                    onClick={() => handleRevokeInvitation(inv.id)}
+                    aria-label={`Thu hồi lời mời của ${inv.invitee.username}`}
+                  >
+                    Thu hồi
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </section>
     <section className={`${styles.card} ${styles.danger}`} aria-labelledby="delete-title">
       <h2 id="delete-title">Xóa repository</h2>

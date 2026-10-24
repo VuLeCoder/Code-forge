@@ -1,6 +1,6 @@
 import { Transform } from 'class-transformer';
 import { IsBoolean, IsEnum, IsString, Matches, MaxLength, MinLength, ValidateIf } from 'class-validator';
-import { RepositoryVisibility } from '@prisma/client';
+import { RepositoryMemberRole, RepositoryVisibility } from '@prisma/client';
 
 // ASCII route segment, without traversal or the reserved Git transport suffix.
 const REPOSITORY_NAME = /^(?!.*\.\.)(?!.*\.git$)[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/i;
@@ -45,4 +45,21 @@ export class UpdateRepositoryDto {
   @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsEnum(RepositoryVisibility)
   visibility?: RepositoryVisibility;
+}
+
+export class InviteMemberDto {
+  @Transform(trim)
+  @IsString()
+  @MinLength(3)
+  @MaxLength(39)
+  @Matches(/^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$/)
+  username!: string;
+
+  @IsEnum(RepositoryMemberRole)
+  role!: RepositoryMemberRole;
+}
+
+export class UpdateMemberRoleDto {
+  @IsEnum(RepositoryMemberRole)
+  role!: RepositoryMemberRole;
 }

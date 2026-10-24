@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { gzipSync } from 'node:zlib';
@@ -613,4 +613,175 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect((await call('GET', 'repos/owner/public', ownerCookie)).status).toBe(404);
     expect((await call('PATCH', 'repos/owner/public', ownerCookie, { visibility: 'PRIVATE' })).status).toBe(404);
   });
+
+  it('M5 manages invitations, enforces lifecycle, and controls member READ/WRITE roles immediately', async () => {
+    // 1. Register Bob
+    const bobRes = await call('POST', 'auth/register', '', {
+      username: 'BobUser', email: 'bob@example.test', password: 'test-password-123',
+    });
+    expect(bobRes.status).toBe(201);
+    const bobCookie = cookie(bobRes);
+    const bobId = (await bobRes.json()).user.id;
+
+    // Use a clean private repository owned by Owner (free up quota from earlier test)
+    await db.repository.deleteMany({ where: { ownerId, normalizedName: { in: ['lastone', 'lasttwo'] } } });
+    const repoRes = await create('M5Repo', 'PRIVATE');
+    expect(repoRes.status).toBe(201);
+    const repoPath = 'repos/owner/m5repo';
+
+    // 2. Validate invitations input & authorization
+    // Anonymous / unauthenticated
+    expect((await call('POST', `${repoPath}/invitations`, '', { username: 'BobUser', role: 'READ' })).status).toBe(401);
+    // Non-owner (Other)
+    expect((await call('POST', `${repoPath}/invitations`, otherCookie, { username: 'BobUser', role: 'READ' })).status).toBe(404);
+    // Untrusted origin
+    expect((await call('POST', `${repoPath}/invitations`, ownerCookie, { username: 'BobUser', role: 'READ' }, 'https://evil.example')).status).toBe(403);
+    // Cannot invite owner
+    const selfInvite = await call('POST', `${repoPath}/invitations`, ownerCookie, { username: 'Owner', role: 'READ' });
+    expect(selfInvite.status).toBe(400);
+    expect((await selfInvite.json()).error.code).toBe('CANNOT_INVITE_OWNER');
+    // Non-existent user
+    const missingInvite = await call('POST', `${repoPath}/invitations`, ownerCookie, { username: 'nonexistent', role: 'READ' });
+    expect(missingInvite.status).toBe(404);
+    expect((await missingInvite.json()).error.code).toBe('USER_NOT_FOUND');
+    // Invalid role
+    expect((await call('POST', `${repoPath}/invitations`, ownerCookie, { username: 'BobUser', role: 'ADMIN' })).status).toBe(400);
+
+    // 3. Owner invites Bob with WRITE
+    const inviteRes = await call('POST', `${repoPath}/invitations`, ownerCookie, { username: 'bobuser', role: 'WRITE' });
+    expect(inviteRes.status).toBe(201);
+    const { invitation: firstInvite } = await inviteRes.json();
+    expect(firstInvite).toMatchObject({
+      role: 'WRITE',
+      status: 'PENDING',
+      invitee: { id: bobId, username: 'BobUser' },
+    });
+
+    // Cannot create duplicate pending invitation
+    const dupInvite = await call('POST', `${repoPath}/invitations`, ownerCookie, { username: 'BobUser', role: 'READ' });
+    expect(dupInvite.status).toBe(409);
+    expect((await dupInvite.json()).error.code).toBe('INVITATION_ALREADY_EXISTS');
+
+    // Owner can list invitations
+    const repoInvs = await call('GET', `${repoPath}/invitations`, ownerCookie);
+    expect(repoInvs.status).toBe(200);
+    expect((await repoInvs.json()).invitations).toHaveLength(1);
+
+    // Bob sees the pending invitation
+    const bobInvs = await call('GET', 'invitations', bobCookie);
+    expect(bobInvs.status).toBe(200);
+    const bobInvsData = await bobInvs.json();
+    expect(bobInvsData.invitations).toHaveLength(1);
+    expect(bobInvsData.invitations[0]).toMatchObject({
+      id: firstInvite.id,
+      role: 'WRITE',
+      status: 'PENDING',
+      repository: { name: 'M5Repo', owner: { username: 'Owner' } },
+    });
+
+    // Before accepting, Bob has no access to private repository
+    expect((await call('GET', repoPath, bobCookie)).status).toBe(404);
+
+    // 4. Test Revoke
+    // Non-owner cannot revoke
+    expect((await call('DELETE', `${repoPath}/invitations/${firstInvite.id}`, bobCookie)).status).toBe(404);
+    // Owner revokes
+    const revokeRes = await call('DELETE', `${repoPath}/invitations/${firstInvite.id}`, ownerCookie);
+    expect(revokeRes.status).toBe(204);
+
+    // Bob cannot accept a revoked invitation
+    const acceptRevoked = await call('POST', `invitations/${firstInvite.id}/accept`, bobCookie);
+    expect(acceptRevoked.status).toBe(409);
+    expect((await acceptRevoked.json()).error.code).toBe('INVITATION_NOT_PENDING');
+
+    // 5. Re-invite and Decline
+    const invite2 = await (await call('POST', `${repoPath}/invitations`, ownerCookie, { username: 'BobUser', role: 'READ' })).json();
+    const declineRes = await call('POST', `invitations/${invite2.invitation.id}/decline`, bobCookie);
+    expect(declineRes.status).toBe(201);
+    expect((await declineRes.json()).success).toBe(true);
+
+    // Cannot accept declined invitation
+    expect((await call('POST', `invitations/${invite2.invitation.id}/accept`, bobCookie)).status).toBe(409);
+
+    // 6. Invite Bob with WRITE and Accept
+    const invite3 = await (await call('POST', `${repoPath}/invitations`, ownerCookie, { username: 'BobUser', role: 'WRITE' })).json();
+    const acceptRes = await call('POST', `invitations/${invite3.invitation.id}/accept`, bobCookie);
+    expect(acceptRes.status).toBe(201);
+    expect((await acceptRes.json()).success).toBe(true);
+
+    // Once accepted, Bob has WRITE permissions immediately
+    const bobAccess = await call('GET', repoPath, bobCookie);
+    expect(bobAccess.status).toBe(200);
+    expect((await bobAccess.json()).repository.permissions).toEqual({
+      canRead: true, canWrite: true, canManage: false,
+    });
+
+    // Cannot invite Bob again because he is already a member
+    const alreadyMemberInvite = await call('POST', `${repoPath}/invitations`, ownerCookie, { username: 'BobUser', role: 'READ' });
+    expect(alreadyMemberInvite.status).toBe(409);
+    expect((await alreadyMemberInvite.json()).error.code).toBe('ALREADY_MEMBER');
+
+    // Members list shows Bob with WRITE
+    const membersList = await call('GET', `${repoPath}/members`, ownerCookie);
+    expect(membersList.status).toBe(200);
+    const membersData = await membersList.json();
+    expect(membersData.members).toHaveLength(1);
+    expect(membersData.members[0]).toMatchObject({
+      userId: bobId,
+      role: 'WRITE',
+      user: { username: 'BobUser' },
+    });
+
+    // 7. Change role from WRITE to READ
+    // Member without owner rights gets 403 Forbidden; non-member gets 404 Not Found
+    expect((await call('PATCH', `${repoPath}/members/${bobId}`, bobCookie, { role: 'READ' })).status).toBe(403);
+    expect((await call('PATCH', `${repoPath}/members/${bobId}`, otherCookie, { role: 'READ' })).status).toBe(404);
+    // Owner changes role to READ
+    const patchRole = await call('PATCH', `${repoPath}/members/${bobId}`, ownerCookie, { role: 'READ' });
+    expect(patchRole.status).toBe(200);
+    expect((await patchRole.json()).member.role).toBe('READ');
+
+    // Bob's permissions immediately reflect role downgrade
+    const bobDowngraded = await call('GET', repoPath, bobCookie);
+    expect((await bobDowngraded.json()).repository.permissions).toEqual({
+      canRead: true, canWrite: false, canManage: false,
+    });
+
+    // 8. Remove member
+    // Member gets 403; non-member gets 404
+    expect((await call('DELETE', `${repoPath}/members/${bobId}`, bobCookie)).status).toBe(403);
+    expect((await call('DELETE', `${repoPath}/members/${bobId}`, otherCookie)).status).toBe(404);
+    // Owner removes Bob
+    const removeRes = await call('DELETE', `${repoPath}/members/${bobId}`, ownerCookie);
+    expect(removeRes.status).toBe(204);
+
+    // Owner cannot modify or delete owner
+    expect((await call('PATCH', `${repoPath}/members/${ownerId}`, ownerCookie, { role: 'READ' })).status).toBe(400);
+    expect((await call('DELETE', `${repoPath}/members/${ownerId}`, ownerCookie)).status).toBe(400);
+
+    // 9. Re-inviting with an expired invitation lazily marks it EXPIRED and succeeds
+    const m5Repo = await db.repository.findFirstOrThrow({ where: { ownerId, normalizedName: 'm5repo' } });
+    await db.invitation.create({
+      data: {
+        id: randomUUID(),
+        repositoryId: m5Repo.id,
+        inviterId: ownerId,
+        inviteeId: bobId,
+        role: 'READ',
+        status: 'PENDING',
+        expiresAt: new Date(Date.now() - 10_000),
+      },
+    });
+    const reInviteExpired = await call('POST', `${repoPath}/invitations`, ownerCookie, { username: 'BobUser', role: 'READ' });
+    expect(reInviteExpired.status).toBe(201);
+    expect(await db.invitation.count({ where: { repositoryId: m5Repo.id, inviteeId: bobId, status: 'EXPIRED' } })).toBe(1);
+
+    // 10. Verify Audit logs
+    expect(await db.auditLog.count({ where: { action: 'INVITATION_CREATED' } })).toBeGreaterThanOrEqual(3);
+    expect(await db.auditLog.count({ where: { action: 'INVITATION_REVOKED' } })).toBeGreaterThanOrEqual(1);
+    expect(await db.auditLog.count({ where: { action: 'INVITATION_DECLINED' } })).toBeGreaterThanOrEqual(1);
+    expect(await db.auditLog.count({ where: { action: 'INVITATION_ACCEPTED' } })).toBeGreaterThanOrEqual(1);
+    expect(await db.auditLog.count({ where: { action: 'MEMBER_ROLE_UPDATED' } })).toBeGreaterThanOrEqual(1);
+    expect(await db.auditLog.count({ where: { action: 'MEMBER_REMOVED' } })).toBeGreaterThanOrEqual(1);
+  }, 60_000);
 });

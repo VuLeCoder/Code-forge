@@ -1,10 +1,10 @@
-import { BadRequestException, Body, Controller, Delete, Get, Header, HttpCode, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Header, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { AccessTokenGuard } from '../auth/access-token.guard';
 import type { AuthenticatedRequest, AuthPrincipal } from '../auth/auth.types';
 import { OriginGuard } from '../auth/origin.guard';
 import { OptionalAccessTokenGuard } from './optional-access-token.guard';
-import { CreateRepositoryDto, UpdateRepositoryDto } from './repository.dto';
+import { CreateRepositoryDto, InviteMemberDto, UpdateMemberRoleDto, UpdateRepositoryDto } from './repository.dto';
 import { RepositoriesService } from './repositories.service';
 
 @Controller()
@@ -120,5 +120,64 @@ export class RepositoriesController {
   @UseGuards(OriginGuard, AccessTokenGuard)
   restore(@Param('owner') owner: string, @Param('repo') repo: string, @Req() request: AuthenticatedRequest) {
     return this.repositories.restore(owner, repo, request.user.id);
+  }
+
+  @Get('repos/:owner/:repo/members')
+  @UseGuards(OriginGuard, AccessTokenGuard)
+  listMembers(@Param('owner') owner: string, @Param('repo') repo: string, @Req() request: AuthenticatedRequest) {
+    return this.repositories.listMembers(owner, repo, request.user.id);
+  }
+
+  @Patch('repos/:owner/:repo/members/:userId')
+  @UseGuards(OriginGuard, AccessTokenGuard)
+  updateMember(
+    @Param('owner') owner: string,
+    @Param('repo') repo: string,
+    @Param('userId', new ParseUUIDPipe({ version: '4', exceptionFactory: () => new BadRequestException({ error: { code: 'INVALID_ID', message: 'ID không hợp lệ.' } }) })) memberUserId: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: UpdateMemberRoleDto,
+  ) {
+    return this.repositories.updateMemberRole(owner, repo, request.user.id, memberUserId, dto);
+  }
+
+  @Delete('repos/:owner/:repo/members/:userId')
+  @HttpCode(204)
+  @UseGuards(OriginGuard, AccessTokenGuard)
+  removeMember(
+    @Param('owner') owner: string,
+    @Param('repo') repo: string,
+    @Param('userId', new ParseUUIDPipe({ version: '4', exceptionFactory: () => new BadRequestException({ error: { code: 'INVALID_ID', message: 'ID không hợp lệ.' } }) })) memberUserId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.repositories.removeMember(owner, repo, request.user.id, memberUserId);
+  }
+
+  @Post('repos/:owner/:repo/invitations')
+  @UseGuards(OriginGuard, AccessTokenGuard)
+  inviteMember(
+    @Param('owner') owner: string,
+    @Param('repo') repo: string,
+    @Req() request: AuthenticatedRequest,
+    @Body() dto: InviteMemberDto,
+  ) {
+    return this.repositories.inviteMember(owner, repo, request.user.id, dto);
+  }
+
+  @Get('repos/:owner/:repo/invitations')
+  @UseGuards(OriginGuard, AccessTokenGuard)
+  listInvitations(@Param('owner') owner: string, @Param('repo') repo: string, @Req() request: AuthenticatedRequest) {
+    return this.repositories.listInvitations(owner, repo, request.user.id);
+  }
+
+  @Delete('repos/:owner/:repo/invitations/:invitationId')
+  @HttpCode(204)
+  @UseGuards(OriginGuard, AccessTokenGuard)
+  revokeInvitation(
+    @Param('owner') owner: string,
+    @Param('repo') repo: string,
+    @Param('invitationId', new ParseUUIDPipe({ version: '4', exceptionFactory: () => new BadRequestException({ error: { code: 'INVALID_ID', message: 'ID không hợp lệ.' } }) })) invitationId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.repositories.revokeInvitation(owner, repo, request.user.id, invitationId);
   }
 }

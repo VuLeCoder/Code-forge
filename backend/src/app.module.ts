@@ -7,6 +7,7 @@ import { validateEnvironment } from './config/environment';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
 import { RepositoriesModule } from './repositories/repositories.module';
+import { InvitationsModule } from './invitations/invitations.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { RepositoriesModule } from './repositories/repositories.module';
     AuthModule,
     HealthModule,
     RepositoriesModule,
+    InvitationsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

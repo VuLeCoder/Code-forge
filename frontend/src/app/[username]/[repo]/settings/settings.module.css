@@ -9,4 +9,17 @@
 .danger { border-color: #fecaca; } .danger h2 { color: #991b1b; }
 .dialog { width: min(480px, calc(100% - 32px)); margin: auto; padding: 26px; border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); } .dialog::backdrop { background: rgb(15 23 42 / 55%); } .dialog h2 { margin-bottom: 14px; font-size: 1.25rem; } .dialog p { line-height: 1.6; margin-bottom: 18px; } .dialog label { display: block; margin-bottom: 8px; }
 .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 24px; } .deleteButton { padding: 10px 16px; border: 0; border-radius: var(--radius-sm); color: #fff; background: #b91c1c; font-weight: 700; cursor: pointer; } .deleteButton:disabled { opacity: .55; cursor: not-allowed; }
+.memberList { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 10px; }
+.memberItem { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px; background: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.memberInfo { display: flex; align-items: center; gap: 8px; }
+.memberActions { display: flex; align-items: center; gap: 8px; }
+.roleSelect { padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff; }
+.removeBtn { padding: 6px 10px; border: 1px solid #fca5a5; background: #fff; color: #b91c1c; border-radius: var(--radius-sm); font-size: .82rem; cursor: pointer; }
+.removeBtn:hover { background: #fee2e2; }
+.revokeBtn { padding: 6px 10px; border: 1px solid var(--border); background: #fff; color: var(--muted); border-radius: var(--radius-sm); font-size: .82rem; cursor: pointer; }
+.revokeBtn:hover { background: #f1f5f9; color: var(--text); }
+.emptyHint { color: var(--muted); font-size: .9rem; font-style: italic; }
+.inviteForm { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; }
+.inviteForm input { flex: 1; min-width: 160px; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.inviteForm select { padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff; }
 @media (max-width: 600px) { .page { padding-block: 28px 56px; } .card, .dialog { padding: 20px; } }

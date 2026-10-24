@@ -3,7 +3,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { ConfigService } from '@nestjs/config';
 import { Prisma, type Repository } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
-import { CreateRepositoryDto, UpdateRepositoryDto } from './repository.dto';
+import { CreateRepositoryDto, InviteMemberDto, UpdateMemberRoleDto, UpdateRepositoryDto } from './repository.dto';
 import { RepositoryPolicy } from './repository.policy';
 import { GitStorageService } from './git-storage.service';
 import { TokensService } from '../tokens/tokens.service';
@@ -268,6 +268,208 @@ export class RepositoriesService {
         include: { owner: { select: { username: true } } },
       });
       return this.response(updated, userId);
+    });
+  }
+
+  async listMembers(owner: string, name: string, userId: string) {
+    const repo = await this.load(this.db, owner, name, userId);
+    this.policy.assertManage(repo, userId);
+    const rows = await this.db.repositoryMember.findMany({
+      where: { repositoryId: repo.id },
+      include: { user: { select: { id: true, username: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    return {
+      members: rows.map((m) => ({
+        userId: m.userId,
+        role: m.role,
+        createdAt: m.createdAt,
+        updatedAt: m.updatedAt,
+        user: { id: m.user.id, username: m.user.username },
+      })),
+    };
+  }
+
+  async inviteMember(owner: string, name: string, userId: string, dto: InviteMemberDto) {
+    return this.db.$transaction(async (tx) => {
+      await this.activeOwner(tx, userId);
+      const repo = await this.load(tx, owner, name, userId);
+      this.policy.assertManage(repo, userId);
+
+      const invitee = await tx.user.findUnique({
+        where: { normalizedUsername: dto.username.toLowerCase() },
+        select: { id: true, username: true, status: true },
+      });
+      if (!invitee || invitee.status !== 'ACTIVE') {
+        throw new NotFoundException({ error: { code: 'USER_NOT_FOUND', message: 'Không tìm thấy người dùng hoặc tài khoản bị khóa.' } });
+      }
+      if (invitee.id === repo.ownerId) {
+        throw new BadRequestException({ error: { code: 'CANNOT_INVITE_OWNER', message: 'Không thể mời chính chủ sở hữu repository.' } });
+      }
+      const existingMember = await tx.repositoryMember.findUnique({
+        where: { repositoryId_userId: { repositoryId: repo.id, userId: invitee.id } },
+      });
+      if (existingMember) {
+        throw new ConflictException({ error: { code: 'ALREADY_MEMBER', message: 'Người dùng này đã là thành viên của repository.' } });
+      }
+      await tx.invitation.updateMany({
+        where: { repositoryId: repo.id, inviteeId: invitee.id, status: 'PENDING', expiresAt: { lte: new Date() } },
+        data: { status: 'EXPIRED' },
+      });
+
+      const activeInvitation = await tx.invitation.findFirst({
+        where: { repositoryId: repo.id, inviteeId: invitee.id, status: 'PENDING', expiresAt: { gt: new Date() } },
+      });
+      if (activeInvitation) {
+        throw new ConflictException({ error: { code: 'INVITATION_ALREADY_EXISTS', message: 'Đã có lời mời đang chờ gửi tới người dùng này.' } });
+      }
+
+      const expiresAt = new Date(Date.now() + 7 * 86_400_000);
+      let invitation;
+      try {
+        invitation = await tx.invitation.create({
+          data: {
+            id: randomUUID(),
+            repositoryId: repo.id,
+            inviterId: userId,
+            inviteeId: invitee.id,
+            role: dto.role,
+            status: 'PENDING',
+            expiresAt,
+          },
+          include: { invitee: { select: { id: true, username: true } } },
+        });
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+          throw new ConflictException({ error: { code: 'INVITATION_ALREADY_EXISTS', message: 'Đã có lời mời đang chờ gửi tới người dùng này.' } });
+        }
+        throw error;
+      }
+
+      await tx.auditLog.create({
+        data: { id: randomUUID(), actorId: userId, action: 'INVITATION_CREATED', targetId: invitation.id },
+      });
+
+      return {
+        invitation: {
+          id: invitation.id,
+          role: invitation.role,
+          status: invitation.status,
+          expiresAt: invitation.expiresAt,
+          createdAt: invitation.createdAt,
+          invitee: { id: invitation.invitee.id, username: invitation.invitee.username },
+        },
+      };
+    });
+  }
+
+  async listInvitations(owner: string, name: string, userId: string) {
+    const repo = await this.load(this.db, owner, name, userId);
+    this.policy.assertManage(repo, userId);
+    const rows = await this.db.invitation.findMany({
+      where: { repositoryId: repo.id, status: 'PENDING', expiresAt: { gt: new Date() } },
+      include: { invitee: { select: { id: true, username: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    return {
+      invitations: rows.map((inv) => ({
+        id: inv.id,
+        role: inv.role,
+        status: inv.status,
+        expiresAt: inv.expiresAt,
+        createdAt: inv.createdAt,
+        invitee: { id: inv.invitee.id, username: inv.invitee.username },
+      })),
+    };
+  }
+
+  async revokeInvitation(owner: string, name: string, userId: string, invitationId: string) {
+    await this.db.$transaction(async (tx) => {
+      await this.activeOwner(tx, userId);
+      const repo = await this.load(tx, owner, name, userId);
+      this.policy.assertManage(repo, userId);
+
+      const invitation = await tx.invitation.findFirst({
+        where: { id: invitationId, repositoryId: repo.id },
+      });
+      if (!invitation) {
+        throw new NotFoundException({ error: { code: 'INVITATION_NOT_FOUND', message: 'Không tìm thấy lời mời.' } });
+      }
+      if (invitation.status !== 'PENDING') {
+        throw new ConflictException({ error: { code: 'INVITATION_NOT_PENDING', message: 'Lời mời không ở trạng thái chờ.' } });
+      }
+      const updated = await tx.invitation.updateMany({
+        where: { id: invitation.id, status: 'PENDING' },
+        data: { status: 'REVOKED' },
+      });
+      if (updated.count === 0) {
+        throw new ConflictException({ error: { code: 'INVITATION_NOT_PENDING', message: 'Lời mời không ở trạng thái chờ.' } });
+      }
+      await tx.auditLog.create({
+        data: { id: randomUUID(), actorId: userId, action: 'INVITATION_REVOKED', targetId: invitation.id },
+      });
+    });
+  }
+
+  async updateMemberRole(owner: string, name: string, userId: string, memberUserId: string, dto: UpdateMemberRoleDto) {
+    return this.db.$transaction(async (tx) => {
+      await this.activeOwner(tx, userId);
+      const repo = await this.load(tx, owner, name, userId);
+      this.policy.assertManage(repo, userId);
+
+      if (memberUserId === repo.ownerId) {
+        throw new BadRequestException({ error: { code: 'CANNOT_MODIFY_OWNER', message: 'Không thể thay đổi vai trò của chủ sở hữu repository.' } });
+      }
+
+      const member = await tx.repositoryMember.findUnique({
+        where: { repositoryId_userId: { repositoryId: repo.id, userId: memberUserId } },
+        include: { user: { select: { id: true, username: true } } },
+      });
+      if (!member) {
+        throw new NotFoundException({ error: { code: 'MEMBER_NOT_FOUND', message: 'Thành viên không tồn tại trong repository.' } });
+      }
+      const updated = await tx.repositoryMember.update({
+        where: { repositoryId_userId: { repositoryId: repo.id, userId: memberUserId } },
+        data: { role: dto.role },
+        include: { user: { select: { id: true, username: true } } },
+      });
+      await tx.auditLog.create({
+        data: { id: randomUUID(), actorId: userId, action: 'MEMBER_ROLE_UPDATED', targetId: memberUserId },
+      });
+      return {
+        member: {
+          userId: updated.userId,
+          role: updated.role,
+          createdAt: updated.createdAt,
+          updatedAt: updated.updatedAt,
+          user: { id: updated.user.id, username: updated.user.username },
+        },
+      };
+    });
+  }
+
+  async removeMember(owner: string, name: string, userId: string, memberUserId: string) {
+    await this.db.$transaction(async (tx) => {
+      await this.activeOwner(tx, userId);
+      const repo = await this.load(tx, owner, name, userId);
+      this.policy.assertManage(repo, userId);
+
+      if (memberUserId === repo.ownerId) {
+        throw new BadRequestException({ error: { code: 'CANNOT_MODIFY_OWNER', message: 'Không thể xóa chủ sở hữu khỏi repository.' } });
+      }
+
+      const member = await tx.repositoryMember.findUnique({
+        where: { repositoryId_userId: { repositoryId: repo.id, userId: memberUserId } },
+      });
+      if (!member) {
+        throw new NotFoundException({ error: { code: 'MEMBER_NOT_FOUND', message: 'Thành viên không tồn tại trong repository.' } });
+      }
+      await tx.repositoryMember.delete({
+        where: { repositoryId_userId: { repositoryId: repo.id, userId: memberUserId } },
+      });
+      await tx.auditLog.create({
+        data: { id: randomUUID(), actorId: userId, action: 'MEMBER_REMOVED', targetId: memberUserId },
+      });
     });
   }
 }
