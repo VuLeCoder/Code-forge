@@ -492,11 +492,8 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(first);
     await git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/member-write'], 'Other', writeOnlyToken.secret);
     expect((await fetch(`${url}/info/refs?service=git-upload-pack`, { headers: { Authorization: basic('Other', writeOnlyToken.secret) } })).status).toBe(401);
-    await git(['-C', work, 'push', 'origin', ':member-write'], 'Other', writeOnlyToken.secret);
-    expect(() => execFileSync('git', ['--git-dir', bare, 'rev-parse', '--verify', 'refs/heads/member-write'], { stdio: 'pipe' })).toThrow();
-    await db.repositoryMember.delete({ where: { repositoryId_userId: { repositoryId: repo.id, userId: other.id } } });
-    await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/member-revoked'], 'Other', writeOnlyToken.secret)).rejects.toThrow();
 
+    // Exercise a real non-fast-forward update while the remote feature ref still exists.
     await git(['-C', work, 'reset', '--hard', first]);
     await writeFile(join(work, 'code.txt'), 'divergent\n');
     await git(['-C', work, 'add', 'code.txt']);
@@ -504,6 +501,12 @@ describe('Repository HTTP + PostgreSQL', () => {
     await expect(git(['-C', work, 'push', '--force', 'origin', 'HEAD:refs/heads/member-write'])).rejects.toThrow();
     expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/member-write'], { encoding: 'utf8' }).trim()).toBe(second);
     await git(['-C', work, 'reset', '--hard', second]);
+
+    await git(['-C', work, 'push', 'origin', ':member-write'], 'Other', writeOnlyToken.secret);
+    expect(() => execFileSync('git', ['--git-dir', bare, 'rev-parse', '--verify', 'refs/heads/member-write'], { stdio: 'pipe' })).toThrow();
+    await db.repositoryMember.delete({ where: { repositoryId_userId: { repositoryId: repo.id, userId: other.id } } });
+    await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/member-revoked'], 'Other', writeOnlyToken.secret)).rejects.toThrow();
+
     await expect(git(['-C', work, 'push', 'origin', ':main'])).rejects.toThrow();
     await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/tags/not-allowed'])).rejects.toThrow();
 

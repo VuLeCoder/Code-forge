@@ -55,7 +55,10 @@ describe('Admin bootstrap CLI + PostgreSQL', () => {
     const password = 'Admin-Password-123!';
     const result = runBootstrap(`RootAdmin\nroot-admin@example.test\n${password}\n${password}\n`);
 
+    expect(result.error).toBeUndefined();
     expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Đã tạo tài khoản ADMIN RootAdmin.');
+    expect(result.stderr).toBe('');
     expect(result.stdout).not.toContain(password);
     const user = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'rootadmin' } });
     expect(user).toMatchObject({ systemRole: 'ADMIN', status: 'ACTIVE', lockedAt: null });
@@ -71,7 +74,10 @@ describe('Admin bootstrap CLI + PostgreSQL', () => {
     } });
     const result = runBootstrap('ExistingAdmin\nexisting@example.test\n');
 
+    expect(result.error).toBeUndefined();
     expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Đã cấp quyền ADMIN cho ExistingAdmin; trạng thái và mật khẩu hiện tại được giữ nguyên.');
+    expect(result.stderr).toBe('');
     expect(result.stdout).not.toContain('Password:');
     const user = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'existingadmin' } });
     expect(user.systemRole).toBe('ADMIN');

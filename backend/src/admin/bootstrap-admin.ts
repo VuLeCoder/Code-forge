@@ -1,6 +1,6 @@
 import { loadEnvFile } from 'node:process';
+import { readFileSync } from 'node:fs';
 import { StringDecoder } from 'node:string_decoder';
-import { createInterface, type Interface } from 'node:readline/promises';
 import { stdin, stdout } from 'node:process';
 import { PrismaClient, SystemRole, UserStatus } from '@prisma/client';
 import * as argon2 from 'argon2';
@@ -27,8 +27,13 @@ function validateIdentity(username: string, email: string) {
   if (email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Email không hợp lệ.');
 }
 
-function promptLine(label: string, lineReader: Interface | null, secret = false): Promise<string> {
-  if (lineReader) return lineReader.question(label);
+type PipedInput = { lines: string[]; index: number };
+
+function promptLine(label: string, pipedInput: PipedInput | null, secret = false): Promise<string> {
+  if (pipedInput) {
+    stdout.write(`${label}\n`);
+    return Promise.resolve(pipedInput.lines[pipedInput.index++] ?? '');
+  }
   stdout.write(label);
   const previousRaw = stdin.isRaw;
   const decoder = new StringDecoder('utf8');
@@ -68,13 +73,15 @@ function promptLine(label: string, lineReader: Interface | null, secret = false)
 
 export async function bootstrapAdmin() {
   loadLocalEnvironment();
-  const db = new PrismaClient();
-  const lineReader = stdin.isTTY && stdout.isTTY && typeof stdin.setRawMode === 'function'
+  // Read pipe input in one operation: sequential readline.question() calls can
+  // miss already-buffered lines at EOF and let Node exit with unresolved Promises.
+  const pipedInput = stdin.isTTY && typeof stdin.setRawMode === 'function'
     ? null
-    : createInterface({ input: stdin, output: stdout, terminal: false });
+    : { lines: readFileSync(0, 'utf8').split(/\r?\n/), index: 0 };
+  const db = new PrismaClient();
   try {
-    const username = (await promptLine('Username: ', lineReader)).trim();
-    const email = (await promptLine('Email: ', lineReader)).trim();
+    const username = (await promptLine('Username: ', pipedInput)).trim();
+    const email = (await promptLine('Email: ', pipedInput)).trim();
     validateIdentity(username, email);
     const normalizedUsername = normalizeUsername(username);
     const normalizedEmail = normalizeEmail(email);
@@ -97,8 +104,8 @@ export async function bootstrapAdmin() {
       return;
     }
 
-    const password = await promptLine('Mật khẩu mới: ', lineReader, true);
-    const confirmation = await promptLine('Nhập lại mật khẩu: ', lineReader, true);
+    const password = await promptLine('Mật khẩu mới: ', pipedInput, true);
+    const confirmation = await promptLine('Nhập lại mật khẩu: ', pipedInput, true);
     if (password.length < 8 || password.length > 128) throw new Error('Mật khẩu phải dài 8–128 ký tự.');
     if (password !== confirmation) throw new Error('Mật khẩu xác nhận không khớp.');
     const passwordHash = await argon2.hash(password, {
@@ -119,7 +126,6 @@ export async function bootstrapAdmin() {
     }, select: { id: true, username: true } });
     stdout.write(`Đã tạo tài khoản ADMIN ${user.username}.\n`);
   } finally {
-    lineReader?.close();
     await db.$disconnect();
   }
 }

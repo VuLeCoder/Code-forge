@@ -8,7 +8,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
-import cookieParser from 'cookie-parser';
+import cookieParser = require('cookie-parser');
 
 const requireFromBackend = createRequire(__filename);
 
