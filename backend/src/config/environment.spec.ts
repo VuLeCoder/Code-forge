@@ -53,9 +53,17 @@ describe('validateEnvironment', () => {
   it('requires a sufficiently strong signed proxy secret only in production', () => {
     expect(() => validateEnvironment({ ...validConfig, NODE_ENV: 'production' })).toThrow('RATE_LIMIT_PROXY_SECRET');
     expect(() => validateEnvironment({ ...validConfig, RATE_LIMIT_PROXY_SECRET: 'too-short' })).toThrow('RATE_LIMIT_PROXY_SECRET');
-    expect(validateEnvironment({ ...validConfig, DATABASE_URL_UNPOOLED: validConfig.DATABASE_URL,
+    expect(validateEnvironment({ ...validConfig, DATABASE_URL_UNPOOLED: validConfig.DATABASE_URL, COOKIE_SECURE: true,
       NODE_ENV: 'production', RATE_LIMIT_PROXY_SECRET: 'x'.repeat(32) }).RATE_LIMIT_PROXY_SECRET)
       .toBe('x'.repeat(32));
+  });
+
+  it('requires secure cookies in production while allowing local and test defaults', () => {
+    const production = { ...validConfig, DATABASE_URL_UNPOOLED: validConfig.DATABASE_URL,
+      NODE_ENV: 'production', RATE_LIMIT_PROXY_SECRET: 'x'.repeat(32) };
+    expect(validateEnvironment(validConfig).COOKIE_SECURE).toBe(false);
+    expect(() => validateEnvironment(production)).toThrow('COOKIE_SECURE=true');
+    expect(validateEnvironment({ ...production, COOKIE_SECURE: 'true' }).COOKIE_SECURE).toBe(true);
   });
 
   it('requires secure cookies when SameSite is none', () => {

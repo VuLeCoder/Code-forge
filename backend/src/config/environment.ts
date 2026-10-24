@@ -113,6 +113,9 @@ export function validateEnvironment(config: Record<string, unknown>): Environmen
   if (validated.NODE_ENV === 'production' && !validated.RATE_LIMIT_PROXY_SECRET) {
     throw new Error('Cấu hình môi trường không hợp lệ: production cần RATE_LIMIT_PROXY_SECRET dài tối thiểu 32 ký tự');
   }
+  if (validated.NODE_ENV === 'production' && !validated.COOKIE_SECURE) {
+    throw new Error('Cấu hình môi trường không hợp lệ: production cần COOKIE_SECURE=true');
+  }
   if (validated.MAX_FILE_BYTES > validated.MAX_REPOSITORY_BYTES) {
     throw new Error('Cấu hình môi trường không hợp lệ: MAX_FILE_BYTES không được lớn hơn MAX_REPOSITORY_BYTES');
   }

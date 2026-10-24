@@ -33,6 +33,14 @@ No confirmed exploitable authentication bypass, private-repository disclosure, c
 - Run real multi-process Git write races and crash/reconciliation scenarios in isolated PostgreSQL/Git fixtures.
 - Run local Docker image smoke when the Docker Engine is available. No containers or volumes were modified during this review.
 
+### Conditional hardening — production could omit Secure cookie attributes
+
+- **Status:** fixed in the current worktree; focused config test passes; hosted CI for this change is pending.
+- **Evidence:** at `d1019a2`, `COOKIE_SECURE` defaulted to `false`, and production validation did not require it. The auth controller applies this setting to access and refresh cookies. Deployment documentation says production must set it to `true`, but configuration was not enforced.
+- **Impact/severity:** deployment-dependent. If production omits the setting and accepts HTTP, browser cookies can lack the `Secure` attribute. No active deployment exposure was established; no CVSS assigned.
+- **Remediation:** `validateEnvironment` now rejects `NODE_ENV=production` unless `COOKIE_SECURE=true`. Local/test behavior still defaults to `false`; unit tests cover both modes.
+- **Verification:** backend typecheck, focused ESLint, `environment.spec.ts` (8/8), and `git diff --check` pass locally.
+
 ## Evidence boundaries
 
-Local worktree checks after the race-test additions passed workspace lint, typecheck, build, backend unit tests (14 suites / 82 tests), ESLint for `pull-requests.e2e-spec.ts`, Compose config validation, and `git diff --check`. The existing repository E2E file retains 122 ESLint diagnostics, unchanged from baseline and none on the added lines; browser tests passed 48/48 in the preceding UI batch. Hosted CI run `40138087574` on `7e0aa27` subsequently passed the full suite, including isolated PostgreSQL/Git E2E, the full-stack PR journey, both image/migration checks, Compose backend-config validation, cross-process repository advisory-lock contention, and two-instance maintenance-lock serialization. The same branch's prior run `40137272731` covers concurrent refresh reuse, push–push, push–merge, reset-read recovery, merge–soft-delete, and PR error-retry regressions. Backend PostgreSQL/Git E2E was not run locally because `127.0.0.1:5433` had no listener. Three AGY audit attempts, including a final read-only review of `9c2439b`, timed out without usable output; AGY review remains unverified.
+Local worktree checks after the race-test additions passed backend unit tests (14 suites/83 tests), typecheck, build, and scoped ESLint. Current cookie validation additionally passes focused typecheck, lint, its unit suite, and diff check. Hosted CI run `40138087574` on `7e0aa27` passed all gates; latest run `40139229848` on `d1019a2` failed at backend E2E and exposes no test detail to the unauthenticated reader. Backend PostgreSQL/Git E2E was not run locally because Docker Desktop remains stuck shutting down and `127.0.0.1:5433` has no listener. Three earlier AGY reviews and a new bounded read-only review of `d1019a2` timed out without usable output; no AGY output is accepted.
