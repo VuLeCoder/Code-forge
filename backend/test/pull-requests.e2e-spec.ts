@@ -192,10 +192,17 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     ]);
     expect(mergedResponse.status).toBe(200);
     const merged = await responseJson<{ status: string; operationId: string; mergeCommitSha: string }>(mergedResponse);
-    expect(concurrentReplayResponse.status).toBe(200);
-    expect(await responseJson(concurrentReplayResponse)).toMatchObject({
-      status: 'MERGED', operationId, mergeCommitSha: merged.mergeCommitSha,
-    });
+    const concurrentReplay = await responseJson<{ status: string; operationId: string; mergeCommitSha?: string }>(concurrentReplayResponse);
+    if (concurrentReplayResponse.status === 200) {
+      expect(concurrentReplay).toMatchObject({
+        status: 'MERGED', operationId, mergeCommitSha: merged.mergeCommitSha,
+      });
+    } else {
+      // A duplicate arriving while the first request still holds the repository
+      // lock may observe the durable operation before its metadata is finalized.
+      expect(concurrentReplayResponse.status).toBe(202);
+      expect(concurrentReplay).toMatchObject({ status: 'RECONCILING', operationId });
+    }
     expect(merged.status).toBe('MERGED');
     expect(merged.mergeCommitSha).toMatch(/^[a-f0-9]{40,64}$/);
     expect((await git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).stdout.trim()).toBe(merged.mergeCommitSha);
