@@ -90,6 +90,22 @@ describe('PullRequestsService', () => {
     expect(storage.compareAndSwapBranch).not.toHaveBeenCalled();
   });
 
+  it('rechecks the operation ID under the repository lock before allocating a merge', async () => {
+    db.pullRequestMergeOperation.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ operationId, repositoryId: repoId, pullRequestId: pullId,
+        expectedSourceSha: sourceSha, expectedTargetSha: targetSha, storageGeneration: 2,
+        status: 'COMPLETED', resultingSha: 'd'.repeat(40) });
+
+    const result = await service.merge('owner', 'repo', ownerId, 4, { operationId, expectedSourceSha: sourceSha,
+      expectedTargetSha: targetSha, storageGeneration: 2, version: 3 });
+
+    expect(result).toEqual({ status: 'MERGED', operationId, mergeCommitSha: 'd'.repeat(40) });
+    expect(locks.acquire).toHaveBeenCalledWith(repoId);
+    expect(db.pullRequestMergeOperation.create).not.toHaveBeenCalled();
+    expect(storage.compareAndSwapBranch).not.toHaveBeenCalled();
+  });
+
   it('allows only the repository owner to merge a pull request', async () => {
     await expect(service.merge('owner', 'repo', writerId, 4, { operationId, expectedSourceSha: sourceSha,
       expectedTargetSha: targetSha, storageGeneration: 2, version: 3 })).rejects.toBeInstanceOf(ForbiddenException);

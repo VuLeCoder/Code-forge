@@ -153,15 +153,18 @@ export class PullRequestsService {
     const first = await this.detail(owner, name, userId, number);
     if (!first.permissions.canMerge) throw new ForbiddenException({ error: { code: 'MERGE_FORBIDDEN', message: 'Chỉ owner repository được merge.' } });
     const repoId = first.pullRequest.repositoryId;
-    const existing = await this.db.pullRequestMergeOperation.findUnique({ where: { operationId: dto.operationId } });
-    if (existing) {
+    const replayExistingOperation = async () => {
+      const existing = await this.db.pullRequestMergeOperation.findUnique({ where: { operationId: dto.operationId } });
+      if (!existing) return undefined;
       if (existing.repositoryId !== repoId || existing.pullRequestId !== first.pullRequest.id ||
         existing.expectedSourceSha !== dto.expectedSourceSha || existing.expectedTargetSha !== dto.expectedTargetSha ||
         existing.storageGeneration !== dto.storageGeneration) throw new ConflictException({ error: { code: 'OPERATION_ID_REUSED', message: 'Operation ID đã được dùng cho yêu cầu khác.' } });
       if (existing.status === 'COMPLETED') return { status: 'MERGED', operationId: dto.operationId, mergeCommitSha: existing.resultingSha };
       if (existing.status === 'PENDING' || existing.status === 'NEEDS_RECONCILIATION') return { status: 'RECONCILING', operationId: dto.operationId };
       throw new ConflictException({ error: { code: 'MERGE_OPERATION_FAILED', message: 'Thao tác merge này đã thất bại; cần tạo operation ID mới.' } });
-    }
+    };
+    const existingResult = await replayExistingOperation();
+    if (existingResult) return existingResult;
 
     const lock = await this.locks.acquire(repoId);
     try {
@@ -171,6 +174,11 @@ export class PullRequestsService {
       if (!repo || repo.ownerId !== userId || repo.status !== 'ACTIVE' || repo.deletedAt !== null) {
         throw new ForbiddenException({ error: { code: 'MERGE_FORBIDDEN', message: 'Chỉ owner repository đang hoạt động được merge.' } });
       }
+      // A same-repository retry may have passed the optimistic lookup above while
+      // another request held this lock. Re-read under the lock before checking PR
+      // state or allocating a second durable operation.
+      const lockedExistingResult = await replayExistingOperation();
+      if (lockedExistingResult) return lockedExistingResult;
       const pullRequest = await this.db.pullRequest.findUnique({ where: { id: first.pullRequest.id } });
       if (!pullRequest || pullRequest.status !== 'OPEN') throw new ConflictException({ error: { code: 'PULL_REQUEST_NOT_OPEN', message: 'Pull request không còn mở.' } });
       const unresolved = await this.db.pullRequestMergeOperation.count({ where: { repositoryId: repo.id,
@@ -183,9 +191,18 @@ export class PullRequestsService {
       if (snapshot.state !== 'READY' || snapshot.sourceSha !== dto.expectedSourceSha || snapshot.targetSha !== dto.expectedTargetSha) {
         throw new ConflictException({ error: { code: 'STALE_COMPARE', message: 'Branch đã thay đổi. Hãy tải lại diff.' } });
       }
-      await this.db.pullRequestMergeOperation.create({ data: { operationId: dto.operationId, repositoryId: repo.id,
-        pullRequestId: pullRequest.id, actorId: userId, storageGeneration: dto.storageGeneration, expectedSourceSha: dto.expectedSourceSha,
-        expectedTargetSha: dto.expectedTargetSha, oldTargetSha: dto.expectedTargetSha, status: 'PENDING' } });
+      try {
+        await this.db.pullRequestMergeOperation.create({ data: { operationId: dto.operationId, repositoryId: repo.id,
+          pullRequestId: pullRequest.id, actorId: userId, storageGeneration: dto.storageGeneration, expectedSourceSha: dto.expectedSourceSha,
+          expectedTargetSha: dto.expectedTargetSha, oldTargetSha: dto.expectedTargetSha, status: 'PENDING' } });
+      } catch (error) {
+        // Operation IDs are globally unique. Requests using the same ID against
+        // different repositories do not share a repository lock, so resolve a
+        // concurrent unique-key winner through the same idempotent replay path.
+        const concurrentResult = await replayExistingOperation();
+        if (concurrentResult) return concurrentResult;
+        throw error;
+      }
 
       let candidateSha: string | undefined;
       try {

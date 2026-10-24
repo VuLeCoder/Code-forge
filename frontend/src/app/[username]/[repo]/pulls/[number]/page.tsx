@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sessionFetch } from "@/lib/auth";
 import styles from "../pulls.module.css";
 
@@ -46,6 +46,31 @@ export default function PullRequestDetailPage() {
   const [confirmMerge, setConfirmMerge] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const actionErrorRef = useRef<HTMLParagraphElement>(null);
+  const mergeConfirmHeadingRef = useRef<HTMLHeadingElement>(null);
+  const mergeTriggerRef = useRef<HTMLButtonElement>(null);
+  const wasConfirmOpen = useRef(false);
+  const wasEditing = useRef(false);
+
+  useEffect(() => { if (actionError) actionErrorRef.current?.focus(); }, [actionError]);
+  useEffect(() => {
+    if (confirmMerge) {
+      wasConfirmOpen.current = true;
+      mergeConfirmHeadingRef.current?.focus();
+    } else if (wasConfirmOpen.current) {
+      wasConfirmOpen.current = false;
+      if (!actionError) mergeTriggerRef.current?.focus();
+    }
+  }, [confirmMerge, actionError]);
+  useEffect(() => {
+    if (editing) {
+      wasEditing.current = true;
+      document.getElementById("edit-title-input")?.focus();
+    } else if (wasEditing.current) {
+      wasEditing.current = false;
+      document.getElementById("edit-pr-trigger")?.focus();
+    }
+  }, [editing]);
 
   const fetchCurrent = useCallback(() => Promise.all([
     requestJson<DetailResult>(base), requestJson<CompareResult>(`${base}/compare`),
@@ -121,33 +146,33 @@ export default function PullRequestDetailPage() {
     } finally { setBusy(false); }
   }
 
-  if (loading) return <main className={`container ${styles.page}`}><p role="status">Đang tải pull request…</p></main>;
-  if (error || !result || !compare) return <main className={`container ${styles.page}`}><p className={styles.error} role="alert">{error || "Không tìm thấy pull request."}</p><button className="button buttonSecondary" onClick={() => { setLoading(true); void load(); }}>Thử lại</button></main>;
+  if (loading) return <main className={`container ${styles.page}`} aria-busy="true"><p role="status">Đang tải pull request…</p></main>;
+  if (error || !result || !compare) return <main className={`container ${styles.page}`} aria-busy="false"><p className={styles.error} role="alert">{error || "Không tìm thấy pull request."}</p><button className="button buttonSecondary" onClick={() => { setLoading(true); void load(); }}>Thử lại</button></main>;
 
   const pull = result.pullRequest;
   const canEdit = result.permissions.canEdit && pull.status !== "MERGED";
   const canMerge = result.permissions.canMerge && pull.status === "OPEN" && compare.state === "READY" && !compare.stale && !reconciling;
-  return <main className={`container ${styles.page}`}>
+  return <main className={`container ${styles.page}`} aria-busy={loading || busy}>
     <nav className={styles.breadcrumb} aria-label="Điều hướng"><Link href={`/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`}>{owner}/{repo}</Link><span aria-hidden="true">/</span><Link href={`/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`}>Pull requests</Link><span aria-hidden="true">/</span><strong>#{number}</strong></nav>
     <header className={styles.header}>
       <div><span className="eyebrow">Pull request #{pull.number}</span><h1>{pull.title} <span className={styles.muted}>#{pull.number}</span></h1><p><span className={`${styles.state} ${styles[`state${pull.status}`]}`}>{stateText(pull.status)}</span> {pull.author.username} đề nghị merge <code>{pull.sourceBranch}</code> vào <code>{pull.targetBranch}</code></p></div>
       <div className={styles.actions}>
-        {canEdit && <button className="button buttonSecondary" onClick={() => setEditing((value) => !value)} aria-expanded={editing}>Chỉnh sửa</button>}
+        {canEdit && <button id="edit-pr-trigger" className="button buttonSecondary" onClick={() => setEditing((value) => !value)} aria-expanded={editing} aria-controls="edit-pull-request">Chỉnh sửa</button>}
         {canEdit && <button className="button buttonSecondary" disabled={busy} onClick={() => void update({ state: pull.status === "OPEN" ? "CLOSED" : "OPEN" })}>{pull.status === "OPEN" ? "Đóng" : "Mở lại"}</button>}
-        {result.permissions.canMerge && pull.status === "OPEN" && <button className="button buttonPrimary" disabled={!canMerge || busy} onClick={() => setConfirmMerge(true)}>Merge pull request</button>}
+        {result.permissions.canMerge && pull.status === "OPEN" && <button ref={mergeTriggerRef} className="button buttonPrimary" disabled={!canMerge || busy} onClick={() => setConfirmMerge(true)} aria-expanded={confirmMerge} aria-controls="merge-confirmation">Merge pull request</button>}
       </div>
     </header>
 
-    {actionError && <p className={styles.error} role="alert">{actionError}</p>}
+    {actionError && <p ref={actionErrorRef} className={styles.error} role="alert" tabIndex={-1}>{actionError}</p>}
     {reconciling && <p className={styles.warning} role="status">Git đã nhận yêu cầu merge. Hệ thống đang đối soát; nút merge sẽ được mở lại sau khi trạng thái được xác nhận.</p>}
     {result.mergeOperation?.status === "FAILED" && <p className={styles.warning} role="status">Merge trước không cập nhật branch. Hãy kiểm tra snapshot mới nhất trước khi thử lại.</p>}
-    {editing && <section className={styles.panel} aria-labelledby="edit-title"><h2 id="edit-title">Chỉnh sửa pull request</h2><form className={styles.form} onSubmit={save}>
+    {editing && <section id="edit-pull-request" className={styles.panel} aria-labelledby="edit-title"><h2 id="edit-title">Chỉnh sửa pull request</h2><form className={styles.form} onSubmit={save}>
       <label htmlFor="edit-title-input">Tiêu đề</label><input id="edit-title-input" required maxLength={256} value={title} onChange={(event) => setTitle(event.target.value)} />
       <label htmlFor="edit-description">Mô tả</label><textarea id="edit-description" rows={6} maxLength={10000} value={description} onChange={(event) => setDescription(event.target.value)} />
       <div className={styles.actions}><button className="button buttonPrimary" disabled={busy}>{busy ? "Đang lưu…" : "Lưu thay đổi"}</button><button className="button buttonSecondary" type="button" onClick={() => setEditing(false)}>Hủy</button></div>
     </form></section>}
 
-    {confirmMerge && <section className={styles.confirm} aria-labelledby="merge-confirm-title"><h2 id="merge-confirm-title">Xác nhận merge</h2><p>Merge <code>{pull.sourceBranch}</code> vào <code>{pull.targetBranch}</code> bằng merge commit? Hãy xem lại danh sách file và diff bên dưới trước khi tiếp tục.</p><p className={styles.snapshot}>Source <code>{compare.sourceSha.slice(0, 12)}</code> · Target <code>{compare.targetSha.slice(0, 12)}</code></p><div className={styles.actions}><button className="button buttonPrimary" disabled={busy} onClick={() => void merge()}>{busy ? "Đang merge…" : "Xác nhận merge"}</button><button className="button buttonSecondary" onClick={() => setConfirmMerge(false)}>Hủy</button></div></section>}
+    {confirmMerge && <section id="merge-confirmation" className={styles.confirm} aria-labelledby="merge-confirm-title"><h2 ref={mergeConfirmHeadingRef} id="merge-confirm-title" tabIndex={-1}>Xác nhận merge</h2><p>Merge <code>{pull.sourceBranch}</code> vào <code>{pull.targetBranch}</code> bằng merge commit? Hãy xem lại danh sách file và diff bên dưới trước khi tiếp tục.</p><p className={styles.snapshot}>Source <code>{compare.sourceSha.slice(0, 12)}</code> · Target <code>{compare.targetSha.slice(0, 12)}</code></p><div className={styles.actions}><button className="button buttonPrimary" disabled={busy} onClick={() => void merge()}>{busy ? "Đang merge…" : "Xác nhận merge"}</button><button className="button buttonSecondary" onClick={() => setConfirmMerge(false)}>Hủy</button></div></section>}
 
     {pull.status === "MERGED" && <p className={styles.success} role="status">Đã merge{pull.mergedBy ? ` bởi ${pull.mergedBy.username}` : ""}{pull.mergeCommitSha ? <> · commit <code>{pull.mergeCommitSha.slice(0, 12)}</code></> : ""}.</p>}
     {compare.state === "STORAGE_RESET" && <p className={styles.warning} role="status">Storage của repository đã được khởi tạo lại. Các branch nguồn không còn khả dụng; PR này được giữ trong lịch sử và không thể merge.</p>}

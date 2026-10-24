@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sessionFetch } from "@/lib/auth";
 import styles from "./pulls.module.css";
 
@@ -52,6 +52,22 @@ export default function PullRequestListPage() {
   const [target, setTarget] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const createToggleRef = useRef<HTMLButtonElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const formErrorRef = useRef<HTMLParagraphElement>(null);
+  const wasCreateOpen = useRef(false);
+
+  useEffect(() => {
+    if (createOpen) {
+      wasCreateOpen.current = true;
+      titleInputRef.current?.focus();
+    } else if (wasCreateOpen.current) {
+      wasCreateOpen.current = false;
+      createToggleRef.current?.focus();
+    }
+  }, [createOpen]);
+
+  useEffect(() => { if (formError) formErrorRef.current?.focus(); }, [formError]);
 
   const fetchPage = useCallback(async () => {
     const query = new URLSearchParams({ page: String(page), ...(state === "ALL" ? {} : { status: state }) });
@@ -95,24 +111,24 @@ export default function PullRequestListPage() {
     finally { setSaving(false); }
   }
 
-  return <main className={`container ${styles.page}`}>
+  return <main className={`container ${styles.page}`} aria-busy={loading || saving}>
     <nav className={styles.breadcrumb} aria-label="Điều hướng"><Link href={`/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`}>{owner}/{repo}</Link><span aria-hidden="true">/</span><strong>Pull requests</strong></nav>
     <header className={styles.header}>
       <div><span className="eyebrow">Cộng tác</span><h1>Pull requests</h1><p>Xem và trao đổi các thay đổi giữa những branch trong repository này.</p></div>
-      {result?.permissions.canCreate && <button className="button buttonPrimary" onClick={() => setCreateOpen((open) => !open)} aria-expanded={createOpen} aria-controls="create-pull-request">Tạo pull request</button>}
+      {result?.permissions.canCreate && <button ref={createToggleRef} className="button buttonPrimary" onClick={() => setCreateOpen((open) => !open)} aria-expanded={createOpen} aria-controls="create-pull-request">Tạo pull request</button>}
     </header>
 
     {createOpen && <section id="create-pull-request" className={styles.panel} aria-labelledby="create-title">
       <h2 id="create-title">Tạo pull request mới</h2>
       <form className={styles.form} onSubmit={create}>
-        <label htmlFor="pr-title">Tiêu đề</label><input id="pr-title" required maxLength={256} value={title} onChange={(event) => setTitle(event.target.value)} />
+        <label htmlFor="pr-title">Tiêu đề</label><input ref={titleInputRef} id="pr-title" required maxLength={256} value={title} onChange={(event) => setTitle(event.target.value)} />
         <div className={styles.branchFields}>
           <div><label htmlFor="pr-source">Branch nguồn</label>{branches.length ? <select id="pr-source" required value={source} onChange={(event) => setSource(event.target.value)}><option value="">Chọn branch</option>{branches.map((branch) => <option key={branch.name} value={branch.name}>{branch.name}</option>)}</select> : <input id="pr-source" required value={source} onChange={(event) => setSource(event.target.value)} placeholder="feature/my-change" />}</div>
           <span className={styles.arrow} aria-hidden="true">→</span>
           <div><label htmlFor="pr-target">Branch đích</label>{branches.length ? <select id="pr-target" required value={target} onChange={(event) => setTarget(event.target.value)}><option value="">Chọn branch</option>{branches.map((branch) => <option key={branch.name} value={branch.name}>{branch.name}</option>)}</select> : <input id="pr-target" required value={target} onChange={(event) => setTarget(event.target.value)} placeholder="main" />}</div>
         </div>
         <label htmlFor="pr-description">Mô tả <span className={styles.muted}>(không bắt buộc)</span></label><textarea id="pr-description" rows={5} maxLength={10000} value={description} onChange={(event) => setDescription(event.target.value)} />
-        {formError && <p className={styles.error} role="alert">{formError}</p>}
+        {formError && <p ref={formErrorRef} className={styles.error} role="alert" tabIndex={-1}>{formError}</p>}
         <div className={styles.actions}><button className="button buttonPrimary" disabled={saving}>{saving ? "Đang tạo…" : "Tạo pull request"}</button><button type="button" className="button buttonSecondary" onClick={() => setCreateOpen(false)}>Hủy</button></div>
       </form>
     </section>}

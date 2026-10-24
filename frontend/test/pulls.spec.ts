@@ -84,16 +84,57 @@ test("owner confirms merge with the displayed snapshot and sees a stale conflict
   });
 
   await page.goto("/alice/project/pulls/1");
-  await page.getByRole("button", { name: "Merge pull request" }).click();
-  await expect(page.getByRole("heading", { name: "Xác nhận merge" })).toBeVisible();
+  const editTrigger = page.getByRole("button", { name: "Chỉnh sửa" });
+  await editTrigger.focus();
+  await editTrigger.press("Enter");
+  await expect(page.getByLabel("Tiêu đề")).toBeFocused();
+  await page.getByRole("button", { name: "Hủy" }).click();
+  await expect(editTrigger).toBeFocused();
+
+  const mergeTrigger = page.getByRole("button", { name: "Merge pull request" });
+  await mergeTrigger.focus();
+  await mergeTrigger.press("Enter");
+  const confirmationHeading = page.getByRole("heading", { name: "Xác nhận merge" });
+  await expect(confirmationHeading).toBeVisible();
+  await expect(confirmationHeading).toBeFocused();
+  await expect(confirmationHeading).toHaveCSS("outline-style", "solid");
   await page.getByRole("button", { name: "Xác nhận merge" }).click();
 
   await expect(page.locator("p[role=alert]")).toContainText("Compare đã cũ.");
+  await expect(page.locator("p[role=alert]")).toBeFocused();
   expect(mergeRequest).toMatchObject({
     expectedSourceSha: pullRequest.sourceSha, expectedTargetSha: pullRequest.targetSha,
     storageGeneration: 2, version: 3,
   });
   expect(mergeRequest?.operationId).toEqual(expect.any(String));
+});
+
+test("pull request form announces validation, restores focus, and fits a 375px viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { user: owner } }));
+  await page.route("**/api/v1/repos/alice/project/branches", (route) =>
+    route.fulfill({ json: { branches: [{ name: "main" }, { name: "feature/greeting" }] } }),
+  );
+  await page.route("**/api/v1/repos/alice/project/pulls*", (route) =>
+    route.fulfill({ json: { pullRequests: [], page: 1, hasMore: false, permissions: { canCreate: true } } }),
+  );
+
+  await page.goto("/alice/project/pulls");
+  const toggle = page.getByRole("button", { name: "Tạo pull request", exact: true }).first();
+  await toggle.focus();
+  await toggle.press("Enter");
+  await expect(page.getByLabel("Tiêu đề")).toBeFocused();
+  await page.getByLabel("Tiêu đề").fill("Invalid same-branch request");
+  await page.getByLabel("Branch nguồn").selectOption("main");
+  await page.getByLabel("Branch đích").selectOption("main");
+  await page.getByRole("button", { name: "Tạo pull request", exact: true }).last().click();
+  const validation = page.getByRole("alert").filter({ hasText: "Hãy chọn hai branch khác nhau." });
+  await expect(validation).toBeFocused();
+
+  await page.getByRole("button", { name: "Hủy" }).click();
+  await expect(toggle).toBeFocused();
+  const widths = await page.evaluate(() => ({ viewport: window.innerWidth, document: document.documentElement.scrollWidth }));
+  expect(widths.document).toBeLessThanOrEqual(widths.viewport);
 });
 
 test("owner cannot submit another merge while the previous operation is reconciling", async ({ page }) => {

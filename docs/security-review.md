@@ -21,4 +21,4 @@ Scope: local static review of auth/session, invitation, Git HTTP/storage, PR/mer
 - Run the hosted CI and cloud Git HTTP checks before publishing a URL.
 - Repeat the audit on the release commit and record any later changes. The review used no destructive payloads and does not establish absence of vulnerabilities outside the inspected paths.
 
-AGY's earlier broad review timed out without usable findings; this checkpoint comes from local code review and an independent read-only reviewer, not a successful AGY review.
+AGY's broad and narrowed read-only reviews both timed out without usable findings. An independent static follow-up review found an operation-ID replay race in PR merge; the working-tree fix rechecks the operation under the repository lock and resolves globally unique-ID collisions. The PR service unit test passes; PostgreSQL replay/concurrency coverage was added but remains unverified until the isolated database is available. Reverse-proxy-aware rate limiting remains a deployment check, not a confirmed vulnerability. See `docs/audits/security-followup-2026-10-25.md`.
