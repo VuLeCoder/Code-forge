@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withBackendClientIp } from "@/lib/backend-client-ip";
 
 type Context = { params: Promise<{ owner: string; repo: string; path?: string[] }> };
+const MAX_MUTATION_BODY_BYTES = 32 * 1024;
 
 const validOwner = (value: string) => /^[a-zA-Z0-9][a-zA-Z0-9._-]{1,37}[a-zA-Z0-9]$/.test(value);
 const validRepo = (value: string) => value.length <= 100 && /^(?!.*\.\.)(?!.*\.git$)[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/i.test(value);
@@ -21,6 +22,47 @@ function allowedRoute(method: string, path: string[]) {
   if (path.length === 2 && number && path[1] === "compare") return method === "GET";
   if (path.length === 2 && number && path[1] === "merge") return method === "POST";
   return false;
+}
+
+async function readMutationBody(request: NextRequest): Promise<{ body: string } | { status: 400 | 413 }> {
+  const contentLength = request.headers.get("content-length");
+  if (contentLength !== null) {
+    if (!/^\d+$/.test(contentLength) || !Number.isSafeInteger(Number(contentLength))) {
+      await request.body?.cancel().catch(() => undefined);
+      return { status: 400 };
+    }
+    if (Number(contentLength) > MAX_MUTATION_BODY_BYTES) {
+      await request.body?.cancel().catch(() => undefined);
+      return { status: 413 };
+    }
+  }
+
+  const reader = request.body?.getReader();
+  if (!reader) return { body: "" };
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_MUTATION_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return { status: 413 };
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { body: new TextDecoder().decode(bytes) };
 }
 
 async function proxy(request: NextRequest, context: Context) {
@@ -43,12 +85,18 @@ async function proxy(request: NextRequest, context: Context) {
   try {
     const suffix = path.length ? `/${path.map(encodeURIComponent).join("/")}` : "";
     const backendUrl = (process.env.BACKEND_URL ?? "http://localhost:4000").replace(/\/$/, "");
+    const body = request.method === "GET" ? undefined : await readMutationBody(request);
+    if (body && "status" in body) {
+      const code = body.status === 413 ? "REQUEST_TOO_LARGE" : "INVALID_CONTENT_LENGTH";
+      const message = body.status === 413 ? "Nội dung yêu cầu vượt quá giới hạn 32 KiB." : "Content-Length không hợp lệ.";
+      return errorResponse(body.status, code, message);
+    }
     const upstream = await fetch(
       `${backendUrl}/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls${suffix}${request.nextUrl.search}`,
       {
         method: request.method,
         headers: withBackendClientIp(request, headers),
-        ...(request.method === "GET" ? {} : { body: await request.text() }),
+        ...(body && "body" in body ? { body: body.body } : {}),
         cache: "no-store",
         redirect: "error",
         signal: AbortSignal.timeout(30_000),

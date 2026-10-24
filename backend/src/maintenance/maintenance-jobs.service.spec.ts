@@ -101,6 +101,40 @@ describe('MaintenanceJobsService', () => {
     expect(fixture.lock.release).toHaveBeenCalledTimes(1);
   });
 
+  it('does not overlap scheduled batches and lets the next run proceed after releasing the job lock', async () => {
+    const fixture = makeFixture();
+    let signalBatchEntered!: () => void;
+    let finishFirstBatch!: (result: number) => void;
+    const batchEntered = new Promise<void>((resolve) => { signalBatchEntered = resolve; });
+    const firstBatchGate = new Promise<number>((resolve) => { finishFirstBatch = resolve; });
+    fixture.db.$executeRaw.mockImplementationOnce(() => {
+      signalBatchEntered();
+      return firstBatchGate;
+    });
+
+    const firstRun = fixture.internals.runScheduled();
+    await batchEntered;
+
+    // A simultaneous invocation must return without entering any batch job.
+    await fixture.internals.runScheduled();
+    expect(fixture.db.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(fixture.purge.purgeDue).not.toHaveBeenCalled();
+    expect(fixture.locks.acquire).toHaveBeenCalledTimes(1);
+
+    finishFirstBatch(1);
+    await firstRun;
+    expect(fixture.db.$executeRaw).toHaveBeenCalledTimes(3);
+    expect(fixture.purge.purgeDue).toHaveBeenCalledTimes(1);
+    expect(fixture.lock.release).toHaveBeenCalledTimes(1);
+
+    // Once the in-process guard and advisory lock are released, a later run can execute.
+    await fixture.internals.runScheduled();
+    expect(fixture.locks.acquire).toHaveBeenCalledTimes(2);
+    expect(fixture.db.$executeRaw).toHaveBeenCalledTimes(6);
+    expect(fixture.purge.purgeDue).toHaveBeenCalledTimes(2);
+    expect(fixture.lock.release).toHaveBeenCalledTimes(2);
+  });
+
   it('does not touch Git when storage generation changed and records reconciliation state', async () => {
     const fixture = makeFixture({ repository: { storageKey: 'owner/repo.git', storageGeneration: 5 } });
     await fixture.internals.reconcileOperation(fixture.operation.operationId);

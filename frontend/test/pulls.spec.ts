@@ -137,6 +137,51 @@ test("pull request form announces validation, restores focus, and fits a 375px v
   expect(widths.document).toBeLessThanOrEqual(widths.viewport);
 });
 
+test("long PR labels and diff stay contained at 375px while review controls remain keyboard accessible", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { user: owner } }));
+  const longSource = `feature/${"very-long-branch-segment-".repeat(8)}`;
+  const longTarget = `release/${"stable-target-".repeat(8)}`;
+  const longPath = `packages/${"nested-folder/".repeat(10)}exceptionally-long-source-file-name.ts`;
+  const longPullRequest = { ...pullRequest, sourceBranch: longSource, targetBranch: longTarget };
+  const longCompare = {
+    ...compare,
+    commits: [{ ...compare.commits[0], subject: `Add a coordinated change from ${longSource}` }],
+    files: [{ status: "M", path: longPath }],
+    diff: `diff --git a/${longPath} b/${longPath}\n+${"unbroken-diff-segment".repeat(120)}\n`,
+  };
+  await page.route("**/api/v1/repos/alice/project/pulls/1", (route) =>
+    route.fulfill({ json: { pullRequest: longPullRequest, permissions: { canCreate: true, canEdit: true, canMerge: true }, mergeOperation: null } }),
+  );
+  await page.route("**/api/v1/repos/alice/project/pulls/1/compare", (route) => route.fulfill({ json: longCompare }));
+
+  await page.goto("/alice/project/pulls/1");
+  await expect(page.getByRole("heading", { name: /Add greeting/ })).toBeVisible();
+  await expect(page.getByText(longSource, { exact: true })).toBeVisible();
+  await expect(page.getByText(longPath, { exact: true })).toBeVisible();
+  const widths = await page.evaluate(() => ({ viewport: window.innerWidth, document: document.documentElement.scrollWidth }));
+  expect(widths.document).toBeLessThanOrEqual(widths.viewport);
+  const diff = page.getByLabel("Nội dung diff dạng văn bản");
+  const diffWidths = await diff.evaluate((element) => ({ client: element.clientWidth, content: element.scrollWidth }));
+  expect(diffWidths.content).toBeGreaterThan(diffWidths.client);
+
+  const editButton = page.getByRole("button", { name: "Chỉnh sửa" });
+  await editButton.focus();
+  await editButton.press("Enter");
+  await expect(page.getByLabel("Tiêu đề")).toBeFocused();
+  await page.getByRole("button", { name: "Hủy" }).click();
+  await expect(editButton).toBeFocused();
+
+  const mergeButton = page.getByRole("button", { name: "Merge pull request" });
+  await expect(mergeButton).toBeEnabled();
+  await mergeButton.focus();
+  await mergeButton.press("Enter");
+  const confirmationHeading = page.getByRole("heading", { name: "Xác nhận merge" });
+  await expect(confirmationHeading).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "Xác nhận merge" })).toBeFocused();
+});
+
 test("owner cannot submit another merge while the previous operation is reconciling", async ({ page }) => {
   await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { user: owner } }));
   await page.route("**/api/v1/repos/alice/project/pulls/1", (route) =>

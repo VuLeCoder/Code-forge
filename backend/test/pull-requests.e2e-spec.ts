@@ -212,26 +212,25 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       await db.pullRequestMergeOperation.deleteMany({ where: { operationId: unresolvedOperationId } });
     }
 
-    const operationId = randomUUID();
-    const mergeRequest = { operationId, expectedSourceSha: sourceSha, expectedTargetSha: targetSha,
+    const operationIds = [randomUUID(), randomUUID()] as const;
+    expect(operationIds[0]).not.toBe(operationIds[1]);
+    const mergeRequest = { expectedSourceSha: sourceSha, expectedTargetSha: targetSha,
       storageGeneration: storedRepo.storageGeneration, version: detail.pullRequest.version };
-    const [mergedResponse, concurrentReplayResponse] = await Promise.all([
-      call('POST', `${repoPath}/${number}/merge`, mergeRequest),
-      call('POST', `${repoPath}/${number}/merge`, mergeRequest),
+    const concurrentResponses = await Promise.all([
+      call('POST', `${repoPath}/${number}/merge`, { ...mergeRequest, operationId: operationIds[0] }),
+      call('POST', `${repoPath}/${number}/merge`, { ...mergeRequest, operationId: operationIds[1] }),
     ]);
-    expect(mergedResponse.status).toBe(200);
+    const successfulResponses = concurrentResponses.filter((response) => response.status === 200);
+    const rejectedResponses = concurrentResponses.filter((response) => response.status === 409);
+    expect(successfulResponses).toHaveLength(1);
+    expect(rejectedResponses).toHaveLength(1);
+    const mergedResponse = successfulResponses[0]!;
+    const rejectedResponse = rejectedResponses[0]!;
     const merged = await responseJson<{ status: string; operationId: string; mergeCommitSha: string }>(mergedResponse);
-    const concurrentReplay = await responseJson<{ status: string; operationId: string; mergeCommitSha?: string }>(concurrentReplayResponse);
-    if (concurrentReplayResponse.status === 200) {
-      expect(concurrentReplay).toMatchObject({
-        status: 'MERGED', operationId, mergeCommitSha: merged.mergeCommitSha,
-      });
-    } else {
-      // A duplicate arriving while the first request still holds the repository
-      // lock may observe the durable operation before its metadata is finalized.
-      expect(concurrentReplayResponse.status).toBe(202);
-      expect(concurrentReplay).toMatchObject({ status: 'RECONCILING', operationId });
-    }
+    const rejected = await responseJson<{ error: { code: string } }>(rejectedResponse);
+    // With distinct operation IDs, the serialized loser observes the already-merged PR and gets a 409.
+    expect(rejected.error.code).toBe('PULL_REQUEST_NOT_OPEN');
+    expect(operationIds).toContain(merged.operationId);
     expect(merged.status).toBe('MERGED');
     expect(merged.mergeCommitSha).toMatch(/^[a-f0-9]{40,64}$/);
     expect((await git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).stdout.trim()).toBe(merged.mergeCommitSha);
@@ -243,6 +242,9 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       mergeOperation: { status: string } }>(await call('GET', `${repoPath}/${number}`));
     expect(finalDetail.pullRequest).toMatchObject({ status: 'MERGED', mergeCommitSha: merged.mergeCommitSha });
     expect(finalDetail.mergeOperation).toMatchObject({ status: 'COMPLETED' });
+    const mergeOperations = await db.pullRequestMergeOperation.findMany({ where: { pullRequestId: detail.pullRequest.id } });
+    expect(mergeOperations).toHaveLength(1);
+    expect(mergeOperations[0]?.operationId).toBe(merged.operationId);
     expect(await db.auditLog.count({ where: { targetId: detail.pullRequest.id, action: 'PULL_REQUEST_MERGED' } })).toBe(1);
 
     await git(['-C', writerWork, 'fetch', 'origin', 'main']);
@@ -250,7 +252,7 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     expect((await git(['-C', writerWork, 'show', 'refs/remotes/origin/main:feature.txt'])).stdout).toBe('button: enabled\n');
 
     const replay = await call('POST', `${repoPath}/${number}/merge`, {
-      operationId, expectedSourceSha: sourceSha, expectedTargetSha: targetSha,
+      operationId: merged.operationId, expectedSourceSha: sourceSha, expectedTargetSha: targetSha,
       storageGeneration: storedRepo.storageGeneration, version: detail.pullRequest.version,
     });
     expect(replay.status).toBe(200);
