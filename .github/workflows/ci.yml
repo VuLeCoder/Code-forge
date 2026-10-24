@@ -39,6 +39,22 @@ jobs:
       - run: corepack enable
       - run: corepack pnpm install --frozen-lockfile
       - run: corepack pnpm db:generate
+      - name: Validate local Compose backend settings
+        run: |
+          docker compose config --format json | node -e '
+            let input = "";
+            process.stdin.setEncoding("utf8");
+            process.stdin.on("data", (chunk) => input += chunk);
+            process.stdin.on("end", () => {
+              const env = JSON.parse(input).services.backend.environment;
+              if (!env.DATABASE_URL_UNPOOLED || typeof env.RATE_LIMIT_PROXY_SECRET !== "string" || env.RATE_LIMIT_PROXY_SECRET.length < 32) {
+                console.error("Compose backend is missing required production settings");
+                process.exitCode = 1;
+                return;
+              }
+              console.log("Local Compose backend settings are valid");
+            });
+          '
       - run: corepack pnpm --filter frontend exec playwright install --with-deps chromium
       - run: corepack pnpm --filter backend test
       - run: corepack pnpm --filter backend test:e2e
