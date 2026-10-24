@@ -415,7 +415,7 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     let recoveredDetailResponse: Response | undefined;
     type RecoveredPullRequestDetail = {
       pullRequest: { status: string; mergedById: string | null; mergeCommitSha: string | null };
-      mergeOperation: { status: string; resultingSha: string | null } | null;
+      mergeOperation: { operationId: string; status: string; errorCode: string | null } | null;
     };
     let recoveredDetail: RecoveredPullRequestDetail | undefined;
     for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -429,11 +429,13 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     expect(recovered).toBe(true);
 
     expect(recoveredDetailResponse?.status).toBe(200);
+    const recoveryOwner = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'recoveryowner' } });
     expect(recoveredDetail).toMatchObject({
-      pullRequest: { status: 'MERGED', mergedById: (await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'recoveryowner' } })).id,
-        mergeCommitSha: candidateSha },
-      mergeOperation: { status: 'COMPLETED', resultingSha: candidateSha },
+      pullRequest: { status: 'MERGED', mergedById: recoveryOwner.id, mergeCommitSha: candidateSha },
+      mergeOperation: { operationId, status: 'COMPLETED' },
     });
+    const recoveredOperation = await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId } });
+    expect(recoveredOperation).toMatchObject({ status: 'COMPLETED', resultingSha: candidateSha, actorId: recoveryOwner.id });
     expect(git(['--git-dir', bare, 'rev-parse', 'refs/heads/main']).trim()).toBe(candidateSha);
     expect(await db.auditLog.count({ where: { targetId: pullRequest.id, action: 'PULL_REQUEST_MERGE_RECONCILED' } })).toBe(1);
 
