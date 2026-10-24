@@ -206,6 +206,15 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect((await call('GET', 'repos/owner/demo/image?path=logo.png', ownerCookie)).status).toBe(404);
     expect((await call('GET', 'repos/owner/demo/image?path=README.md', ownerCookie)).status).toBe(400);
     await rm(bare, { recursive: true });
+    const concurrentRecoveryResponses = await Promise.all(Array.from({ length: 5 }, () =>
+      call('GET', 'repos/owner/demo/commits', ownerCookie)));
+    expect(concurrentRecoveryResponses.map((response) => response.status)).toEqual([200, 200, 200, 200, 200]);
+    const concurrentRecoveryResults = await Promise.all(concurrentRecoveryResponses.map(async (response) =>
+      await response.json() as { commits: unknown[]; storageState: string; storageGeneration: number }));
+    for (const recovery of concurrentRecoveryResults) {
+      expect(recovery).toMatchObject({ commits: [], storageState: 'RESET', storageGeneration: 1 });
+    }
+    expect((await db.repository.findUniqueOrThrow({ where: { id: stored.id } })).storageGeneration).toBe(1);
     expect((await call('GET', `repos/owner/demo/commits/${imageCommit}`, ownerCookie)).status).toBe(404);
     expect(await (await call('GET', 'repos/owner/demo/commits', ownerCookie)).json()).toMatchObject({ commits: [], storageState: 'RESET', storageGeneration: 1 });
     expect((await call('GET', `repos/owner/demo/commits?snapshot=${imageCommit}`, ownerCookie)).status).toBe(404);

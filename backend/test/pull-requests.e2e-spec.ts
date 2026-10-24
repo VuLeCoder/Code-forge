@@ -331,4 +331,122 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       expect(raceMergeAudits).toBe(0);
     }
   }, 60_000);
+
+  it('serializes a source-branch push against a merge snapshot', async () => {
+    const registered = await call('POST', 'auth/register', {
+      username: 'RaceOwner', email: 'race-owner@example.test', password: 'test-password-123',
+    });
+    expect(registered.status).toBe(201);
+    const raceOwnerCookie = cookie(registered);
+
+    const writerRegistered = await call('POST', 'auth/register', {
+      username: 'RaceWriter', email: 'race-writer@example.test', password: 'test-password-123',
+    }, '');
+    expect(writerRegistered.status).toBe(201);
+    const raceWriterCookie = cookie(writerRegistered);
+
+    const createdRepo = await call('POST', 'repositories', {
+      name: 'PushMergeRace', visibility: 'PRIVATE', initializeReadme: true,
+    }, raceOwnerCookie);
+    expect(createdRepo.status).toBe(201);
+    const { repository } = await responseJson<{ repository: { id: string } }>(createdRepo);
+    const storedRepo = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
+    const bare = join(storageRoot, storedRepo.storageKey);
+
+    const inviteResponse = await call('POST', 'repos/raceowner/pushmergerace/invitations', {
+      username: 'RaceWriter', role: 'WRITE',
+    }, raceOwnerCookie);
+    expect(inviteResponse.status).toBe(201);
+    const invite = await responseJson<{ invitation: { id: string } }>(inviteResponse);
+    const accepted = await call('POST', `invitations/${invite.invitation.id}/accept`, undefined, raceWriterCookie);
+    expect(accepted.status).toBe(201);
+
+    const tokenResponse = await call('POST', 'tokens', {
+      name: 'Push/merge race', scopes: ['repo:read', 'repo:write'],
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+    }, raceWriterCookie);
+    expect(tokenResponse.status).toBe(201);
+    const { token } = await responseJson<{ token: { secret: string } }>(tokenResponse);
+
+    const askpass = join(storageRoot, 'git-race-askpass.sh');
+    await writeFile(askpass,
+      '#!/bin/sh\ncase "$1" in *Username*) printf "%s\\n" "$TEST_GIT_USER" ;; *) printf "%s\\n" "$TEST_GIT_PAT" ;; esac\n',
+      { mode: 0o700 });
+    const runGit = promisify(execFile);
+    const git = (args: string[]) => runGit('git', ['-c', 'credential.helper=', ...args], {
+      timeout: 20_000,
+      env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(storageRoot, 'empty-git-config'),
+        GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: askpass, TEST_GIT_USER: 'RaceWriter', TEST_GIT_PAT: token.secret },
+    });
+    const repoUrl = `${base}/git/RaceOwner/PushMergeRace.git`;
+    const writerWork = join(storageRoot, 'push-merge-race-clone');
+    await git(['clone', repoUrl, writerWork]);
+    await git(['-C', writerWork, 'config', 'user.name', 'Race Writer']);
+    await git(['-C', writerWork, 'config', 'user.email', 'race-writer@example.test']);
+    await git(['-C', writerWork, 'switch', '-c', 'feature/concurrent-source-update']);
+    await writeFile(join(writerWork, 'race.txt'), 'source snapshot\n');
+    await git(['-C', writerWork, 'add', 'race.txt']);
+    await git(['-C', writerWork, 'commit', '-m', 'Create merge snapshot']);
+    const snapshotSourceSha = (await git(['-C', writerWork, 'rev-parse', 'HEAD'])).stdout.trim();
+    await git(['-C', writerWork, 'push', '--set-upstream', 'origin', 'feature/concurrent-source-update']);
+    const snapshotTargetSha = (await git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).stdout.trim();
+
+    const repoPath = 'repos/raceowner/pushmergerace/pulls';
+    const createdPull = await call('POST', repoPath, {
+      title: 'Race source push and merge', description: 'Concurrent Git and merge mutation regression.',
+      sourceBranch: 'feature/concurrent-source-update', targetBranch: 'main',
+    }, raceOwnerCookie);
+    expect(createdPull.status).toBe(201);
+    const pull = await responseJson<{ pullRequest: { id: string; number: number } }>(createdPull);
+    const detailResponse = await call('GET', `${repoPath}/${pull.pullRequest.number}`, undefined, raceOwnerCookie);
+    expect(detailResponse.status).toBe(200);
+    const detail = await responseJson<{ pullRequest: { status: string; version: number } }>(detailResponse);
+    expect(detail.pullRequest.status).toBe('OPEN');
+    const compareResponse = await call('GET', `${repoPath}/${pull.pullRequest.number}/compare`, undefined, raceOwnerCookie);
+    expect(compareResponse.status).toBe(200);
+    const comparison = await responseJson<{ state: string; sourceSha: string; targetSha: string; storageGeneration: number }>(compareResponse);
+    expect(comparison).toMatchObject({ state: 'READY', sourceSha: snapshotSourceSha, targetSha: snapshotTargetSha,
+      storageGeneration: storedRepo.storageGeneration });
+
+    await writeFile(join(writerWork, 'race.txt'), 'source advanced during merge\n');
+    await git(['-C', writerWork, 'add', 'race.txt']);
+    await git(['-C', writerWork, 'commit', '-m', 'Advance PR source during merge']);
+    const advancedSourceSha = (await git(['-C', writerWork, 'rev-parse', 'HEAD'])).stdout.trim();
+    const operationId = randomUUID();
+    const [, mergeResponse] = await Promise.all([
+      Promise.resolve().then(() => git(['-C', writerWork, 'push', 'origin', 'HEAD:refs/heads/feature/concurrent-source-update'])),
+      Promise.resolve().then(() => call('POST', `${repoPath}/${pull.pullRequest.number}/merge`, {
+        operationId, expectedSourceSha: comparison.sourceSha, expectedTargetSha: comparison.targetSha,
+        storageGeneration: comparison.storageGeneration, version: detail.pullRequest.version,
+      }, raceOwnerCookie)),
+    ]);
+    expect(advancedSourceSha).toMatch(/^[a-f0-9]{40,64}$/);
+    expect([200, 409]).toContain(mergeResponse.status);
+    expect((await git(['--git-dir', bare, 'rev-parse', 'refs/heads/feature/concurrent-source-update'])).stdout.trim())
+      .toBe(advancedSourceSha);
+
+    const targetAfterRace = (await git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).stdout.trim();
+    const racedPull = await db.pullRequest.findUniqueOrThrow({ where: { id: pull.pullRequest.id } });
+    const racedOperations = await db.pullRequestMergeOperation.findMany({ where: { pullRequestId: pull.pullRequest.id } });
+    const mergeAudits = await db.auditLog.count({ where: { targetId: pull.pullRequest.id, action: 'PULL_REQUEST_MERGED' } });
+    if (mergeResponse.status === 200) {
+      const result = await responseJson<{ status: string; operationId: string; mergeCommitSha: string }>(mergeResponse);
+      expect(result).toMatchObject({ status: 'MERGED', operationId });
+      expect(targetAfterRace).toBe(result.mergeCommitSha);
+      const parents = (await git(['--git-dir', bare, 'rev-list', '--parents', '-n', '1', result.mergeCommitSha]))
+        .stdout.trim().split(' ');
+      expect(parents).toHaveLength(3);
+      expect(parents.slice(1).sort()).toEqual([snapshotTargetSha, snapshotSourceSha].sort());
+      expect(racedPull).toMatchObject({ status: 'MERGED', mergeCommitSha: result.mergeCommitSha });
+      expect(racedOperations).toHaveLength(1);
+      expect(racedOperations[0]).toMatchObject({ operationId, status: 'COMPLETED', resultingSha: result.mergeCommitSha });
+      expect(mergeAudits).toBe(1);
+    } else {
+      expect(await responseJson<{ error: { code: string } }>(mergeResponse)).toMatchObject({ error: { code: 'STALE_COMPARE' } });
+      expect(targetAfterRace).toBe(snapshotTargetSha);
+      expect(racedPull).toMatchObject({ status: 'OPEN', mergeCommitSha: null });
+      expect(racedOperations).toHaveLength(0);
+      expect(mergeAudits).toBe(0);
+    }
+  }, 60_000);
 });
