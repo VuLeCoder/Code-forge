@@ -41,3 +41,4 @@ yarn-error.log*
 
 # Local Git repository storage
 data/git/
+note

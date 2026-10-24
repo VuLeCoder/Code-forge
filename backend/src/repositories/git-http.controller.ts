@@ -8,11 +8,16 @@ export class GitHttpController {
 
   @Get('info/refs')
   advertise(@Param('owner') owner: string, @Param('repository') repository: string, @Req() req: Request, @Res() res: Response) {
-    return this.transport.serve(owner, repository, true, req, res);
+    return this.transport.serve(owner, repository, 'advertise', req, res);
   }
 
   @Post('git-upload-pack')
   upload(@Param('owner') owner: string, @Param('repository') repository: string, @Req() req: Request, @Res() res: Response) {
-    return this.transport.serve(owner, repository, false, req, res);
+    return this.transport.serve(owner, repository, 'git-upload-pack', req, res);
+  }
+
+  @Post('git-receive-pack')
+  receive(@Param('owner') owner: string, @Param('repository') repository: string, @Req() req: Request, @Res() res: Response) {
+    return this.transport.serve(owner, repository, 'git-receive-pack', req, res);
   }
 }

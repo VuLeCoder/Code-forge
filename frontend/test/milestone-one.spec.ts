@@ -82,7 +82,7 @@ test('repository read refreshes mid-session and long names fit mobile', async ({
   const name = 'a'.repeat(100);
   await page.route('**/api/v1/repos/alice/*', (route) => {
     reads++;
-    return route.fulfill(reads === 1 ? { status: 401, json: {} } : { json: { repository: { id: 'long', name, description: 'x'.repeat(2000), visibility: 'PRIVATE', owner: { username: 'alice' }, defaultBranch: 'main' } } });
+    return route.fulfill(reads === 1 ? { status: 401, json: {} } : { json: { repository: { id: 'long', name, description: 'x'.repeat(2000), visibility: 'PRIVATE', owner: { username: 'alice' }, defaultBranch: 'main', permissions: { canRead: true, canWrite: true, canManage: true } } } });
   });
   await page.goto(`/alice/${name}`);
   await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
@@ -146,7 +146,7 @@ test('create repository reports name conflicts and opens the new repository', as
     expect(data).toEqual({ name: 'my-project', description: 'Mô tả thử nghiệm', visibility: 'PRIVATE', initializeReadme: false });
     return route.fulfill({ status: 201, json: { repository: { id: 'created', owner: { username: 'alice' }, name: data.name, description: data.description, visibility: data.visibility } } });
   });
-  await page.route('**/api/v1/repos/alice/my-project', (route) => route.fulfill({ json: { repository: { id: 'created', owner: { username: 'alice' }, name: 'my-project', description: 'Mô tả thử nghiệm', visibility: 'PRIVATE', status: 'ACTIVE', defaultBranch: 'main', permissions: { canRead: true, canManage: true } } } }));
+  await page.route('**/api/v1/repos/alice/my-project', (route) => route.fulfill({ json: { repository: { id: 'created', owner: { username: 'alice' }, name: 'my-project', description: 'Mô tả thử nghiệm', visibility: 'PRIVATE', status: 'ACTIVE', defaultBranch: 'main', permissions: { canRead: true, canWrite: true, canManage: true } } } }));
   await page.goto('/new');
   await page.getByRole('textbox', { name: 'Tên repository' }).fill('taken');
   await page.getByRole('button', { name: 'Tạo repository' }).click();
@@ -180,6 +180,7 @@ test('README option is sent on create and a storage reset is explained', async (
   await page.route('**/api/v1/repos/alice/with-readme', (route) => route.fulfill({ json: { repository: {
     name: 'with-readme', owner: { username: 'alice' }, visibility: 'PRIVATE', defaultBranch: 'main',
     storageState: reset ? 'RESET' : 'READY', readme: reset ? null : '# with-readme\n',
+    permissions: { canRead: true, canWrite: true, canManage: true },
   } } }));
   await page.goto('/new');
   await page.getByRole('textbox', { name: 'Tên repository' }).fill('with-readme');
@@ -205,7 +206,7 @@ test('owner can edit repository settings, confirm visibility, and confirm deleti
     const requested = route.request().url().split('/').pop();
     if (method === 'GET') {
       if (deleted || requested !== name) return route.fulfill({ status: 404, json: { error: { code: 'REPOSITORY_NOT_FOUND' } } });
-      return route.fulfill({ json: { repository: { id: 'repo-1', name, description, visibility, status: 'ACTIVE', owner: { username: 'alice' }, defaultBranch: 'main', permissions: { canRead: true, canManage: true } } } });
+      return route.fulfill({ json: { repository: { id: 'repo-1', name, description, visibility, status: 'ACTIVE', owner: { username: 'alice' }, defaultBranch: 'main', permissions: { canRead: true, canWrite: true, canManage: true } } } });
     }
     if (method === 'PATCH') {
       const body = route.request().postDataJSON() as Record<string, unknown>;
@@ -214,7 +215,7 @@ test('owner can edit repository settings, confirm visibility, and confirm deleti
       if (typeof body.name === 'string') name = body.name;
       if ('description' in body) description = String(body.description ?? '');
       if (body.visibility === 'PUBLIC' || body.visibility === 'PRIVATE') visibility = body.visibility;
-      return route.fulfill({ json: { repository: { id: 'repo-1', name, description, visibility, status: 'ACTIVE', owner: { username: 'alice' }, permissions: { canRead: true, canManage: true } } } });
+      return route.fulfill({ json: { repository: { id: 'repo-1', name, description, visibility, status: 'ACTIVE', owner: { username: 'alice' }, permissions: { canRead: true, canWrite: true, canManage: true } } } });
     }
     mutations.push({ method });
     deleted = true;
@@ -253,7 +254,7 @@ test('owner can edit repository settings, confirm visibility, and confirm deleti
 
 test('repository settings reject visitors without manage permission', async ({ page }) => {
   await anonymous(page);
-  await page.route('**/api/v1/repos/alice/hello-world', (route) => route.fulfill({ json: { repository: { id: 'public', name: 'hello-world', owner: { username: 'alice' }, visibility: 'PUBLIC', status: 'ACTIVE', permissions: { canRead: true, canManage: false } } } }));
+  await page.route('**/api/v1/repos/alice/hello-world', (route) => route.fulfill({ json: { repository: { id: 'public', name: 'hello-world', owner: { username: 'alice' }, visibility: 'PUBLIC', status: 'ACTIVE', permissions: { canRead: true, canWrite: false, canManage: false } } } }));
   await page.goto('/alice/hello-world');
   await expect(page.getByRole('link', { name: 'Cài đặt' })).toHaveCount(0);
   await page.goto('/alice/hello-world/settings');

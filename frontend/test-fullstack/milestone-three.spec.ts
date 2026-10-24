@@ -106,7 +106,7 @@ test('M3.8 real registration, source browser desktop/mobile, history and public 
     await git(['-C', work, '-c', 'protocol.version=0', 'fetch', 'origin']);
     expect((await git(['-C', work, 'rev-parse', 'origin/feature/demo'])).stdout.trim()).toBe(head);
     expect(await readFile(join(work, 'README.md'), 'utf8')).toBe('# Source\n');
-    expect((await anonymous.request.post(`${url}/git-receive-pack`)).status()).toBe(404);
+    expect((await anonymous.request.post(`${url}/git-receive-pack`)).status()).toBe(401);
     expect((await mutation(context.request, 'repositories', { name: 'Empty', visibility: 'PUBLIC' })).status()).toBe(201);
     await publicPage.goto(`${origin}/M38Owner/Empty`);
     await expect(publicPage.getByRole('heading', { name: 'Repository chưa có mã nguồn' })).toBeVisible();
@@ -120,7 +120,7 @@ test('M3.8 real registration, source browser desktop/mobile, history and public 
   } finally { await anonymous.close(); }
 });
 
-test('M3.8 real private PAT UI, READ/WRITE/OWNER, revocation, audit and sanitized logs', async ({ page, context, browser }) => {
+test('M4 real private PAT UI, READ/WRITE/OWNER, push, revocation, audit and sanitized logs', async ({ page, context, browser }) => {
   await page.goto('/login?returnTo=%2Fsettings%2Ftokens');
   await page.getByLabel('Email hoặc username').fill('M38Owner');
   await page.getByLabel('Mật khẩu', { exact: true }).fill(password);
@@ -132,6 +132,7 @@ test('M3.8 real private PAT UI, READ/WRITE/OWNER, revocation, audit and sanitize
   const repo = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
   await page.setViewportSize({ width: 375, height: 812 });
   await page.getByLabel('Tên token').fill('Acceptance laptop');
+  await page.getByLabel(/Thêm quyền/).check();
   await page.getByRole('button', { name: 'Tạo token', exact: true }).click();
   await expect(page.getByLabel('Secret PAT')).toHaveValue(/^cfg_/);
   const secret = await page.getByLabel('Secret PAT').inputValue();
@@ -152,6 +153,14 @@ test('M3.8 real private PAT UI, READ/WRITE/OWNER, revocation, audit and sanitize
   const work = join(state.root, 'private-clone');
   await git(['clone', url, work], credentials('M38Owner', secret));
   expect(await readFile(join(work, 'README.md'), 'utf8')).toBe('# Private\n');
+  await git(['-C', work, 'config', 'user.name', 'Acceptance Writer']);
+  await git(['-C', work, 'config', 'user.email', 'writer@example.test']);
+  await writeFile(join(work, 'pushed.txt'), 'pushed through Next and backend\n');
+  await git(['-C', work, 'add', 'pushed.txt']);
+  await git(['-C', work, 'commit', '-m', 'Full-stack push']);
+  const pushed = (await git(['-C', work, 'rev-parse', 'HEAD'])).stdout.trim();
+  await git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/fullstack-push'], credentials('M38Owner', secret));
+  expect(execFileSync('git', ['--git-dir', join(state.root, 'git', repo.storageKey), 'rev-parse', 'refs/heads/fullstack-push'], { encoding: 'utf8' }).trim()).toBe(pushed);
   const outsider = await browser.newContext({ baseURL: origin });
   const outsiderPage = await outsider.newPage();
   let otherSecret = '';
@@ -203,5 +212,7 @@ test('M3.8 real private PAT UI, READ/WRITE/OWNER, revocation, audit and sanitize
       expect(Object.keys(event).sort()).toEqual(['event', 'requestId', 'operation', 'status', 'outcome', 'durationMs', 'activeProcesses'].sort());
       expect(event.durationMs).toBeGreaterThanOrEqual(0);
     }
+    const writeEvents = [...logs.matchAll(/\{"event":"git_write"[^\n]*?\}/g)].map(([json]) => JSON.parse(json));
+    expect(writeEvents.some((event) => event.status === 200 && event.operation === 'receive-pack')).toBe(true);
   } finally { await outsider.close(); }
 });

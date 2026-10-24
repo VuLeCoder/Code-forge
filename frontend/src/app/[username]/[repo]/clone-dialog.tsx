@@ -32,7 +32,11 @@ export function CloneDialog({ repository }: { repository: RepositorySummary }) {
         <button className="button buttonSecondary" onClick={copy}>Sao chép URL</button>
         <pre><code>git clone {url}</code></pre>
         <p>Trong thư mục đã clone, chạy <code>git fetch origin</code> để tải commit mới. Repository rỗng vẫn có thể clone.</p>
-        <p>Git push chưa được hỗ trợ ở giai đoạn này.</p>
+        {repository.permissions.canWrite ? <>
+          <p>Để push, dùng username của bạn và PAT có cả <code>repo:read</code>, <code>repo:write</code>, rồi chạy:</p>
+          <pre><code>git push origin ten-branch</code></pre>
+          <p>Push chỉ chấp nhận branch hợp lệ và cập nhật fast-forward; không thể xóa branch mặc định.</p>
+        </> : <p>Bạn đang có quyền chỉ đọc. Quyền WRITE hoặc OWNER cùng PAT <code>repo:write</code> là bắt buộc để push.</p>}
         {!isPublic && <p>Không đưa PAT vào URL hoặc lệnh clone. Dùng HTTPS khi truy cập ngoài máy local.</p>}
       </>
       <p role="status">{message}</p>

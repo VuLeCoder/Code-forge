@@ -7,7 +7,7 @@ export type RepositorySummary = {
   updatedAt: string;
   deletedAt?: string | null;
   purgeAfter?: string | null;
-  permissions: { canRead: boolean; canManage: boolean };
+  permissions: { canRead: boolean; canWrite?: boolean; canManage: boolean };
 };
 
 export function repositoryPath(repo: RepositorySummary) {

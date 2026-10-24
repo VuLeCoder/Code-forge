@@ -51,6 +51,24 @@ class EnvironmentVariables {
 
   @IsInt()
   @Min(1)
+  @Max(10 * 1024 * 1024 * 1024)
+  @Type(() => Number)
+  MAX_REPOSITORY_BYTES = 500 * 1024 * 1024;
+
+  @IsInt()
+  @Min(1)
+  @Max(1024 * 1024 * 1024)
+  @Type(() => Number)
+  MAX_FILE_BYTES = 25 * 1024 * 1024;
+
+  @IsInt()
+  @Min(1)
+  @Max(2 * 1024 * 1024 * 1024)
+  @Type(() => Number)
+  MAX_PUSH_BYTES = 100 * 1024 * 1024;
+
+  @IsInt()
+  @Min(1)
   @Max(365)
   @Type(() => Number)
   SOFT_DELETE_RETENTION_DAYS = 30;
@@ -71,6 +89,9 @@ export function validateEnvironment(config: Record<string, unknown>): Environmen
   }
   if (validated.COOKIE_SAME_SITE === 'none' && !validated.COOKIE_SECURE) {
     throw new Error('Cấu hình môi trường không hợp lệ: COOKIE_SAME_SITE=none yêu cầu COOKIE_SECURE=true');
+  }
+  if (validated.MAX_FILE_BYTES > validated.MAX_REPOSITORY_BYTES) {
+    throw new Error('Cấu hình môi trường không hợp lệ: MAX_FILE_BYTES không được lớn hơn MAX_REPOSITORY_BYTES');
   }
   return validated;
 }

@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { gzipSync } from 'node:zlib';
@@ -27,6 +27,9 @@ describe('Repository HTTP + PostgreSQL', () => {
   let originalQuota: string | undefined;
   let originalRetention: string | undefined;
   let originalStorage: string | undefined;
+  let originalMaxRepositoryBytes: string | undefined;
+  let originalMaxFileBytes: string | undefined;
+  let originalMaxPushBytes: string | undefined;
   let storageRoot: string;
   const cookie = (res: Response) => res.headers.getSetCookie().map((value) => value.split(';')[0]).join('; ');
   const call = (method: string, path: string, cookies = '', body?: unknown, requestOrigin = origin) =>
@@ -42,6 +45,9 @@ describe('Repository HTTP + PostgreSQL', () => {
     originalQuota = process.env.MAX_REPOSITORIES_PER_USER;
     originalRetention = process.env.SOFT_DELETE_RETENTION_DAYS;
     originalStorage = process.env.GIT_STORAGE_PATH;
+    originalMaxRepositoryBytes = process.env.MAX_REPOSITORY_BYTES;
+    originalMaxFileBytes = process.env.MAX_FILE_BYTES;
+    originalMaxPushBytes = process.env.MAX_PUSH_BYTES;
     storageRoot = await mkdtemp(join(tmpdir(), 'code-forge-repositories-'));
     process.env.GIT_STORAGE_PATH = storageRoot;
     if (!originalUrl) throw new Error('DATABASE_URL is required for integration tests');
@@ -52,6 +58,9 @@ describe('Repository HTTP + PostgreSQL', () => {
     process.env.DATABASE_URL = url.toString();
     process.env.MAX_REPOSITORIES_PER_USER = '3';
     process.env.SOFT_DELETE_RETENTION_DAYS = '7';
+    process.env.MAX_REPOSITORY_BYTES = String(32 * 1024);
+    process.env.MAX_FILE_BYTES = String(1024);
+    process.env.MAX_PUSH_BYTES = String(64 * 1024);
     execFileSync(process.execPath, [require.resolve('prisma/build/index.js'), 'migrate', 'deploy'], {
       env: process.env, stdio: 'pipe', timeout: 30_000,
     });
@@ -89,6 +98,9 @@ describe('Repository HTTP + PostgreSQL', () => {
       DATABASE_URL: originalUrl, MAX_REPOSITORIES_PER_USER: originalQuota,
       SOFT_DELETE_RETENTION_DAYS: originalRetention,
       GIT_STORAGE_PATH: originalStorage,
+      MAX_REPOSITORY_BYTES: originalMaxRepositoryBytes,
+      MAX_FILE_BYTES: originalMaxFileBytes,
+      MAX_PUSH_BYTES: originalMaxPushBytes,
     })) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -112,7 +124,7 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect(res.status).toBe(201);
     const { repository } = await res.json();
     expect(repository).toMatchObject({ name: 'Demo', visibility: 'PRIVATE', owner: { username: 'Owner' },
-      permissions: { canRead: true, canManage: true } });
+      permissions: { canRead: true, canWrite: true, canManage: true } });
     expect(repository.storageKey).toBeUndefined();
     expect(repository.owner.email).toBeUndefined();
     const stored = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
@@ -229,7 +241,7 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect(await (await call('GET', 'repos/owner/public/blob?path=code.txt')).json()).toMatchObject({ kind: 'text', content: 'public source' });
     const publicList = await (await call('GET', 'repositories')).json();
     expect(publicList.repositories.map((repo: { name: string }) => repo.name)).toEqual(['Public']);
-    expect(publicList.repositories[0].permissions).toEqual({ canRead: true, canManage: false });
+    expect(publicList.repositories[0].permissions).toEqual({ canRead: true, canWrite: false, canManage: false });
     expect((await (await call('GET', 'repositories?q=owner')).json()).repositories).toHaveLength(1);
     expect((await (await call('GET', 'repositories?q=missing')).json()).repositories).toHaveLength(0);
     expect((await call('GET', 'repositories?page=0')).status).toBe(400);
@@ -240,7 +252,7 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect((await (await call('GET', 'repositories/owner/Owner')).json()).repositories.map((repo: { name: string }) => repo.name)).toEqual(['Public']);
     const publicRes = await call('GET', 'repos/owner/public');
     expect(publicRes.status).toBe(200);
-    expect((await publicRes.json()).repository.permissions).toEqual({ canRead: true, canManage: false });
+    expect((await publicRes.json()).repository.permissions).toEqual({ canRead: true, canWrite: false, canManage: false });
     expect((await call('PATCH', 'repos/owner/public', otherCookie, { description: 'Hijack' })).status).toBe(403);
     expect((await call('DELETE', 'repos/owner/public', otherCookie)).status).toBe(403);
     expect((await call('PATCH', 'repos/owner/public', '', { name: 'Hijack' })).status).toBe(401);
@@ -282,8 +294,9 @@ describe('Repository HTTP + PostgreSQL', () => {
         expect((await fetch(`${hidden}/git-upload-pack`, { method: 'POST' })).status).toBe(401);
       }
     }
-    for (const query of ['', '?service=git-receive-pack', '?service=git-upload-pack&service=git-upload-pack']) expect((await fetch(`${url}/info/refs${query}`)).status).toBe(400);
-    expect((await fetch(`${url}/git-receive-pack`, { method: 'POST' })).status).toBe(404);
+    for (const query of ['', '?service=git-upload-pack&service=git-upload-pack']) expect((await fetch(`${url}/info/refs${query}`)).status).toBe(400);
+    expect((await fetch(`${url}/info/refs?service=git-receive-pack`)).status).toBe(401);
+    expect((await fetch(`${url}/git-receive-pack`, { method: 'POST' })).status).toBe(401);
     expect((await fetch(`${url}/HEAD`)).status).toBe(404);
     expect((await fetch(`${url}/objects/info/packs`)).status).toBe(404);
     expect((await fetch(`${base}/git/Owner/%2e%2e%2fPublic.git/info/refs?service=git-upload-pack`)).status).toBe(404);
@@ -376,10 +389,10 @@ describe('Repository HTTP + PostgreSQL', () => {
       expect(await readFile(join(work, 'private.txt'), 'utf8')).toBe('private source\n');
       const metadata = await call('GET', 'repos/owner/demo', otherCookie);
       expect(metadata.status).toBe(200);
-      expect((await metadata.json()).repository.permissions).toEqual({ canRead: true, canManage: false });
+      expect((await metadata.json()).repository.permissions).toEqual({ canRead: true, canWrite: role === 'WRITE', canManage: false });
       expect((await call('GET', 'repos/owner/demo/blob?path=private.txt', otherCookie)).status).toBe(200);
       expect((await call('PATCH', 'repos/owner/demo', otherCookie, { description: 'No' })).status).not.toBe(200);
-      expect((await fetch(`${url}/git-receive-pack`, { method: 'POST', headers: { Authorization: otherAuth } })).status).toBe(404);
+      expect((await fetch(`${url}/git-receive-pack`, { method: 'POST', headers: { Authorization: otherAuth } })).status).toBe(401);
     }
     await db.repositoryMember.delete({ where: { repositoryId_userId: { repositoryId: repo.id, userId: other.id } } });
     expect((await request(otherAuth)).status).toBe(404);
@@ -412,6 +425,97 @@ describe('Repository HTTP + PostgreSQL', () => {
     await expect(cli(['-C', ownerWork, 'fetch', 'origin'])).rejects.toThrow();
     expect(await db.auditLog.count({ where: { targetId: ownerToken.token.id, action: 'TOKEN_CREATED' } })).toBe(1);
     expect(await db.auditLog.count({ where: { targetId: ownerToken.token.id, action: 'TOKEN_REVOKED' } })).toBe(1);
+  }, 60_000);
+
+  it('M4 pushes with WRITE/OWNER, protects refs and rejects quota violations without moving refs', async () => {
+    const expiresAt = new Date(Date.now() + 86400000).toISOString();
+    const makeToken = async (userId: string, name: string, scopes: string[]) => {
+      const tokenPrefix = randomBytes(8).toString('hex');
+      const secret = `cfg_${tokenPrefix}_${randomBytes(32).toString('hex')}`;
+      const token = await db.personalAccessToken.create({ data: {
+        userId, name, scopes, expiresAt, tokenPrefix,
+        tokenHash: createHash('sha256').update(secret).digest('hex'),
+      } });
+      return { token, secret };
+    };
+    const other = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'other' } });
+    const ownerToken = await makeToken(ownerId, 'M4 owner', ['repo:read', 'repo:write']);
+    const readToken = await makeToken(ownerId, 'M4 read only', ['repo:read']);
+    const writeOnlyToken = await makeToken(other.id, 'M4 write only', ['repo:write']);
+    const repo = await db.repository.findFirstOrThrow({ where: { ownerId, normalizedName: 'demo' } });
+    const bare = join(storageRoot, repo.storageKey);
+    const url = `${base}/git/Owner/Demo.git`;
+    const askpass = join(storageRoot, 'm4-askpass.sh');
+    await writeFile(askpass, '#!/bin/sh\ncase "$1" in *Username*) printf "%s\\n" "$TEST_GIT_USER" ;; *) printf "%s\\n" "$TEST_GIT_PAT" ;; esac\n', { mode: 0o700 });
+    const run = promisify(execFile);
+    const git = (args: string[], username = 'Owner', secret = ownerToken.secret) => run('git', ['-c', 'credential.helper=', ...args], {
+      timeout: 20_000,
+      env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0',
+        GIT_ASKPASS: askpass, TEST_GIT_USER: username, TEST_GIT_PAT: secret },
+    });
+    const basic = (username: string, secret: string) => `Basic ${Buffer.from(`${username}:${secret}`).toString('base64')}`;
+    const work = join(storageRoot, 'm4-owner');
+    await git(['init', '--initial-branch=main', work]);
+    await git(['-C', work, 'config', 'user.name', 'M4 Tester']);
+    await git(['-C', work, 'config', 'user.email', 'm4@example.test']);
+    await git(['-C', work, 'remote', 'add', 'origin', url]);
+    await writeFile(join(work, 'code.txt'), 'first\n');
+    await git(['-C', work, 'add', 'code.txt']);
+    await git(['-C', work, 'commit', '-m', 'First push']);
+    const first = (await git(['-C', work, 'rev-parse', 'HEAD'])).stdout.trim();
+    await git(['-C', work, 'push', '-u', 'origin', 'main']);
+    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(first);
+
+    await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/read-token-denied'], 'Owner', readToken.secret)).rejects.toThrow();
+    await db.repositoryMember.upsert({
+      where: { repositoryId_userId: { repositoryId: repo.id, userId: other.id } },
+      create: { repositoryId: repo.id, userId: other.id, role: 'READ' }, update: { role: 'READ' },
+    });
+    await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/member-denied'], 'Other', writeOnlyToken.secret)).rejects.toThrow();
+    await db.repositoryMember.update({ where: { repositoryId_userId: { repositoryId: repo.id, userId: other.id } }, data: { role: 'WRITE' } });
+    await git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/member-write'], 'Other', writeOnlyToken.secret);
+    expect((await fetch(`${url}/info/refs?service=git-upload-pack`, { headers: { Authorization: basic('Other', writeOnlyToken.secret) } })).status).toBe(401);
+    await git(['-C', work, 'push', 'origin', ':member-write'], 'Other', writeOnlyToken.secret);
+    expect(() => execFileSync('git', ['--git-dir', bare, 'rev-parse', '--verify', 'refs/heads/member-write'], { stdio: 'pipe' })).toThrow();
+    await db.repositoryMember.delete({ where: { repositoryId_userId: { repositoryId: repo.id, userId: other.id } } });
+    await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/member-revoked'], 'Other', writeOnlyToken.secret)).rejects.toThrow();
+
+    await writeFile(join(work, 'code.txt'), 'second\n');
+    await git(['-C', work, 'add', 'code.txt']);
+    await git(['-C', work, 'commit', '-m', 'Fast forward']);
+    const second = (await git(['-C', work, 'rev-parse', 'HEAD'])).stdout.trim();
+    await git(['-C', work, 'push', 'origin', 'main']);
+    await git(['-C', work, 'reset', '--hard', first]);
+    await writeFile(join(work, 'code.txt'), 'divergent\n');
+    await git(['-C', work, 'add', 'code.txt']);
+    await git(['-C', work, 'commit', '-m', 'Divergent']);
+    await expect(git(['-C', work, 'push', '--force', 'origin', 'main'])).rejects.toThrow();
+    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(second);
+    await git(['-C', work, 'reset', '--hard', second]);
+    await expect(git(['-C', work, 'push', 'origin', ':main'])).rejects.toThrow();
+    await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/tags/not-allowed'])).rejects.toThrow();
+
+    await writeFile(join(work, 'too-large.bin'), randomBytes(1025));
+    await git(['-C', work, 'add', 'too-large.bin']);
+    await git(['-C', work, 'commit', '-m', 'Oversized file']);
+    await expect(git(['-C', work, 'push', 'origin', 'main'])).rejects.toThrow();
+    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(second);
+    await git(['-C', work, 'reset', '--hard', second]);
+
+    for (let index = 0; index < 40; index++) await writeFile(join(work, `quota-${index}.bin`), randomBytes(900));
+    await git(['-C', work, 'add', '.']);
+    await git(['-C', work, 'commit', '-m', 'Repository quota']);
+    await expect(git(['-C', work, 'push', 'origin', 'main'])).rejects.toThrow();
+    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(second);
+
+    const oversizedRequest = await fetch(`${url}/git-receive-pack`, {
+      method: 'POST', headers: { Authorization: basic('Owner', ownerToken.secret), 'content-type': 'application/x-git-receive-pack-request' },
+      body: Buffer.alloc(64 * 1024 + 1),
+    });
+    expect(oversizedRequest.status).toBe(413);
+    await call('DELETE', `tokens/${ownerToken.token.id}`, ownerCookie);
+    const revoked = await fetch(`${url}/info/refs?service=git-receive-pack`, { headers: { Authorization: basic('Owner', ownerToken.secret) } });
+    expect(revoked.status).toBe(401);
   }, 60_000);
 
   it('updates metadata, clears description, normalizes rename and applies visibility immediately', async () => {

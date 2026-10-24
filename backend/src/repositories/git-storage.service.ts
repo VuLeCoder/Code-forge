@@ -13,17 +13,29 @@ const runFile = promisify(execFile);
 export class GitStorageService {
   constructor(private readonly config: ConfigService) {}
 
-  openUploadPack(key: string, advertise: boolean, protocol?: string) {
+  openPack(key: string, defaultBranch: string, service: 'git-upload-pack' | 'git-receive-pack', advertise: boolean, protocol?: string) {
     this.path(key); // Only server-owned UUID keys may enter the CGI environment.
-    return spawn('git', ['-c', 'http.receivepack=false', '-c', 'http.getanyfile=false',
-      '-c', 'http.uploadpack=true', '-c', 'http.maxRequestBuffer=1048576', 'http-backend'], {
+    const write = service === 'git-receive-pack';
+    return spawn('git', [
+      '-c', `http.receivepack=${write}`,
+      '-c', 'http.getanyfile=false',
+      '-c', `http.uploadpack=${!write}`,
+      '-c', 'http.maxRequestBuffer=1048576',
+      ...(write ? ['-c', `core.hooksPath=${resolve(__dirname)}`, '-c', 'receive.denyNonFastForwards=true'] : []),
+      'http-backend',
+    ], {
       detached: process.platform !== 'win32',
       env: { PATH: process.env.PATH, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null',
         GIT_PROJECT_ROOT: this.root(), GIT_HTTP_EXPORT_ALL: '1',
-        PATH_INFO: `/${key}/${advertise ? 'info/refs' : 'git-upload-pack'}`,
+        PATH_INFO: `/${key}/${advertise ? 'info/refs' : service}`,
         REQUEST_METHOD: advertise ? 'GET' : 'POST',
-        QUERY_STRING: advertise ? 'service=git-upload-pack' : '',
-        CONTENT_TYPE: advertise ? '' : 'application/x-git-upload-pack-request',
+        QUERY_STRING: advertise ? `service=${service}` : '',
+        CONTENT_TYPE: advertise ? '' : `application/x-${service}-request`,
+        ...(write ? {
+          CODE_FORGE_DEFAULT_BRANCH: defaultBranch,
+          CODE_FORGE_MAX_FILE_BYTES: String(this.config.getOrThrow<number>('MAX_FILE_BYTES')),
+          CODE_FORGE_MAX_REPOSITORY_BYTES: String(this.config.getOrThrow<number>('MAX_REPOSITORY_BYTES')),
+        } : {}),
         ...(protocol ? { GIT_PROTOCOL: protocol } : {}),
       },
       stdio: ['pipe', 'pipe', 'pipe'],

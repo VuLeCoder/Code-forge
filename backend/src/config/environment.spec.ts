@@ -25,10 +25,15 @@ describe('validateEnvironment', () => {
   it('validates repository quota and retention settings', () => {
     const defaults = validateEnvironment(validConfig);
     expect(defaults.MAX_REPOSITORIES_PER_USER).toBe(20);
+    expect(defaults.MAX_REPOSITORY_BYTES).toBe(500 * 1024 * 1024);
+    expect(defaults.MAX_FILE_BYTES).toBe(25 * 1024 * 1024);
+    expect(defaults.MAX_PUSH_BYTES).toBe(100 * 1024 * 1024);
     expect(defaults.SOFT_DELETE_RETENTION_DAYS).toBe(30);
     expect(validateEnvironment({ ...validConfig, MAX_REPOSITORIES_PER_USER: '4' }).MAX_REPOSITORIES_PER_USER).toBe(4);
     expect(() => validateEnvironment({ ...validConfig, MAX_REPOSITORIES_PER_USER: '0' })).toThrow('MAX_REPOSITORIES_PER_USER');
     expect(() => validateEnvironment({ ...validConfig, SOFT_DELETE_RETENTION_DAYS: '-1' })).toThrow('SOFT_DELETE_RETENTION_DAYS');
+    expect(() => validateEnvironment({ ...validConfig, MAX_PUSH_BYTES: '0' })).toThrow('MAX_PUSH_BYTES');
+    expect(() => validateEnvironment({ ...validConfig, MAX_REPOSITORY_BYTES: '100', MAX_FILE_BYTES: '101' })).toThrow('MAX_FILE_BYTES');
   });
 
   it('rejects a short JWT secret', () => {

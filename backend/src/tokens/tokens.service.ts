@@ -43,7 +43,7 @@ export class TokensService {
     });
   }
 
-  async authenticate(authorization: string): Promise<string> {
+  async authenticate(authorization: string, requiredScope: 'repo:read' | 'repo:write' = 'repo:read'): Promise<string> {
     const invalid = () => new UnauthorizedException();
     if (authorization.length > 1024 || !/^Basic [A-Za-z0-9+/]+={0,2}$/i.test(authorization)) throw invalid();
     const encoded = authorization.slice(6);
@@ -59,7 +59,7 @@ export class TokensService {
     const token = await this.db.personalAccessToken.findUnique({ where: { tokenPrefix: match[1] }, include: { user: true } });
     const expected = token ? Buffer.from(token.tokenHash, 'hex') : Buffer.alloc(32);
     const matches = expected.length === 32 && timingSafeEqual(digest(secret), expected);
-    if (!matches || !token || token.user.normalizedUsername !== username.toLowerCase() || token.user.status !== 'ACTIVE' || token.revokedAt || token.expiresAt <= new Date() || !token.scopes.includes('repo:read')) throw invalid();
+    if (!matches || !token || token.user.normalizedUsername !== username.toLowerCase() || token.user.status !== 'ACTIVE' || token.revokedAt || token.expiresAt <= new Date() || !token.scopes.includes(requiredScope)) throw invalid();
     // Re-check expiry/revocation when recording usage; no authentication cache.
     const used = await this.db.personalAccessToken.updateMany({ where: { id: token.id, revokedAt: null, expiresAt: { gt: new Date() }, user: { status: 'ACTIVE' } }, data: { lastUsedAt: new Date() } });
     if (!used.count) throw invalid();

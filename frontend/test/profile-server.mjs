@@ -21,22 +21,24 @@ const server = createServer((request, response) => {
     const url = new URL(request.url, 'http://fixture');
     const privateRepo = url.pathname.startsWith('/api/v1/git/alice/private.git/');
     const root = `/api/v1/git/alice/${privateRepo ? 'private' : 'hello-world'}.git`;
-    const advertise = url.pathname === `${root}/info/refs` && request.method === 'GET' && url.search === '?service=git-upload-pack';
-    const upload = url.pathname === `${root}/git-upload-pack` && request.method === 'POST';
-    if ((!advertise && !upload) || request.headers.cookie) { response.statusCode = 404; return response.end(); }
-    if ((privateRepo || request.headers.authorization) && request.headers.authorization !== `Basic ${Buffer.from('alice:fixture-pat').toString('base64')}`) {
+    const service = url.searchParams.get('service') ?? (url.pathname.endsWith('/git-receive-pack') ? 'git-receive-pack' : 'git-upload-pack');
+    const advertise = url.pathname === `${root}/info/refs` && request.method === 'GET' && url.searchParams.size === 1 && ['git-upload-pack', 'git-receive-pack'].includes(service);
+    const rpc = url.pathname === `${root}/${service}` && request.method === 'POST' && ['git-upload-pack', 'git-receive-pack'].includes(service);
+    if ((!advertise && !rpc) || request.headers.cookie) { response.statusCode = 404; return response.end(); }
+    const expectedAuthorization = `Basic ${Buffer.from('alice:fixture-pat').toString('base64')}`;
+    if ((privateRepo || service === 'git-receive-pack' || request.headers.authorization) && request.headers.authorization !== expectedAuthorization) {
       response.statusCode = 401; response.setHeader('WWW-Authenticate', 'Basic realm="Code Forge Git", charset="UTF-8"'); return response.end('Git request unavailable.\n');
     }
-    const child = execFile('git', ['http-backend'], { encoding: 'buffer', maxBuffer: 4 * 1024 * 1024,
+    const child = execFile('git', ['-c', 'http.receivepack=true', 'http-backend'], { encoding: 'buffer', maxBuffer: 4 * 1024 * 1024,
       env: { PATH: process.env.PATH, GIT_PROJECT_ROOT: gitRoot, GIT_HTTP_EXPORT_ALL: '1',
-        PATH_INFO: `/fixture.git/${advertise ? 'info/refs' : 'git-upload-pack'}`, REQUEST_METHOD: request.method,
-        QUERY_STRING: advertise ? 'service=git-upload-pack' : '', CONTENT_TYPE: request.headers['content-type'] ?? '',
+        PATH_INFO: `/fixture.git/${advertise ? 'info/refs' : service}`, REQUEST_METHOD: request.method,
+        QUERY_STRING: advertise ? `service=${service}` : '', CONTENT_TYPE: request.headers['content-type'] ?? '',
         ...(request.headers['git-protocol'] ? { GIT_PROTOCOL: request.headers['git-protocol'] } : {}),
       },
     }, (error, stdout) => {
       if (error) { response.statusCode = 503; return response.end(); }
       const boundary = stdout.indexOf('\r\n\r\n');
-      response.setHeader('Content-Type', `application/x-git-upload-pack-${advertise ? 'advertisement' : 'result'}`);
+      response.setHeader('Content-Type', `application/x-${service}-${advertise ? 'advertisement' : 'result'}`);
       response.end(stdout.subarray(boundary + 4));
     });
     request.pipe(child.stdin);
@@ -127,14 +129,14 @@ const server = createServer((request, response) => {
   }
   if (request.url?.startsWith("/api/v1/repositories?")) {
     const query = new URL(request.url, "http://localhost").searchParams.get("q") ?? "";
-    const repository = { id: "public-repo", owner: { username: "alice" }, name: "hello-world", description: "Repository thử nghiệm", visibility: "PUBLIC", updatedAt: "2026-09-01T00:00:00.000Z", permissions: { canRead: true, canManage: false } };
+    const repository = { id: "public-repo", owner: { username: "alice" }, name: "hello-world", description: "Repository thử nghiệm", visibility: "PUBLIC", updatedAt: "2026-09-01T00:00:00.000Z", permissions: { canRead: true, canWrite: false, canManage: false } };
     return response.end(JSON.stringify({ repositories: query && !"hello-world alice".includes(query) ? [] : [repository], hasMore: false, page: 1 }));
   }
   if (request.url === "/api/v1/users/alice") {
     return response.end(JSON.stringify({ user: { username: "alice", createdAt: "2026-09-01T00:00:00.000Z" }, repositories: [{ id: "public-repo", owner: { username: "alice" }, name: "hello-world", description: "Repository thử nghiệm", visibility: "PUBLIC" }], repositoriesAvailable: true }));
   }
   if (request.url === "/api/v1/repos/alice/hello-world") {
-    return response.end(JSON.stringify({ repository: { id: "public-repo", owner: { username: "alice" }, name: "hello-world", description: "Repository thử nghiệm", visibility: "PUBLIC", status: "ACTIVE", defaultBranch: "main", createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z", permissions: { canRead: true, canManage: false } } }));
+    return response.end(JSON.stringify({ repository: { id: "public-repo", owner: { username: "alice" }, name: "hello-world", description: "Repository thử nghiệm", visibility: "PUBLIC", status: "ACTIVE", defaultBranch: "main", createdAt: "2026-09-01T00:00:00.000Z", updatedAt: "2026-09-01T00:00:00.000Z", permissions: { canRead: true, canWrite: false, canManage: false } } }));
   }
   if (request.url === "/api/v1/users/offline" && offlineRequests++ > 0) {
     return response.end(JSON.stringify({ user: { username: "offline", createdAt: "2026-09-01T00:00:00.000Z" }, repositories: [], repositoriesAvailable: false }));

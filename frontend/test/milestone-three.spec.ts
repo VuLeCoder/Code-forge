@@ -38,7 +38,6 @@ test('M3.6 clone dialog copies public URL, handles clipboard errors, keyboard an
   const response = await page.request.get(`${url}/info/refs?service=git-upload-pack`, { headers: { Cookie: 'session=do-not-forward' } });
   expect(response.status()).toBe(200);
   expect(response.headers()['cache-control']).toBe('private, no-store');
-  expect((await page.request.post(`${url}/git-receive-pack`)).status()).toBe(404);
   expect((await page.request.get(`${url}/HEAD`)).status()).toBe(404);
   expect((await page.request.get('/git/alice/private.git/info/refs?service=git-upload-pack')).status()).toBe(401);
 });
@@ -46,12 +45,14 @@ test('M3.6 clone dialog copies public URL, handles clipboard errors, keyboard an
 test('M3.7 private repository offers a clean URL and username/PAT instructions', async ({ page }) => {
   await page.route('**/api/v1/auth/*', (route) => route.fulfill({ status: 401, json: {} }));
   await page.route('**/api/v1/repos/alice/private', (route) => route.fulfill({ json: { repository: {
-    id: 'private', owner: { username: 'alice' }, name: 'private', visibility: 'PRIVATE', permissions: { canRead: true, canManage: true }, defaultBranch: 'main',
+    id: 'private', owner: { username: 'alice' }, name: 'private', visibility: 'PRIVATE', permissions: { canRead: true, canWrite: true, canManage: true }, defaultBranch: 'main',
   } } }));
   await page.goto('/alice/private');
   await page.getByRole('button', { name: 'Clone', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('Khi Git hỏi mật khẩu, nhập PAT');
+  await expect(dialog).toContainText('repo:write');
+  await expect(dialog).toContainText('git push origin ten-branch');
   await expect(dialog.getByLabel('URL clone')).toHaveValue('http://localhost:3111/git/alice/private.git');
   await expect(dialog.getByRole('link', { name: 'Tạo hoặc quản lý PAT' })).toHaveAttribute('href', '/settings/tokens');
 });

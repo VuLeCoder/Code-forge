@@ -3,6 +3,7 @@ import { once } from 'node:events';
 import { request } from 'node:http';
 import { gzipSync } from 'node:zlib';
 import { INestApplication, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { GitHttpController } from './git-http.controller';
 import { GitHttpService } from './git-http.service';
@@ -16,6 +17,7 @@ describe('Git HTTP process lifecycle', () => {
   let script: string;
   let children: ChildProcessWithoutNullStreams[];
   let logs: jest.SpyInstance;
+  let prepareGit: jest.Mock;
   const header = 'Content-Type: application/x-git-upload-pack-advertisement\r\n\r\n';
   const start = jest.fn(() => {
     const child = spawn(process.execPath, ['-e', script], { detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
@@ -27,10 +29,12 @@ describe('Git HTTP process lifecycle', () => {
     logs = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
     children = [];
     start.mockClear();
+    prepareGit = jest.fn(() => Promise.resolve({ storageKey: 'key', defaultBranch: 'main' }));
     script = `process.stdout.write(${JSON.stringify(header + '0000')}); setInterval(() => {}, 1000);`;
     const module = await Test.createTestingModule({ controllers: [GitHttpController], providers: [GitHttpService,
-      { provide: RepositoriesService, useValue: { prepareGit: () => Promise.resolve('key') } },
-      { provide: GitStorageService, useValue: { openUploadPack: start } },
+      { provide: RepositoriesService, useValue: { prepareGit } },
+      { provide: GitStorageService, useValue: { openPack: start } },
+      { provide: ConfigService, useValue: { getOrThrow: (key: string) => key === 'MAX_PUSH_BYTES' ? 1024 * 1024 : undefined } },
     ] }).compile();
     app = module.createNestApplication();
     await app.listen(0, '127.0.0.1');
@@ -48,7 +52,7 @@ describe('Git HTTP process lifecycle', () => {
     await response.text();
     const raw = logs.mock.calls.map(([value]) => String(value)).find((value) => value.includes('"event":"git_read"'))!;
     const event = JSON.parse(raw) as Record<string, unknown>;
-    expect(event).toMatchObject({ event: 'git_read', requestId: response.headers.get('x-request-id'), operation: 'discovery',
+    expect(event).toMatchObject({ event: 'git_read', requestId: response.headers.get('x-request-id'), operation: 'upload-pack-discovery',
       status: 200, outcome: 'success' });
     expect(typeof event.durationMs).toBe('number');
     expect(typeof event.activeProcesses).toBe('number');
@@ -116,5 +120,18 @@ describe('Git HTTP process lifecycle', () => {
     const bytes = new Uint8Array(await response.arrayBuffer());
     expect(bytes.length).toBe(2 * 1024 * 1024);
     expect(bytes.every((byte) => byte === 97)).toBe(true);
+  });
+
+  it('serves authenticated receive-pack with write authorization and its own content types', async () => {
+    const receiveHeader = 'Content-Type: application/x-git-receive-pack-advertisement\r\n\r\n';
+    script = `process.stdout.end(${JSON.stringify(receiveHeader + '0000')});`;
+    const response = await fetch(`${url}/info/refs?service=git-receive-pack`, { headers: { Authorization: 'Basic test' } });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('application/x-git-receive-pack-advertisement');
+    expect(await response.text()).toBe('0000');
+    expect(prepareGit).toHaveBeenCalledWith('owner', 'repo', 'Basic test', 'write');
+    expect(start).toHaveBeenCalledWith('key', 'main', 'git-receive-pack', true, undefined);
+    const raw = logs.mock.calls.map(([value]) => String(value)).find((value) => value.includes('"event":"git_write"'))!;
+    expect(JSON.parse(raw)).toMatchObject({ event: 'git_write', operation: 'receive-pack-discovery', status: 200 });
   });
 });

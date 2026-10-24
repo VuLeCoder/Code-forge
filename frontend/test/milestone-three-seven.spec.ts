@@ -92,6 +92,13 @@ test('M3.7 Next forwards Basic challenge and credentials without cookie; token p
     await git('git', ['-c', 'credential.helper=', 'clone', url, join(root, 'work')], { env, timeout: 20_000 });
     expect(await readFile(join(root, 'work', 'README.md'), 'utf8')).toBe('Clone through Next proxy\n');
     await git('git', ['-C', join(root, 'work'), '-c', 'credential.helper=', '-c', 'protocol.version=0', 'fetch', 'origin'], { env, timeout: 20_000 });
+    await git('git', ['-C', join(root, 'work'), 'config', 'user.name', 'Proxy Writer'], { env });
+    await git('git', ['-C', join(root, 'work'), 'config', 'user.email', 'proxy@example.test'], { env });
+    await writeFile(join(root, 'work', 'proxy.txt'), 'push through Next\n');
+    await git('git', ['-C', join(root, 'work'), 'add', 'proxy.txt'], { env });
+    await git('git', ['-C', join(root, 'work'), 'commit', '-m', 'Proxy push'], { env });
+    await git('git', ['-C', join(root, 'work'), '-c', 'credential.helper=', 'push', 'origin', 'HEAD:refs/heads/proxy-write'], { env, timeout: 20_000 });
+    expect((await git('git', ['-C', join(root, 'work'), 'ls-remote', '--heads', 'origin', 'proxy-write'], { env })).stdout).toContain('refs/heads/proxy-write');
   } finally { await rm(root, { recursive: true, force: true }); }
   expect((await request.post('/api/v1/tokens', { headers: { Origin: 'https://evil.test' }, data: {} })).status()).toBe(403);
   const cookies = { Cookie: 'pat-test=session', Origin: 'http://localhost:3111' };

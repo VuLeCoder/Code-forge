@@ -168,22 +168,32 @@ export class RepositoriesService {
     return { repositories: rows.slice(0, 20).map((repo) => this.response(repo).repository), hasMore: rows.length > 20, page };
   }
 
-  async prepareGit(owner: string, name: string, authorization?: string) {
-    const userId = authorization === undefined ? undefined : await this.tokens.authenticate(authorization);
+  async prepareGit(owner: string, name: string, authorization: string | undefined, operation: 'read' | 'write' = 'read') {
+    const userId = authorization === undefined ? undefined : await this.tokens.authenticate(authorization, operation === 'write' ? 'repo:write' : 'repo:read');
     const repo = await this.load(this.db, owner, name, userId);
+    if (operation === 'write') {
+      if (!userId) throw new UnauthorizedException();
+      this.policy.assertWrite(repo, userId);
+    }
     // Challenge every unavailable anonymous path identically, including missing repositories.
-    if (!userId && (!repo || !this.policy.permissions(repo).canRead)) throw new UnauthorizedException();
-    this.policy.assertRead(repo, userId);
+    if (operation === 'read') {
+      if (!userId && (!repo || !this.policy.permissions(repo).canRead)) throw new UnauthorizedException();
+      this.policy.assertRead(repo, userId);
+    }
+    const repositoryId = repo!.id;
     return this.db.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM repositories WHERE id = ${repo.id}::uuid FOR UPDATE`;
-      const current = await tx.repository.findUnique({ where: { id: repo.id }, include: { members: { where: { userId: userId ?? '00000000-0000-0000-0000-000000000000' } } } });
-      if (!userId && (!current || !this.policy.permissions(current).canRead)) throw new UnauthorizedException();
-      this.policy.assertRead(current, userId);
+      await tx.$queryRaw`SELECT id FROM repositories WHERE id = ${repositoryId}::uuid FOR UPDATE`;
+      const current = await tx.repository.findUnique({ where: { id: repositoryId }, include: { members: { where: { userId: userId ?? '00000000-0000-0000-0000-000000000000' } } } });
+      if (operation === 'write') this.policy.assertWrite(current, userId!);
+      else {
+        if (!userId && (!current || !this.policy.permissions(current).canRead)) throw new UnauthorizedException();
+        this.policy.assertRead(current, userId);
+      }
       if (!(await this.storage.exists(current.storageKey))) {
         await this.storage.create(current.storageKey, current.defaultBranch, false, current.name);
         await tx.repository.update({ where: { id: current.id }, data: { storageGeneration: { increment: 1 } } });
       }
-      return current.storageKey;
+      return { storageKey: current.storageKey, defaultBranch: current.defaultBranch };
     }, { timeout: 30_000 });
   }
 

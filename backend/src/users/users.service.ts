@@ -17,7 +17,7 @@ export class UsersService {
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }] });
     const repositories = rows.map((repo) => ({ id: repo.id, owner: { username: user.username }, name: repo.name,
       description: repo.description, visibility: repo.visibility, status: repo.status, defaultBranch: repo.defaultBranch,
-      createdAt: repo.createdAt, updatedAt: repo.updatedAt, permissions: { canRead: true, canManage: false } }));
+      createdAt: repo.createdAt, updatedAt: repo.updatedAt, permissions: { canRead: true, canWrite: false, canManage: false } }));
     return { user: { username: user.username, createdAt: user.createdAt }, repositories, repositoriesAvailable: true };
   }
 

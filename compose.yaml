@@ -29,6 +29,11 @@ services:
       REFRESH_TOKEN_TTL_DAYS: 30
       COOKIE_SECURE: "false"
       COOKIE_SAME_SITE: lax
+      MAX_REPOSITORIES_PER_USER: 20
+      MAX_REPOSITORY_BYTES: 524288000
+      MAX_FILE_BYTES: 26214400
+      MAX_PUSH_BYTES: 104857600
+      SOFT_DELETE_RETENTION_DAYS: 30
     ports: ["4000:4000"]
     volumes: ["git-data:/data/git"]
     depends_on:

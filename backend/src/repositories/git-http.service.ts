@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { Transform } from 'node:stream';
 import { createGunzip } from 'node:zlib';
+import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
 import { GitStorageService } from './git-storage.service';
 import { RepositoriesService } from './repositories.service';
@@ -14,7 +15,21 @@ export class GitHttpService implements OnModuleDestroy {
 
   onModuleDestroy() { for (const stop of this.running) stop(); }
 
-  async serve(owner: string, repository: string, advertise: boolean, req: Request, res: Response) {
+  async serve(owner: string, repository: string, requested: 'advertise' | 'git-upload-pack' | 'git-receive-pack', req: Request, res: Response) {
+    const advertise = requested === 'advertise';
+    let service: 'git-upload-pack' | 'git-receive-pack';
+    if (advertise) {
+      const queryService = req.query.service;
+      if (Object.keys(req.query).length !== 1 ||
+        (queryService !== 'git-upload-pack' && queryService !== 'git-receive-pack')) {
+        return res.status(400).type('text/plain').end('Git request unavailable.\n');
+      }
+      service = queryService;
+    } else {
+      service = requested;
+      if (Object.keys(req.query).length !== 0) return res.status(400).type('text/plain').end('Git request unavailable.\n');
+    }
+    const write = service === 'git-receive-pack';
     const started = performance.now();
     const requestId = randomUUID();
     let reported = false;
@@ -23,8 +38,8 @@ export class GitHttpService implements OnModuleDestroy {
       if (reported) return;
       reported = true;
       // Fixed fields only: never include URL, query, headers, credentials or Git output.
-      this.logger.log(JSON.stringify({ event: 'git_read', requestId,
-        operation: advertise ? 'discovery' : 'upload-pack',
+      this.logger.log(JSON.stringify({ event: write ? 'git_write' : 'git_read', requestId,
+        operation: advertise ? `${write ? 'receive' : 'upload'}-pack-discovery` : write ? 'receive-pack' : 'upload-pack',
         status: failureStatus ?? res.statusCode,
         outcome: aborted ? 'aborted' : (res.statusCode === 200 ? 'success' : 'rejected'),
         durationMs: Math.round(performance.now() - started), activeProcesses: this.running.size,
@@ -38,24 +53,25 @@ export class GitHttpService implements OnModuleDestroy {
     const reject = (status: number) => { res.status(status).type('text/plain').end('Git request unavailable.\n'); };
     if (!/^[a-z0-9][a-z0-9._-]{1,37}[a-z0-9]$/i.test(owner) ||
       !/^(?!.*\.\.)(?!.*\.git\.git$)[a-z0-9](?:[a-z0-9._-]{0,98}[a-z0-9])?\.git$/i.test(repository)) return reject(404);
-    let key: string;
-    try { key = await this.repositories.prepareGit(owner, repository.slice(0, -4), req.headers.authorization); }
+    let access: { storageKey: string; defaultBranch: string };
+    try { access = await this.repositories.prepareGit(owner, repository.slice(0, -4), req.headers.authorization, write ? 'write' : 'read'); }
     catch (error) {
       const status = (error as { getStatus?: () => number }).getStatus?.();
       if (status === 401) res.setHeader('WWW-Authenticate', 'Basic realm="Code Forge Git", charset="UTF-8"');
       return reject(status === 401 || status === 404 ? status : 503);
     }
     if (req.aborted || res.destroyed) return;
-    if (advertise ? (Object.keys(req.query).length !== 1 || req.query.service !== 'git-upload-pack') : Object.keys(req.query).length !== 0) return reject(400);
     const protocol = req.headers['git-protocol'];
     if (protocol !== undefined && (typeof protocol !== 'string' || !/^version=[012]$/.test(protocol))) return reject(400);
     const encoding = req.headers['content-encoding'];
-    if (!advertise && (req.headers['content-type'] !== 'application/x-git-upload-pack-request' || (encoding && encoding !== 'gzip' && encoding !== 'identity'))) return reject(415);
-    if (Number(req.headers['content-length'] ?? 0) > 1024 * 1024) return reject(413);
+    if (!advertise && (req.headers['content-type'] !== `application/x-${service}-request` || (encoding && encoding !== 'gzip' && encoding !== 'identity'))) return reject(415);
+    const requestLimit = write ? this.config.getOrThrow<number>('MAX_PUSH_BYTES') : 1024 * 1024;
+    const rawLength = req.headers['content-length'];
+    if (rawLength !== undefined && (!/^\d+$/.test(rawLength) || Number(rawLength) > requestLimit)) return reject(413);
     if (this.running.size >= 4) return reject(503);
 
-    let child: ReturnType<GitStorageService['openUploadPack']>;
-    try { child = this.storage.openUploadPack(key, advertise, protocol); }
+    let child: ReturnType<GitStorageService['openPack']>;
+    try { child = this.storage.openPack(access.storageKey, access.defaultBranch, service, advertise, protocol); }
     catch { return reject(503); }
     let stopped = false;
     let header = Buffer.alloc(0);
@@ -94,7 +110,7 @@ export class GitHttpService implements OnModuleDestroy {
       const status = lines.find((line) => /^Status:/i.test(line));
       if (status && !/^Status: 200\b/i.test(status)) return callback(new Error('Git failed'));
       const contentType = lines.find((line) => /^Content-Type:/i.test(line))?.slice(13).trim();
-      if (contentType !== `application/x-git-upload-pack-${advertise ? 'advertisement' : 'result'}`) return callback(new Error('Invalid Git response'));
+      if (contentType !== `application/x-${service}-${advertise ? 'advertisement' : 'result'}`) return callback(new Error('Invalid Git response'));
       res.status(200).setHeader('Content-Type', contentType);
       parsed = true;
       callback(null, header.subarray(boundary + 4));
@@ -104,7 +120,7 @@ export class GitHttpService implements OnModuleDestroy {
       let bytes = 0;
       const stream = new Transform({ transform(chunk: Buffer, _encoding, callback) {
         bytes += chunk.length;
-        if (bytes > 1024 * 1024) { stop(413); return callback(); }
+        if (bytes > requestLimit) { stop(413); return callback(); }
         callback(null, chunk);
       } });
       inputs.push(stream);
@@ -151,5 +167,9 @@ export class GitHttpService implements OnModuleDestroy {
     }
   }
 
-  constructor(private readonly repositories: RepositoriesService, private readonly storage: GitStorageService) {}
+  constructor(
+    private readonly repositories: RepositoriesService,
+    private readonly storage: GitStorageService,
+    private readonly config: ConfigService,
+  ) {}
 }

@@ -86,7 +86,7 @@ function TokenManager() {
       <label htmlFor="token-days">Thời hạn</label><select id="token-days" value={days} onChange={(event) => setDays(event.target.value)}><option value="7">7 ngày</option><option value="30">30 ngày</option><option value="90">90 ngày</option><option value="365">365 ngày</option></select>
       <p>Quyền đọc: <code>repo:read</code> (clone/fetch).</p>
       <label><input type="checkbox" checked={write} onChange={(event) => setWrite(event.target.checked)} /> Thêm quyền <code>repo:write</code></label>
-      <p>Git push hiện chưa được hỗ trợ.</p>
+      <p><code>repo:write</code> cho phép push khi tài khoản có quyền WRITE hoặc OWNER; giao diện sẽ tự kèm <code>repo:read</code> để clone/fetch.</p>
       <button className="button buttonPrimary" disabled={busy || !!secret || !name.trim()}>{busy ? "Đang xử lý…" : "Tạo token"}</button>
     </form>
     <section><h2>Token của bạn</h2>

@@ -9,6 +9,7 @@ export class RepositoryPolicy {
     const owner = repo.ownerId === userId;
     return {
       canRead: active && (repo.visibility === 'PUBLIC' || owner || !!repo.members?.some((member) => member.userId === userId && (member.role === 'READ' || member.role === 'WRITE'))),
+      canWrite: active && (owner || !!repo.members?.some((member) => member.userId === userId && member.role === 'WRITE')),
       canManage: active && owner,
     };
   }
@@ -23,6 +24,12 @@ export class RepositoryPolicy {
     this.assertRead(repo, userId);
     if (!this.permissions(repo, userId).canManage) {
       throw new ForbiddenException({ error: { code: 'REPOSITORY_FORBIDDEN', message: 'Chỉ owner được quản lý repository.', details: {} } });
+    }
+  }
+
+  assertWrite(repo: ReadableRepository | null, userId: string): asserts repo is ReadableRepository {
+    if (!repo || !this.permissions(repo, userId).canWrite) {
+      throw new NotFoundException({ error: { code: 'REPOSITORY_NOT_FOUND', message: 'Không tìm thấy repository.', details: {} } });
     }
   }
 }
