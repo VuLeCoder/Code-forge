@@ -9,7 +9,6 @@
     "db:generate": "corepack pnpm --filter backend prisma:generate",
     "db:migrate": "corepack pnpm --filter backend prisma:migrate:dev",
     "db:deploy": "corepack pnpm --filter backend prisma:migrate:deploy",
-    "db:seed": "pnpm --filter backend exec ts-node prisma/seed.ts",
     "db:studio": "corepack pnpm --filter backend prisma:studio",
     "build": "corepack pnpm -r --if-present build",
     "lint": "corepack pnpm -r --if-present lint",
