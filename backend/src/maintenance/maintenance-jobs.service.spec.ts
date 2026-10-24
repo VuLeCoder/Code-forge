@@ -65,7 +65,7 @@ function makeFixture(operation?: Partial<MergeOperation>) {
 }
 
 describe('MaintenanceJobsService', () => {
-  it('runs a batch on startup and clears its scheduled timer on shutdown', () => {
+  it('runs a batch on startup and clears its scheduled timer on shutdown', async () => {
     jest.useFakeTimers();
     try {
       const fixture = makeFixture();
@@ -73,15 +73,34 @@ describe('MaintenanceJobsService', () => {
 
       fixture.service.onModuleInit();
       expect(run).toHaveBeenCalledTimes(1);
-      jest.advanceTimersByTime(60_000);
+      await Promise.resolve();
+      await jest.advanceTimersByTimeAsync(60_000);
       expect(run).toHaveBeenCalledTimes(2);
 
       fixture.service.onModuleDestroy();
-      jest.advanceTimersByTime(60_000);
+      await jest.advanceTimersByTimeAsync(60_000);
       expect(run).toHaveBeenCalledTimes(2);
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('awaits the active batch when runOnce is called during reconciliation', async () => {
+    const fixture = makeFixture();
+    let finishFirstBatch!: (result: number) => void;
+    const firstBatchGate = new Promise<number>((resolve) => { finishFirstBatch = resolve; });
+    fixture.db.$executeRaw.mockImplementationOnce(() => firstBatchGate);
+
+    const first = fixture.service.runOnce();
+    await Promise.resolve();
+    const overlapping = fixture.service.runOnce();
+    expect(overlapping).toBe(first);
+    expect(fixture.locks.acquire).toHaveBeenCalledTimes(1);
+
+    finishFirstBatch(1);
+    await overlapping;
+    expect(fixture.db.$executeRaw).toHaveBeenCalledTimes(3);
+    expect(fixture.purge.purgeDue).toHaveBeenCalledTimes(1);
   });
 
   it('skips an overlapping batch and releases the process-wide job lock once', async () => {
@@ -228,7 +247,7 @@ describe('MaintenanceJobsService', () => {
   });
 
   it('completes metadata and audit only for a verified two-parent merge commit', async () => {
-    const fixture = makeFixture();
+    const fixture = makeFixture({ pullRequest: { targetBranch: 'main', number: 1, mergedById: null } });
     await fixture.internals.reconcileOperation(fixture.operation.operationId);
 
     expect(fixture.db.$transaction).toHaveBeenCalledTimes(1);

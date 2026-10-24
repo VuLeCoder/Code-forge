@@ -9,6 +9,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
+import { MaintenanceJobsService } from '../src/maintenance/maintenance-jobs.service';
 // cookie-parser is CommonJS; its default import is undefined at runtime in this test runner.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import cookieParser = require('cookie-parser');
@@ -330,6 +331,119 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       expect(raceMergeOperations).toHaveLength(0);
       expect(raceMergeAudits).toBe(0);
     }
+  }, 60_000);
+
+  it('reconciles a Git-updated merge after PostgreSQL rejects metadata and preserves the merger', async () => {
+    const registered = await call('POST', 'auth/register', {
+      username: 'RecoveryOwner', email: 'recovery-owner@example.test', password: 'test-password-123',
+    });
+    expect(registered.status).toBe(201);
+    const recoveryCookie = cookie(registered);
+    const createdRepo = await call('POST', 'repositories', {
+      name: 'MergeRecovery', visibility: 'PRIVATE', initializeReadme: true,
+    }, recoveryCookie);
+    expect(createdRepo.status).toBe(201);
+    const { repository } = await responseJson<{ repository: { id: string } }>(createdRepo);
+    const storedRepo = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
+    const bare = join(storageRoot, storedRepo.storageKey);
+    const work = join(storageRoot, 'merge-recovery-clone');
+    const git = (args: string[]) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    git(['clone', bare, work]);
+    git(['-C', work, 'config', 'user.name', 'Recovery Owner']);
+    git(['-C', work, 'config', 'user.email', 'recovery-owner@example.test']);
+    git(['-C', work, 'switch', '-c', 'feature/recovery']);
+    await writeFile(join(work, 'recovered.txt'), 'recovered merge content\n');
+    git(['-C', work, 'add', 'recovered.txt']);
+    git(['-C', work, 'commit', '-m', 'Add recovery fixture']);
+    const sourceSha = git(['-C', work, 'rev-parse', 'HEAD']).trim();
+    git(['-C', work, 'push', 'origin', 'feature/recovery']);
+    const targetSha = git(['--git-dir', bare, 'rev-parse', 'refs/heads/main']).trim();
+
+    const repoPath = 'repos/recoveryowner/mergerecovery/pulls';
+    const createdPull = await call('POST', repoPath, {
+      title: 'Recover merge metadata', description: 'Verify Git and PostgreSQL reconciliation.',
+      sourceBranch: 'feature/recovery', targetBranch: 'main',
+    }, recoveryCookie);
+    expect(createdPull.status).toBe(201);
+    const { pullRequest } = await responseJson<{ pullRequest: { id: string; number: number } }>(createdPull);
+    const detailResponse = await call('GET', `${repoPath}/${pullRequest.number}`, undefined, recoveryCookie);
+    const detail = await responseJson<{ pullRequest: { version: number }; }>(detailResponse);
+    expect(detailResponse.status).toBe(200);
+    const compareResponse = await call('GET', `${repoPath}/${pullRequest.number}/compare`, undefined, recoveryCookie);
+    const comparison = await responseJson<{ sourceSha: string; targetSha: string; storageGeneration: number }>(compareResponse);
+    expect(compareResponse.status).toBe(200);
+
+    const triggerName = `fail_merge_${schema.slice(-12)}`;
+    const functionName = `${triggerName}_fn`;
+    await admin.$executeRawUnsafe(`CREATE FUNCTION "${schema}"."${functionName}"() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.id = '${pullRequest.id}' AND NEW.status = 'MERGED' THEN
+          RAISE EXCEPTION 'intentional isolated merge metadata failure';
+        END IF;
+        RETURN NEW;
+      END $$`);
+    await admin.$executeRawUnsafe(`CREATE TRIGGER "${triggerName}" BEFORE UPDATE ON "${schema}"."pull_requests"
+      FOR EACH ROW EXECUTE FUNCTION "${schema}"."${functionName}"()`);
+    const operationId = randomUUID();
+    let candidateSha = '';
+    try {
+      const mergeResponse = await call('POST', `${repoPath}/${pullRequest.number}/merge`, {
+        operationId, expectedSourceSha: comparison.sourceSha, expectedTargetSha: comparison.targetSha,
+        storageGeneration: comparison.storageGeneration, version: detail.pullRequest.version,
+      }, recoveryCookie);
+      expect(mergeResponse.status).toBe(202);
+      expect(await responseJson(mergeResponse)).toMatchObject({ status: 'RECONCILING', operationId });
+
+      candidateSha = git(['--git-dir', bare, 'rev-parse', 'refs/heads/main']).trim();
+      expect(candidateSha).not.toBe(targetSha);
+      const parents = git(['--git-dir', bare, 'rev-list', '--parents', '-n', '1', candidateSha]).trim().split(' ');
+      expect(parents).toHaveLength(3);
+      expect(parents.slice(1).sort()).toEqual([targetSha, sourceSha].sort());
+      const pending = await call('GET', `${repoPath}/${pullRequest.number}`, undefined, recoveryCookie);
+      expect(await responseJson<{ pullRequest: { status: string; mergedById: string | null };
+        mergeOperation: { status: string } }>(pending)).toMatchObject({
+        pullRequest: { status: 'OPEN', mergedById: null }, mergeOperation: { status: 'PENDING' },
+      });
+      expect(await db.auditLog.count({ where: { targetId: pullRequest.id, action: 'PULL_REQUEST_MERGED' } })).toBe(0);
+    } finally {
+      await admin.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "${triggerName}" ON "${schema}"."pull_requests"`);
+      await admin.$executeRawUnsafe(`DROP FUNCTION IF EXISTS "${schema}"."${functionName}"()`);
+    }
+
+    const maintenance = app.get(MaintenanceJobsService);
+    let recovered = false;
+    let recoveredDetailResponse: Response | undefined;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await maintenance.runOnce();
+      recoveredDetailResponse = await call('GET', `${repoPath}/${pullRequest.number}`, undefined, recoveryCookie);
+      const current = await responseJson<{ pullRequest: { status: string } }>(recoveredDetailResponse);
+      if (current.pullRequest.status === 'MERGED') { recovered = true; break; }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    expect(recovered).toBe(true);
+
+    expect(recoveredDetailResponse?.status).toBe(200);
+    expect(await responseJson<{ pullRequest: { status: string; mergedById: string; mergeCommitSha: string };
+      mergeOperation: { status: string; resultingSha: string } }>(recoveredDetailResponse!)).toMatchObject({
+      pullRequest: { status: 'MERGED', mergedById: (await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'recoveryowner' } })).id,
+        mergeCommitSha: candidateSha },
+      mergeOperation: { status: 'COMPLETED', resultingSha: candidateSha },
+    });
+    expect(git(['--git-dir', bare, 'rev-parse', 'refs/heads/main']).trim()).toBe(candidateSha);
+    expect(await db.auditLog.count({ where: { targetId: pullRequest.id, action: 'PULL_REQUEST_MERGE_RECONCILED' } })).toBe(1);
+
+    const retry = await call('POST', `${repoPath}/${pullRequest.number}/merge`, {
+      operationId, expectedSourceSha: comparison.sourceSha, expectedTargetSha: comparison.targetSha,
+      storageGeneration: comparison.storageGeneration, version: detail.pullRequest.version,
+    }, recoveryCookie);
+    expect(retry.status).toBe(200);
+    expect(await responseJson(retry)).toMatchObject({ status: 'MERGED', operationId, mergeCommitSha: candidateSha });
+    expect(git(['--git-dir', bare, 'rev-parse', 'refs/heads/main']).trim()).toBe(candidateSha);
+    expect(await db.auditLog.count({ where: { targetId: pullRequest.id, action: 'PULL_REQUEST_MERGE_RECONCILED' } })).toBe(1);
+
+    const fetched = join(storageRoot, 'merge-recovery-fetch');
+    git(['clone', bare, fetched]);
+    expect(git(['-C', fetched, 'show', 'main:recovered.txt'])).toBe('recovered merge content\n');
   }, 60_000);
 
   it('serializes a source-branch push against a merge snapshot', async () => {
