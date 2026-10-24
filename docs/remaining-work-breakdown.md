@@ -1,11 +1,11 @@
 # Code Forge — remaining work breakdown
 
-State date: 2026-10-25. Branch: `thviet`. Latest pushed commit: `1227730`. This register decomposes the approved P0–P8 plan; it does not narrow or replace that scope.
+State date: 2026-10-25. Branch: `thviet`. Latest pushed code commit: `1227730`; current branch HEAD is docs-only commit `269d008`. This register decomposes the approved P0–P8 plan; it does not narrow or replace that scope.
 
 ## Current verified state
 
 - Previous fully green hosted workflow: `40138087574` on `7e0aa27`.
-- Latest hosted workflows: `40139229848` on `d1019a2` and `40140118957` on `1227730`; both failed at step 12 (`backend test:e2e`). Public unauthenticated output gives only exit code 1. The 23/24-second durations are not proof of which test failed.
+- Hosted workflows `40139229848` on `d1019a2`, `40140118957` on `1227730`, and `40140367864` on docs-only `269d008` failed at step 12 (`backend test:e2e`). Public unauthenticated output gives only exit code 1; durations are not proof of which test failed.
 - Local on `1227730`: backend typecheck, backend lint/build, and all unit tests (14 suites/84 tests) pass.
 - New merge-recovery E2E still requires hosted verification; the production secure-cookie validation and focused environment suite (8/8) pass locally, with hosted E2E still failing.
 - Docker Desktop is installed, but its dashboard reports “Turning off the Docker Engine…”; do not reset containers or volumes. Local image/PostgreSQL smoke remains unverified.
@@ -19,7 +19,7 @@ State date: 2026-10-25. Branch: `thviet`. Latest pushed commit: `1227730`. This 
 - **Dependency:** Start here; do not infer the failing case from run duration.
 - **Writable scope:** `backend/test/*.e2e-spec.ts` and the smallest directly implicated backend source/test files.
 - **Forbidden:** Existing dev/cloud database, secrets, broad refactors, unrelated UI or migration files.
-- **Actions:** Obtain failed-step stdout for run `40139229848`, or rerun the exact E2E suite in an isolated PostgreSQL/Git environment; identify the failing test; reproduce once; make the smallest evidence-based correction.
+- **Actions:** Obtain failed-step stdout for runs `40139229848`/`40140118957`/`40140367864`, or rerun the exact E2E suite in an isolated PostgreSQL/Git environment; identify the failing test; reproduce once; make the smallest evidence-based correction.
 - **Acceptance:** Exact failing case and cause recorded; `corepack pnpm --filter backend test:e2e` passes against isolated test PostgreSQL and temporary Git storage on the fix commit; `git diff --check` passes.
 
 ### T1 — Accept merge ref-update / metadata-recovery path
@@ -77,9 +77,9 @@ State date: 2026-10-25. Branch: `thviet`. Latest pushed commit: `1227730`. This 
 ### T7 — Cloud setup, Git transport, and release handoff
 
 - **Owner:** User chooses authorized GitHub/Vercel/Render/Neon projects and demo hostname/access; Codex executes smoke after identifiers/interactive account access are available.
-- **Dependency:** T0–T5 acceptance and T6 or equivalent hosted runtime smoke; user choices U2/U3 in `next-actions.md`.
+- **Dependency:** T8 acceptance and T6 or equivalent hosted runtime smoke; user choices U2/U3 in `next-actions.md`.
 - **Forbidden:** No secret values in chat, repo, logs, tickets, or URL. No production-like database migration without known ownership and a backup rehearsal.
-- **Acceptance:** Complete `docs/deployment/cloud-smoke-checklist.md` on the release commit, including Render-direct Git (>4.5 MB), PAT, private/public permission, cold start, source reset warning, recovery from a local clone, auth, PR merge, admin/audit, and proxy-header spoofing. Publish only after U4 review.
+- **Acceptance:** Rehearse metadata backup and restore, additive/forward-only migration on a production-like copy, app rollback, and migration-failure recovery without resetting existing data. Then complete `docs/deployment/cloud-smoke-checklist.md` on the release commit, including Render-direct Git (>4.5 MB), PAT, private/public permission, cold start, source reset warning, recovery from a local clone, auth, PR merge, admin/audit, and proxy-header spoofing. Publish only after U4 review.
 
 ## Dependency graph
 

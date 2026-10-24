@@ -11,7 +11,7 @@ Suggested comment/update:
 
 - Nhánh `thviet` hiện ở commit `1227730`.
 - Run `40138087574` trên `7e0aa27` trước đó pass bộ acceptance hosted.
-- Runs `40139229848` (`d1019a2`) và `40140118957` (`1227730`) fail ở bước `backend test:e2e`; log công khai chỉ cho biết exit code 1, chưa xác định được test/cause. Không suy luận từ thời lượng chạy.
+- Runs `40139229848` (`d1019a2`), `40140118957` (`1227730`) và `40140367864` (`269d008`, docs-only) đều fail ở bước `backend test:e2e`. Log công khai chỉ cho biết exit code 1, chưa xác định được test/cause. Không suy luận từ thời lượng chạy.
 - Commit `d1019a2` thêm PostgreSQL failure injection sau khi Git ref được cập nhật, kiểm tra HTTP `202`, merge commit hai parent, reconciliation, actor attribution, một audit và retry idempotent. Test chưa được chấp nhận đến khi E2E xanh.
 - Commit `1227730` bổ sung enforce `COOKIE_SECURE=true` cho production; backend unit (14 suite/84 test), lint, typecheck, build đã đạt local.
 
@@ -38,7 +38,7 @@ Suggested comment/update:
 
 - Branch `thviet`, latest pushed commit `1227730`.
 - Hosted run `40138087574` trên `7e0aa27` đã pass toàn bộ gates của revision đó.
-- Runs `40139229848` (`d1019a2`) và `40140118957` (`1227730`) fail tại `backend test:e2e`; tên test/stack trace chưa lấy được do Actions log cần phiên đăng nhập. Đây là blocker mới và cần xử lý trước khi tuyên bố CI xanh.
+- Runs `40139229848` (`d1019a2`), `40140118957` (`1227730`) và `40140367864` (`269d008`, docs-only) fail tại `backend test:e2e`. Tên test/stack trace chưa lấy được do Actions log cần phiên đăng nhập. Đây là blocker mới và cần xử lý trước khi tuyên bố CI xanh.
 - Docker Desktop có cài nhưng dashboard hiện “Turning off the Docker Engine…”; local image/runtime smoke chưa chạy. Không reset hoặc xóa container/volume để chữa trạng thái này.
 - Chưa có smoke trên Vercel/Render/Neon; URLs, proxy headers, Render-direct Git payload và source-reset recovery đều chưa được xác minh.
 
@@ -48,11 +48,12 @@ Suggested comment/update:
 2. Lấy log và sửa lỗi E2E trên commit chính xác, rồi chạy lại full CI.
 3. Chỉ sau đó chạy local image/migration smoke trên database test cô lập.
 4. Chủ repository chọn project/account Vercel, Render, Neon, hostname và chính sách truy cập. Không đưa secrets vào issue/chat/repository.
-5. Chạy `docs/deployment/cloud-smoke-checklist.md`, bao gồm Git trực tiếp Render với payload >4.5 MB, cold start, restart/reset và restore từ clone local.
+5. Trên bản sao production-like, diễn tập backup/restore metadata, migration additive/forward-only, app rollback và migration-failure recovery; không reset DB đang dùng.
+6. Chạy `docs/deployment/cloud-smoke-checklist.md`, bao gồm Git trực tiếp Render với payload >4.5 MB, cold start, restart/reset và restore source từ clone local.
 
 ### Chấp nhận
 
-- Một hosted run xanh trên release commit; local runtime/image smoke có output; cloud checklist có URL, thời gian, commit và bằng chứng không nhạy cảm.
+- Một hosted run xanh trên release commit; local runtime/image smoke có output; backup/restore và rollback rehearsal đạt trên bản sao; cloud checklist có URL, thời gian, commit và bằng chứng không nhạy cảm.
 - Source reset/ephemeral behavior được hiển thị rõ trong demo và có quy trình restore đã thử.
 ```
 
