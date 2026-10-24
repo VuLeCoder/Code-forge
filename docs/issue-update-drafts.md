@@ -1,6 +1,6 @@
 # GitHub issue update drafts
 
-Prepared 2026-10-25 for the existing public issues below. The public issue pages were observed as Open. These are drafts only; no GitHub comments or issue edits have been submitted because the current session lacks authenticated issue-write access. Do not create duplicates.
+Prepared 2026-10-25 for the existing public issues below. The public issue pages were observed as Open. These are drafts only; do not create duplicates. Latest pushed code is `31cb306`; workflow `40142665347` failed but its job details are unavailable through the unauthenticated API. The previous run `40142070744` is confirmed to fail at backend E2E after unit passed. Local frontend/backend gates are recorded in `implementation-status.md`.
 
 ## Issue #3 — [P3/P4/P7] Kiểm thử full-stack PR, merge an toàn và phục hồi cạnh tranh
 
@@ -9,12 +9,12 @@ Suggested comment/update:
 ```markdown
 ### Cập nhật trạng thái (2026-10-25)
 
-- Nhánh `thviet` có code commit mới nhất `851013e`; backend hardening gần nhất là `1227730`.
+- Nhánh `thviet` có commit code mới nhất `31cb306`; backend hardening gần nhất là `1227730`.
 - Run `40138087574` trên `7e0aa27` trước đó pass bộ acceptance hosted.
-- Runs `40139229848`, `40140118957`, `40140367864`, `40140645289`, `40140833332`, `40141114581` và `40141721845` đều fail ở bước `backend test:e2e`. Check-run mới nhất `121014675459` chỉ có annotation exit code 1; tải raw log trả HTTP 403, nên chưa xác định được test/cause. Không suy luận từ thời lượng chạy.
+- Run `40142070744` fail ở `backend test:e2e` sau khi backend unit pass. Latest `40142665347` kết thúc failure nhưng chưa lấy được job details do GitHub API rate limit; không kết luận step nào fail.
 - Commit `d1019a2` thêm PostgreSQL failure injection sau khi Git ref được cập nhật, kiểm tra HTTP `202`, merge commit hai parent, reconciliation, actor attribution, một audit và retry idempotent. Test chưa được chấp nhận đến khi E2E xanh.
 - So sánh source cho thấy đây là test E2E mới đầu tiên cần chạy riêng để khoanh vùng; chưa có bằng chứng nó là nguyên nhân lỗi.
-- Commit `851013e` sửa lỗi focus khi mở form từ empty state và hiển thị/retry lỗi tải branches. Local frontend lint/typecheck và Playwright 49/49 đạt; hosted xác nhận đang chờ vì backend E2E fail trước browser gate.
+- Commit `851013e` sửa lỗi focus khi mở form từ empty state và hiển thị/retry lỗi tải branches; `141f749` bổ sung admin UI assertions; `31cb306` bổ sung admin restore/audit privacy tests. Local frontend 49/49 và backend 14 suite/86 test cùng lint/typecheck/build đạt.
 - Commit `1227730` bổ sung enforce `COOKIE_SECURE=true` cho production; backend unit (14 suite/84 test), lint, typecheck, build đã đạt local.
 
 ### Còn lại
@@ -38,11 +38,12 @@ Suggested comment/update:
 ```markdown
 ### Cập nhật trạng thái (2026-10-25)
 
-- Branch `thviet`, latest pushed UI code commit `851013e`; latest backend code hardening is `1227730`.
+- Branch `thviet`, latest pushed code commit `31cb306`; latest backend runtime hardening is `1227730`.
 - Hosted run `40138087574` trên `7e0aa27` đã pass toàn bộ gates của revision đó.
-- Runs `40139229848`, `40140118957`, `40140367864`, `40140645289`, `40140833332`, `40141114581` và `40141721845` fail tại `backend test:e2e`. Check-run mới nhất `121014675459` chỉ có annotation exit code 1; raw log trả HTTP 403 và tên test/stack trace chưa biết. Đây là blocker cần xử lý trước khi tuyên bố CI xanh.
-- Docker Desktop có cài nhưng dashboard hiện “Turning off the Docker Engine…”; local image/runtime smoke chưa chạy. Không reset hoặc xóa container/volume để chữa trạng thái này.
+- Run `40142070744` fail tại `backend test:e2e` sau khi backend unit pass; các bước sau bị skip. Newest run `40142665347` cũng kết thúc failure, nhưng job detail chưa truy cập được qua GitHub API rate limit. Chưa kết luận failure step trên run mới.
+- Docker Desktop đang mở nhưng Docker Engine/PostgreSQL local chưa phản hồi; local image/runtime smoke chưa chạy. Không reset hoặc xóa container/volume để chữa trạng thái này.
 - Chưa có smoke trên Vercel/Render/Neon; URLs, proxy headers, Render-direct Git payload và source-reset recovery đều chưa được xác minh.
+- Cấu hình Vercel cần đặt server-side `APP_ORIGIN` bằng origin production canonical cùng `BACKEND_URL` và proxy secret; preview/custom origins cần quyết định và kiểm thử rõ.
 
 ### Việc cần làm
 

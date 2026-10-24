@@ -1,14 +1,14 @@
 # Code Forge — remaining work breakdown
 
-State date: 2026-10-25. Branch: `thviet`. Latest pushed UI code commit: `851013e`; latest backend code hardening remains `1227730`. This register decomposes the approved P0–P8 plan; it does not narrow or replace that scope.
+State date: 2026-10-25. Branch: `thviet`. Latest pushed code commit: `31cb306` (P6 admin unit tests); latest backend runtime hardening remains `1227730`. This register decomposes the approved P0–P8 plan; it does not narrow or replace that scope.
 
 ## Current verified state
 
 - Previous fully green hosted workflow: `40138087574` on `7e0aa27`.
-- Hosted workflows `40139229848`, `40140118957`, `40140367864`, `40140645289`, `40140833332`, `40141114581`, and `40141721845` failed at step 12 (`backend test:e2e`). Public job metadata confirms the latest job `121014675459`; its annotations only report exit code 1. Log download returns HTTP 403, so the exact test and stack trace remain unknown. Durations are not diagnostic evidence.
-- Local on `1227730`: backend typecheck, backend lint/build, and all unit tests (14 suites/84 tests) pass.
+- Hosted run `40142070744` on `141f749` failed at step 12 (`backend test:e2e`) after backend unit passed; later gates were skipped. Newest run `40142665347` on `31cb306` concluded failure, but job details are currently unavailable due GitHub API rate limit, so its step is unknown.
+- Local on checkout `31cb306` plus current documentation edits: backend unit (14 suites/86 tests), lint, typecheck and build pass; frontend lint/typecheck and Playwright (49/49) pass.
 - New merge-recovery E2E still requires hosted verification; the production secure-cookie validation and focused environment suite (8/8) pass locally, with hosted E2E still failing.
-- Docker Desktop is installed, but its dashboard reports “Turning off the Docker Engine…”; do not reset containers or volumes. Local image/PostgreSQL smoke remains unverified.
+- Docker Desktop process is open, but Docker Engine commands do not return promptly and PostgreSQL `localhost:5433` is unavailable; do not reset containers or volumes. Local image/PostgreSQL smoke remains unverified.
 - Public issue pages identify issues #3 (PR/Git race/recovery) and #4 (Docker/CI/cloud release) as open at the time checked. Update those existing issues rather than duplicate them after authenticated access is available.
 
 ## Work packages
@@ -19,7 +19,7 @@ State date: 2026-10-25. Branch: `thviet`. Latest pushed UI code commit: `851013e
 - **Dependency:** Start here; do not infer the failing case from run duration.
 - **Writable scope:** `backend/test/*.e2e-spec.ts` and the smallest directly implicated backend source/test files.
 - **Forbidden:** Existing dev/cloud database, secrets, broad refactors, unrelated UI or migration files.
-- **Actions:** Obtain authenticated failed-step stdout for runs `40139229848`/`40140118957`/`40140367864`/`40140645289`/`40140833332`/`40141114581`/`40141721845`, or rerun the exact E2E suite in an isolated PostgreSQL/Git environment; identify the failing test; reproduce once; make the smallest evidence-based correction. Public GitHub API log download currently returns HTTP 403; `gh` is not installed and local Docker/PostgreSQL are unavailable. Source comparison identifies the new “reconciles a Git-updated merge after PostgreSQL rejects metadata” E2E as the first focused reproducer to try, not as a confirmed cause.
+- **Actions:** Obtain authenticated failed-step stdout for run `40142665347` (or inspect `40142070744` logs), or rerun the exact E2E suite in an isolated PostgreSQL/Git environment; identify the failing test; reproduce once; make the smallest evidence-based correction. GitHub API rate limit is exhausted and local Docker/PostgreSQL are currently unavailable. Source comparison identifies the new “reconciles a Git-updated merge after PostgreSQL rejects metadata” E2E as the first focused reproducer to try, not as a confirmed cause.
 - **Focused reproducer (once isolated PostgreSQL is available):** `corepack pnpm --filter backend exec jest --config test/jest-e2e.json --runInBand test/pull-requests.e2e-spec.ts -t "reconciles a Git-updated merge"` with loopback `*_test` database URLs and isolated `GIT_STORAGE_PATH`; then run the full E2E suite.
 - **Acceptance:** Exact failing case and cause recorded; `corepack pnpm --filter backend test:e2e` passes against isolated test PostgreSQL and temporary Git storage on the fix commit; `git diff --check` passes.
 
@@ -53,6 +53,7 @@ State date: 2026-10-25. Branch: `thviet`. Latest pushed UI code commit: `851013e
 - **Dependency:** Existing contracts remain unchanged unless a separately approved contract edit is needed.
 - **Files:** Admin/auth/maintenance tests first; UI agent owns only `frontend/src/app/admin/page.tsx`, `frontend/src/app/admin/admin.module.css`, and `frontend/test/admin.spec.ts` if UI changes are required.
 - **Acceptance:** Isolated integration proves locked user session/PAT rejection, public repository anonymous reads still work, admin cannot read private source or merge, last active admin cannot be locked, restore retention works, and audit omits secrets/source. Maintenance jobs remain batch/idempotent after repeated startup/run.
+- **Progress:** Current unit tests cover final-admin/self-lock rejection, session revocation, expired restore without DB update/audit plus lock release, and allowlisted audit details that omit token/password/diff data. This is unit evidence only; current-head isolated PostgreSQL acceptance remains pending.
 
 ### T5 — Accessibility and responsive review for existing PR/admin UI
 
@@ -60,7 +61,8 @@ State date: 2026-10-25. Branch: `thviet`. Latest pushed UI code commit: `851013e
 - **Dependency:** No API/route/auth/schema changes. Confirm whether code changes are needed after read-only review.
 - **Candidate AGY-owned paths:** PR list/detail components and their CSS module plus frontend UI tests; admin page/CSS only in a separate task. AGY must not edit backend, API proxy routes, global auth, shared contracts, or migration files.
 - **Acceptance:** Keyboard-only flow, visible focus, semantic names/roles, state announcements for merge/reconciliation, 375px and desktop layouts, browser tests, lint/typecheck. Report any screen-reader limitations and manual checks still outstanding.
-- **Progress:** Commit `851013e` fixes empty-state trigger focus restoration and distinguishes/retries branch-fetch failures. Local lint/typecheck and the full Playwright suite pass (49/49), including added Admin role/status actions and confirmation dialog focus/keyboard assertions. Screen-reader/manual multi-viewport review remains open.
+- **Progress:** Commit `851013e` fixes empty-state trigger focus restoration and distinguishes/retries branch-fetch failures. Commit `141f749` adds Admin role/status actions and confirmation dialog focus/keyboard assertions. Local lint/typecheck and the full Playwright suite pass (49/49). Screen-reader/manual multi-viewport review remains open; hosted confirmation is gated by backend E2E.
+- **AGY review:** A bounded read-only review of the admin UI and deploy-origin guidance timed out at 60 seconds with no usable result; no AGY approval is claimed.
 
 ### T6 — Local Docker runtime smoke
 
