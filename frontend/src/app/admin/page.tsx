@@ -6,41 +6,14 @@ import { useAuth } from "@/components/auth-provider";
 import { sessionFetch } from "@/lib/auth";
 import styles from "./admin.module.css";
 
-type Tab = "overview" | "users" | "repositories" | "operations" | "audit";
+type Tab = "overview" | "users" | "repositories" | "audit";
 type PageResult = { page: number; pageSize: number; total: number; hasMore: boolean };
 type AdminUser = { id: string; username: string; email: string; systemRole: "USER" | "ADMIN"; status: "ACTIVE" | "LOCKED"; lockedAt: string | null; createdAt: string };
 type AdminRepository = { id: string; name: string; description: string | null; visibility: "PUBLIC" | "PRIVATE"; status: "ACTIVE" | "LOCKED" | "DELETED"; defaultBranch: string | null; storageGeneration: number; createdAt: string; updatedAt: string; deletedAt: string | null; purgeAfter: string | null; owner: { id: string; username: string }; _count: { pullRequests: number; members: number } };
 type AuditEntry = { id: string; actorId: string | null; action: string; targetId: string; details: Record<string, string | number | boolean | null>; createdAt: string; actor: { id: string; username: string } | null };
-type AdminOperation = {
-  operationId: string;
-  type: "PUSH" | "MERGE";
-  repositoryId: string;
-  repositoryName: string;
-  actorId: string;
-  status: "PENDING" | "NEEDS_RECONCILIATION";
-  errorCode: string | null;
-  storageGeneration: number;
-  changedRefCount?: number;
-  pullRequestId?: string;
-  pullRequestNumber?: number;
-  targetBranch?: string;
-  createdAt: string;
-  updatedAt: string;
-};
-type ResolutionReason = "MANUAL_REPAIR_VERIFIED" | "CORRUPTED_OR_MISSING_STORAGE" | "STALE_OPERATION_DISCARDED" | "RECONCILIATION_TIMEOUT" | "OPERATOR_OVERRIDE";
 type Stats = { users: { total: number; active: number; locked: number }; repositories: { total: number; active: number; locked: number; deleted: number }; pullRequests: { total: number; open: number; pendingMerges: number } };
 type RequestError = Error & { status?: number; code?: string };
-type PendingAction = {
-  title: string;
-  description: string;
-  path: string;
-  method: "PATCH" | "POST";
-  body?: unknown;
-  reasonConfig?: {
-    operationType: "PUSH" | "MERGE";
-    action: "RETRY_RECONCILE" | "MARK_FAILED";
-  };
-};
+type PendingAction = { title: string; description: string; path: string; method: "PATCH" | "POST"; body?: unknown };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await sessionFetch(`/api/v1/admin/${path}`, { ...init, cache: "no-store" });
@@ -71,7 +44,6 @@ export default function AdminPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [repositories, setRepositories] = useState<AdminRepository[]>([]);
-  const [operations, setOperations] = useState<AdminOperation[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [pageInfo, setPageInfo] = useState<PageResult>({ page: 1, pageSize: 20, total: 0, hasMore: false });
   const [page, setPage] = useState(1);
@@ -79,8 +51,6 @@ export default function AdminPage() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [actionFilter, setActionFilter] = useState("");
-  const [operationTypeFilter, setOperationTypeFilter] = useState("");
-  const [selectedReason, setSelectedReason] = useState<ResolutionReason>("MANUAL_REPAIR_VERIFIED");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -97,13 +67,6 @@ export default function AdminPage() {
     try {
       if (tab === "overview") {
         setStats(await request<Stats>("stats", { signal }));
-      } else if (tab === "operations") {
-        const params = new URLSearchParams({ page: String(page) });
-        if (operationTypeFilter) params.set("type", operationTypeFilter);
-        const result = await request<{ operations: AdminOperation[] } & PageResult>(`operations/unresolved?${params}`, { signal });
-        if (signal?.aborted) return;
-        setOperations(result.operations);
-        setPageInfo({ page: result.page, pageSize: result.pageSize, total: result.total, hasMore: result.hasMore });
       } else {
         const params = new URLSearchParams({ page: String(page) });
         if (query) params.set("q", query);
@@ -126,7 +89,7 @@ export default function AdminPage() {
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, [actionFilter, authLoading, operationTypeFilter, page, query, statusFilter, tab, user]);
+  }, [actionFilter, authLoading, page, query, statusFilter, tab, user]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -180,7 +143,6 @@ export default function AdminPage() {
     setQuery("");
     setStatusFilter("");
     setActionFilter("");
-    setOperationTypeFilter("");
     setError("");
     setNotice("");
   }
@@ -191,17 +153,10 @@ export default function AdminPage() {
     setError("");
     setNotice("");
     try {
-      const payload = pendingAction.reasonConfig
-        ? {
-            type: pendingAction.reasonConfig.operationType,
-            action: pendingAction.reasonConfig.action,
-            reason: selectedReason,
-          }
-        : pendingAction.body;
       await request(pendingAction.path, {
         method: pendingAction.method,
-        headers: payload ? { "content-type": "application/json" } : undefined,
-        body: payload ? JSON.stringify(payload) : undefined,
+        headers: pendingAction.body ? { "content-type": "application/json" } : undefined,
+        body: pendingAction.body ? JSON.stringify(pendingAction.body) : undefined,
       });
       setNotice("Đã cập nhật thành công.");
       closeConfirmation();
@@ -218,11 +173,8 @@ export default function AdminPage() {
   if (!user) return <main className={`container ${styles.shell}`}><h1>Khu vực quản trị</h1><p>Đăng nhập để tiếp tục.</p><Link className="button buttonPrimary" href="/login?returnTo=%2Fadmin">Đăng nhập</Link></main>;
 
   const tabs: { id: Tab; label: string }[] = [
-    { id: "overview", label: "Tổng quan" },
-    { id: "users", label: "Người dùng" },
-    { id: "repositories", label: "Repositories" },
-    { id: "operations", label: "Thao tác tồn đọng" },
-    { id: "audit", label: "Nhật ký" },
+    { id: "overview", label: "Tổng quan" }, { id: "users", label: "Người dùng" },
+    { id: "repositories", label: "Repositories" }, { id: "audit", label: "Nhật ký" },
   ];
 
   return <main className={`container ${styles.shell}`}>
@@ -247,27 +199,17 @@ export default function AdminPage() {
         <p className={styles.privacyNote}>Thông tin source và diff không được hiển thị trong khu vực admin.</p>
       </>}
 
-      {(tab === "users" || tab === "repositories" || tab === "operations" || tab === "audit") && <>
+      {(tab === "users" || tab === "repositories" || tab === "audit") && <>
         <form className={styles.filters} onSubmit={search}>
-          {tab !== "operations" && (
-            <label className={styles.searchField}><span>{tab === "users" ? "Tìm username hoặc email" : tab === "repositories" ? "Tìm repository hoặc chủ sở hữu" : "Tìm hành động hoặc target ID"}</span><input type="search" value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder="Nhập từ khóa" /></label>
-          )}
-          {tab === "operations" ? (
-            <label><span>Loại thao tác</span><select value={operationTypeFilter} onChange={(event) => { setOperationTypeFilter(event.target.value); setPage(1); }}><option value="">Tất cả (Push & Merge)</option><option value="PUSH">Chỉ Push</option><option value="MERGE">Chỉ Merge</option></select></label>
-          ) : tab !== "audit" ? (
-            <label><span>Trạng thái</span><select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }}><option value="">Tất cả</option>{tab === "users" ? <><option value="ACTIVE">Hoạt động</option><option value="LOCKED">Đã khóa</option></> : <><option value="ACTIVE">Hoạt động</option><option value="LOCKED">Đã khóa</option><option value="DELETED">Đã xóa</option></>}</select></label>
-          ) : (
-            <label><span>Hành động</span><input value={actionFilter} onChange={(event) => { setActionFilter(event.target.value); setPage(1); }} placeholder="Ví dụ ADMIN_USER_LOCKED" /></label>
-          )}
-          {tab !== "operations" && <button className="button buttonPrimary" type="submit">Tìm kiếm</button>}
+          <label className={styles.searchField}><span>{tab === "users" ? "Tìm username hoặc email" : tab === "repositories" ? "Tìm repository hoặc chủ sở hữu" : "Tìm hành động hoặc target ID"}</span><input type="search" value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder="Nhập từ khóa" /></label>
+          {tab !== "audit" ? <label><span>Trạng thái</span><select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }}><option value="">Tất cả</option>{tab === "users" ? <><option value="ACTIVE">Hoạt động</option><option value="LOCKED">Đã khóa</option></> : <><option value="ACTIVE">Hoạt động</option><option value="LOCKED">Đã khóa</option><option value="DELETED">Đã xóa</option></>}</select></label> : <label><span>Hành động</span><input value={actionFilter} onChange={(event) => { setActionFilter(event.target.value); setPage(1); }} placeholder="Ví dụ ADMIN_USER_LOCKED" /></label>}
+          <button className="button buttonPrimary" type="submit">Tìm kiếm</button>
         </form>
 
         {loading ? <p role="status" className={styles.empty}>Đang tải dữ liệu…</p> : tab === "users" ? <>
           {users.length === 0 ? <p className={styles.empty}>Không tìm thấy người dùng phù hợp.</p> : <div className={styles.tableWrap}><table><caption className="srOnly">Danh sách người dùng quản trị</caption><thead><tr><th>Tài khoản</th><th>Vai trò</th><th>Trạng thái</th><th>Ngày tạo</th><th>Thao tác</th></tr></thead><tbody>{users.map((item) => <tr key={item.id}><td><strong>{item.username}</strong><small>{item.email}</small></td><td>{item.systemRole === "ADMIN" ? "Admin" : "User"}</td><td><span className={item.status === "ACTIVE" ? styles.statusActive : styles.statusLocked}>{item.status === "ACTIVE" ? "Hoạt động" : "Đã khóa"}</span></td><td>{formatDate(item.createdAt)}</td><td>{item.id === user.id && item.status === "ACTIVE" ? <span className={styles.muted}>Tài khoản hiện tại</span> : <button className={styles.tableButton} type="button" onClick={(event) => openAction(event.currentTarget, { title: item.status === "ACTIVE" ? `Khóa ${item.username}?` : `Mở khóa ${item.username}?`, description: item.status === "ACTIVE" ? "Các phiên đăng nhập sẽ bị thu hồi; PAT sẽ không thể dùng khi tài khoản bị khóa." : "Tài khoản có thể đăng nhập và sử dụng lại các quyền hiện có.", path: `users/${encodeURIComponent(item.id)}/status`, method: "PATCH", body: { status: item.status === "ACTIVE" ? "LOCKED" : "ACTIVE" } })}>{item.status === "ACTIVE" ? "Khóa tài khoản" : "Mở khóa"}</button>}</td></tr>)}</tbody></table></div>}
         </> : tab === "repositories" ? <>
           {repositories.length === 0 ? <p className={styles.empty}>Không tìm thấy repository phù hợp.</p> : <div className={styles.tableWrap}><table><caption className="srOnly">Danh sách repository quản trị</caption><thead><tr><th>Repository</th><th>Quyền riêng tư</th><th>Trạng thái</th><th>PR · Thành viên</th><th>Thao tác</th></tr></thead><tbody>{repositories.map((item) => <tr key={item.id}><td><strong>{item.owner.username}/{item.name}</strong><small>{item.description || "Chưa có mô tả"}</small>{item.status === "DELETED" && <small>Hạn khôi phục: {formatDate(item.purgeAfter)}</small>}</td><td>{item.visibility === "PRIVATE" ? "Riêng tư" : "Công khai"}</td><td><span className={item.status === "ACTIVE" ? styles.statusActive : styles.statusLocked}>{item.status === "ACTIVE" ? "Hoạt động" : item.status === "LOCKED" ? "Đã khóa" : "Đã xóa"}</span></td><td>{item._count.pullRequests} · {item._count.members}</td><td>{item.status === "DELETED" ? <button className={styles.tableButton} type="button" onClick={(event) => openAction(event.currentTarget, { title: `Khôi phục ${item.owner.username}/${item.name}?`, description: "Repository sẽ hoạt động lại. Nếu storage đã reset, source có thể chưa tồn tại và cần push lại từ bản clone.", path: `repositories/${encodeURIComponent(item.id)}/restore`, method: "POST" })}>Khôi phục</button> : <button className={styles.tableButton} type="button" onClick={(event) => openAction(event.currentTarget, { title: item.status === "ACTIVE" ? `Khóa ${item.name}?` : `Mở khóa ${item.name}?`, description: item.status === "ACTIVE" ? "Repository sẽ tạm thời không cho đọc hoặc ghi." : "Repository sẽ được mở lại theo visibility và membership hiện có.", path: `repositories/${encodeURIComponent(item.id)}/status`, method: "PATCH", body: { status: item.status === "ACTIVE" ? "LOCKED" : "ACTIVE" } })}>{item.status === "ACTIVE" ? "Khóa repository" : "Mở khóa"}</button>}</td></tr>)}</tbody></table></div>}
-        </> : tab === "operations" ? <>
-          {operations.length === 0 ? <p className={styles.empty}>Không có thao tác nào đang chờ đối soát hoặc bị treo.</p> : <div className={styles.tableWrap}><table><caption className="srOnly">Danh sách thao tác cần đối soát</caption><thead><tr><th>Thao tác · Repo</th><th>Loại · Trạng thái</th><th>Mã lỗi</th><th>Chi tiết</th><th>Cập nhật</th><th>Can thiệp quản trị</th></tr></thead><tbody>{operations.map((item) => <tr key={item.operationId}><td><strong><code>{item.operationId.slice(0, 10)}…</code></strong><small>{item.repositoryName}</small></td><td><strong>{item.type}</strong><span className={styles.statusPending}>{item.status}</span></td><td><code>{item.errorCode || "—"}</code></td><td><small>{item.type === "MERGE" ? `PR #${item.pullRequestNumber} → ${item.targetBranch}` : `${item.changedRefCount ?? 0} ref(s) · gen ${item.storageGeneration}`}</small></td><td>{formatDate(item.updatedAt)}</td><td><div className={styles.actionGroup}><button className={styles.tableButton} type="button" onClick={(event) => { setSelectedReason("MANUAL_REPAIR_VERIFIED"); openAction(event.currentTarget, { title: `Đối soát lại thao tác [${item.type}] ${item.operationId.slice(0, 8)}?`, description: `Hệ thống sẽ đối soát lại kho Git của repository ${item.repositoryName} dưới khóa độc quyền. Nếu trạng thái khớp hoặc đã sửa chữa thủ công hoàn tất, thao tác sẽ được chuyển trạng thái tương ứng.`, path: `operations/${encodeURIComponent(item.operationId)}/resolve`, method: "POST", reasonConfig: { operationType: item.type, action: "RETRY_RECONCILE" } }); }}>Đối soát lại</button><button className={styles.tableButton} type="button" onClick={(event) => { setSelectedReason("CORRUPTED_OR_MISSING_STORAGE"); openAction(event.currentTarget, { title: `Đánh dấu thất bại thao tác [${item.type}] ${item.operationId.slice(0, 8)}?`, description: `Thao tác tại ${item.repositoryName} sẽ chuyển sang FAILED dưới khóa độc quyền. Với Push, beforeRefs sẽ bị xóa triệt để để đảm bảo không rò rỉ. Hành động này sẽ được ghi vào nhật ký kiểm toán.`, path: `operations/${encodeURIComponent(item.operationId)}/resolve`, method: "POST", reasonConfig: { operationType: item.type, action: "MARK_FAILED" } }); }}>Đánh dấu thất bại</button></div></td></tr>)}</tbody></table></div>}
         </> : <>
           {audit.length === 0 ? <p className={styles.empty}>Chưa có sự kiện phù hợp.</p> : <div className={styles.tableWrap}><table><caption className="srOnly">Nhật ký kiểm toán</caption><thead><tr><th>Thời điểm</th><th>Người thực hiện</th><th>Hành động</th><th>Target</th><th>Chi tiết an toàn</th></tr></thead><tbody>{audit.map((item) => <tr key={item.id}><td>{formatDate(item.createdAt)}</td><td>{item.actorId === null ? "Hệ thống (bootstrap CLI)" : item.actor?.username ?? "Tài khoản không còn tồn tại"}</td><td><code>{item.action}</code></td><td><code>{item.targetId}</code></td><td>{Object.entries(item.details).map(([key, value]) => `${key}: ${value ?? "—"}`).join(" · ") || "—"}</td></tr>)}</tbody></table></div>}
         </>}
@@ -280,32 +222,8 @@ export default function AdminPage() {
     </section>
 
     <dialog ref={confirmation} className={styles.dialog} aria-labelledby="admin-confirm-title" aria-describedby="admin-confirm-description" onClose={handleConfirmationClose} onCancel={(event) => { event.preventDefault(); if (!busy) closeConfirmation(); }}>
-      <h2 id="admin-confirm-title">{pendingAction?.title}</h2>
-      <p id="admin-confirm-description">{pendingAction?.description}</p>
-      {pendingAction?.reasonConfig && (
-        <label className={styles.dialogField}>
-          <span>Lý do chuẩn hóa (Audit Reason Code):</span>
-          <select value={selectedReason} onChange={(event) => setSelectedReason(event.target.value as ResolutionReason)}>
-            {pendingAction.reasonConfig.action === "RETRY_RECONCILE" ? (
-              <>
-                <option value="MANUAL_REPAIR_VERIFIED">Đã sửa chữa và kiểm tra kho Git thủ công (MANUAL_REPAIR_VERIFIED)</option>
-                <option value="OPERATOR_OVERRIDE">Ghi đè quản trị viên (OPERATOR_OVERRIDE)</option>
-              </>
-            ) : (
-              <>
-                <option value="CORRUPTED_OR_MISSING_STORAGE">Kho lưu trữ Git bị hỏng hoặc mất file (CORRUPTED_OR_MISSING_STORAGE)</option>
-                <option value="STALE_OPERATION_DISCARDED">Thao tác quá hạn không còn giá trị (STALE_OPERATION_DISCARDED)</option>
-                <option value="RECONCILIATION_TIMEOUT">Hết thời gian chờ hệ thống tự động xử lý (RECONCILIATION_TIMEOUT)</option>
-                <option value="OPERATOR_OVERRIDE">Ghi đè quản trị viên (OPERATOR_OVERRIDE)</option>
-              </>
-            )}
-          </select>
-        </label>
-      )}
-      <div className={styles.dialogActions}>
-        <button className="button buttonPrimary" type="button" disabled={busy} onClick={() => void confirmMutation()}>{busy ? "Đang cập nhật…" : "Xác nhận"}</button>
-        <button className="button buttonSecondary" type="button" disabled={busy} onClick={closeConfirmation}>Hủy</button>
-      </div>
+      <h2 id="admin-confirm-title">{pendingAction?.title}</h2><p id="admin-confirm-description">{pendingAction?.description}</p>
+      <div className={styles.dialogActions}><button className="button buttonPrimary" type="button" disabled={busy} onClick={() => void confirmMutation()}>{busy ? "Đang cập nhật…" : "Xác nhận"}</button><button className="button buttonSecondary" type="button" disabled={busy} onClick={closeConfirmation}>Hủy</button></div>
     </dialog>
   </main>;
 }
