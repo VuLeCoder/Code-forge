@@ -17,6 +17,22 @@ import { GitPushJournalService } from '../src/repositories/git-push-journal.serv
 import { RepositoryPurgeService } from '../src/repositories/repository-purge.service';
 import { GitStorageService } from '../src/repositories/git-storage.service';
 
+function assertLoopbackTestDatabase(connectionString: string, variableName: string): void {
+  let url: URL;
+  try {
+    url = new URL(connectionString);
+  } catch {
+    throw new Error(`${variableName} must be a valid PostgreSQL URL.`);
+  }
+
+  const databaseName = decodeURIComponent(url.pathname.replace(/^\/+/, ''));
+  if (!['postgres:', 'postgresql:'].includes(url.protocol)
+    || !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+    || !databaseName.endsWith('_test')) {
+    throw new Error(`${variableName} must target a loopback PostgreSQL database whose name ends in _test.`);
+  }
+}
+
 describe('Repository HTTP + PostgreSQL', () => {
   const schema = `repo_test_${randomBytes(8).toString('hex')}`;
   let db: PrismaClient;
@@ -55,9 +71,11 @@ describe('Repository HTTP + PostgreSQL', () => {
     originalMaxRepositoryBytes = process.env.MAX_REPOSITORY_BYTES;
     originalMaxFileBytes = process.env.MAX_FILE_BYTES;
     originalMaxPushBytes = process.env.MAX_PUSH_BYTES;
+    if (!originalUrl) throw new Error('DATABASE_URL is required for integration tests');
+    assertLoopbackTestDatabase(originalUrl, 'DATABASE_URL');
+    if (originalUrlUnpooled) assertLoopbackTestDatabase(originalUrlUnpooled, 'DATABASE_URL_UNPOOLED');
     storageRoot = await mkdtemp(join(tmpdir(), 'code-forge-repositories-'));
     process.env.GIT_STORAGE_PATH = storageRoot;
-    if (!originalUrl) throw new Error('DATABASE_URL is required for integration tests');
     admin = new PrismaClient({ datasourceUrl: originalUrl });
     await admin.$executeRawUnsafe(`CREATE SCHEMA "${schema}"`);
     const url = new URL(originalUrl);
