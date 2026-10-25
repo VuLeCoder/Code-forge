@@ -1238,6 +1238,48 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       expect(git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).toBe(withinMerge.mergeCommitSha);
 
       git(['-C', work, 'fetch', 'origin', 'main']);
+      git(['-C', work, 'switch', '-c', 'feature/over-file-quota']);
+      await writeFile(join(work, 'large.txt'), 'x'.repeat(101));
+      git(['-C', work, 'add', 'large.txt']);
+      git(['-C', work, 'commit', '-m', 'Add over-file-quota candidate']);
+      const largeFileSourceSha = git(['-C', work, 'rev-parse', 'HEAD']);
+      publishBranch('feature/over-file-quota', largeFileSourceSha);
+      const largeFileCreated = await call('POST', repoPath, {
+        title: 'Over file quota', description: 'A merge with a blob above the configured file limit.',
+        sourceBranch: 'feature/over-file-quota', targetBranch: 'main',
+      });
+      expect(largeFileCreated.status).toBe(201);
+      const largeFilePull = await responseJson<{ pullRequest: { id: string; number: number } }>(largeFileCreated);
+      const largeFileDetailResponse = await call('GET', `${repoPath}/${largeFilePull.pullRequest.number}`);
+      const largeFileDetail = await responseJson<{ pullRequest: { version: number } }>(largeFileDetailResponse);
+      const largeFileCompareResponse = await call('GET', `${repoPath}/${largeFilePull.pullRequest.number}/compare`);
+      const largeFileCompare = await responseJson<{ sourceSha: string; targetSha: string; storageGeneration: number }>(largeFileCompareResponse);
+      expect(largeFileDetailResponse.status).toBe(200);
+      expect(largeFileCompareResponse.status).toBe(200);
+      expect(largeFileCompare.sourceSha).toBe(largeFileSourceSha);
+
+      const refsBeforeFileQuotaMerge = git(['--git-dir', bare, 'for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)']);
+      const fileQuotaAuditsBefore = await db.auditLog.count({ where: { targetId: largeFilePull.pullRequest.id, action: 'PULL_REQUEST_MERGED' } });
+      const fileQuotaOperationId = randomUUID();
+      const fileQuotaResponse = await call('POST', `${repoPath}/${largeFilePull.pullRequest.number}/merge`, {
+        operationId: fileQuotaOperationId, expectedSourceSha: largeFileCompare.sourceSha,
+        expectedTargetSha: largeFileCompare.targetSha, storageGeneration: largeFileCompare.storageGeneration,
+        version: largeFileDetail.pullRequest.version,
+      });
+      expect(fileQuotaResponse.status).toBe(409);
+      expect(await responseJson<{ error: { code: string } }>(fileQuotaResponse)).toMatchObject({
+        error: { code: 'MERGE_FILE_QUOTA_EXCEEDED' },
+      });
+      expect(git(['--git-dir', bare, 'for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)']))
+        .toBe(refsBeforeFileQuotaMerge);
+      expect(await db.pullRequest.findUniqueOrThrow({ where: { id: largeFilePull.pullRequest.id } }))
+        .toMatchObject({ status: 'OPEN', version: largeFileDetail.pullRequest.version, mergeCommitSha: null, mergedById: null });
+      expect(await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId: fileQuotaOperationId } }))
+        .toMatchObject({ status: 'FAILED', errorCode: 'MERGE_FILE_QUOTA_EXCEEDED',
+          oldTargetSha: largeFileCompare.targetSha, resultingSha: null });
+      expect(await db.auditLog.count({ where: { targetId: largeFilePull.pullRequest.id, action: 'PULL_REQUEST_MERGED' } }))
+        .toBe(fileQuotaAuditsBefore);
+
       git(['-C', work, 'switch', '-C', 'main', 'refs/remotes/origin/main']);
       git(['-C', work, 'switch', '-c', 'feature/over-quota']);
       await writeFile(join(work, 'over.txt'), 'small over-quota content\n');
