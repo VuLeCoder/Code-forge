@@ -148,6 +148,120 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     }
   }, 30_000);
 
+  it('uses one compare snapshot across pages and rejects every page after a source ref changes', async () => {
+    const registration = await call('POST', 'auth/register', {
+      username: 'SnapshotOwner', email: 'snapshot-owner@example.test', password: 'test-password-123',
+    }, '');
+    expect(registration.status).toBe(201);
+    const snapshotOwnerCookie = cookie(registration);
+
+    const repositoryResponse = await call('POST', 'repositories', {
+      name: 'SnapshotDemo', visibility: 'PRIVATE', initializeReadme: true,
+    }, snapshotOwnerCookie);
+    expect(repositoryResponse.status).toBe(201);
+    const { repository } = await responseJson<{ repository: { id: string } }>(repositoryResponse);
+    const storedRepository = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
+
+    const tokenResponse = await call('POST', 'tokens', {
+      name: 'Snapshot compare E2E', scopes: ['repo:read', 'repo:write'],
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+    }, snapshotOwnerCookie);
+    expect(tokenResponse.status).toBe(201);
+    const { secret } = await responseJson<{ secret: string }>(tokenResponse);
+
+    const askpass = join(storageRoot, 'snapshot-askpass.sh');
+    await writeFile(askpass,
+      '#!/bin/sh\ncase "$1" in *Username*) printf "%s\\n" "$TEST_GIT_USER" ;; *) printf "%s\\n" "$TEST_GIT_PAT" ;; esac\n',
+      { mode: 0o700 });
+    const runGit = promisify(execFile);
+    const git = (args: string[]) => runGit('git', ['-c', 'credential.helper=', ...args], {
+      timeout: 20_000,
+      env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(storageRoot, 'empty-git-config'),
+        GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: askpass, TEST_GIT_USER: 'SnapshotOwner', TEST_GIT_PAT: secret },
+    });
+    const bare = join(storageRoot, storedRepository.storageKey);
+    const repoUrl = `${base}/git/SnapshotOwner/SnapshotDemo.git`;
+    const work = join(storageRoot, 'snapshot-writer-clone');
+    await git(['clone', repoUrl, work]);
+    await git(['-C', work, 'config', 'user.name', 'Snapshot Owner']);
+    await git(['-C', work, 'config', 'user.email', 'snapshot-owner@example.test']);
+    await git(['-C', work, 'switch', '-c', 'feature/snapshot']);
+    await writeFile(join(work, 'snapshot.txt'), 'first version\n');
+    await git(['-C', work, 'add', 'snapshot.txt']);
+    await git(['-C', work, 'commit', '-m', 'Create snapshot source']);
+    await git(['-C', work, 'push', '--set-upstream', 'origin', 'feature/snapshot']);
+
+    const repoPath = 'repos/snapshotowner/snapshotdemo/pulls';
+    const createPull = await call('POST', repoPath, {
+      title: 'Check snapshot consistency', description: 'Compare pages must share one ref snapshot.',
+      sourceBranch: 'feature/snapshot', targetBranch: 'main',
+    }, snapshotOwnerCookie);
+    expect(createPull.status).toBe(201);
+    const createdPull = await responseJson<{ pullRequest: { id: string; number: number } }>(createPull);
+    const number = createdPull.pullRequest.number;
+
+    const compareResponse = await call('GET', `${repoPath}/${number}/compare`, undefined, snapshotOwnerCookie);
+    expect(compareResponse.status).toBe(200);
+    const compare = await responseJson<{ state: string; sourceSha: string; targetSha: string;
+      storageGeneration: number }>(compareResponse);
+    expect(compare).toMatchObject({ state: 'READY', storageGeneration: storedRepository.storageGeneration });
+    const snapshot = { sourceSha: compare.sourceSha, targetSha: compare.targetSha,
+      storageGeneration: compare.storageGeneration };
+    const pageQuery = new URLSearchParams({ ...Object.fromEntries(Object.entries(snapshot).map(([key, value]) => [key, String(value)])),
+      page: '1', pageSize: '20' }).toString();
+
+    const commitsResponse = await call('GET', `${repoPath}/${number}/commits?${pageQuery}`, undefined, snapshotOwnerCookie);
+    expect(commitsResponse.status).toBe(200);
+    const commits = await responseJson<{ snapshot: typeof snapshot; commits: { sha: string }[] }>(commitsResponse);
+    expect(commits.snapshot).toEqual(snapshot);
+    expect(commits.commits[0]?.sha).toBe(snapshot.sourceSha);
+
+    const filesResponse = await call('GET', `${repoPath}/${number}/files?${pageQuery}`, undefined, snapshotOwnerCookie);
+    expect(filesResponse.status).toBe(200);
+    const files = await responseJson<{ snapshot: typeof snapshot; files: { path: string }[] }>(filesResponse);
+    expect(files.snapshot).toEqual(snapshot);
+    expect(files.files.map((file) => file.path)).toContain('snapshot.txt');
+
+    const diffResponse = await call('GET', `${repoPath}/${number}/diff?${pageQuery}`, undefined, snapshotOwnerCookie);
+    expect(diffResponse.status).toBe(200);
+    const diff = await responseJson<{ snapshot: typeof snapshot; files: { path: string; diff: string }[] }>(diffResponse);
+    expect(diff.snapshot).toEqual(snapshot);
+    expect(diff.files).toHaveLength(1);
+    expect(diff.files[0]?.path).toBe('snapshot.txt');
+    expect(diff.files[0]?.diff).toContain('+first version');
+
+    await writeFile(join(work, 'snapshot.txt'), 'first version\nsecond version\n');
+    await git(['-C', work, 'add', 'snapshot.txt']);
+    await git(['-C', work, 'commit', '-m', 'Advance snapshot source']);
+    await git(['-C', work, 'push', 'origin', 'feature/snapshot']);
+    const advancedSourceSha = (await git(['--git-dir', bare, 'rev-parse', 'refs/heads/feature/snapshot'])).stdout.trim();
+    expect(advancedSourceSha).not.toBe(snapshot.sourceSha);
+
+    const beforeStaleRequests = await db.pullRequest.findUniqueOrThrow({ where: { id: createdPull.pullRequest.id } });
+    expect(beforeStaleRequests).toMatchObject({ status: 'OPEN', version: 1, sourceSha: snapshot.sourceSha, targetSha: snapshot.targetSha });
+    const mergeOperationCount = await db.pullRequestMergeOperation.count({ where: { pullRequestId: beforeStaleRequests.id } });
+    const pullAuditCount = await db.auditLog.count({ where: { targetId: beforeStaleRequests.id } });
+    const repositoryAuditCount = await db.auditLog.count({ where: { targetId: repository.id } });
+    const pushOperationCount = await db.gitPushOperation.count({ where: { repositoryId: repository.id } });
+
+    for (const section of ['commits', 'files', 'diff']) {
+      const staleResponse = await call('GET', `${repoPath}/${number}/${section}?${pageQuery}`, undefined, snapshotOwnerCookie);
+      expect(staleResponse.status).toBe(409);
+      expect(await responseJson<{ error: { code: string } }>(staleResponse))
+        .toMatchObject({ error: { code: 'STALE_COMPARE' } });
+    }
+
+    const afterStaleRequests = await db.pullRequest.findUniqueOrThrow({ where: { id: beforeStaleRequests.id } });
+    expect(afterStaleRequests).toMatchObject({ status: 'OPEN', version: beforeStaleRequests.version,
+      sourceSha: beforeStaleRequests.sourceSha, targetSha: beforeStaleRequests.targetSha });
+    expect(await db.pullRequestMergeOperation.count({ where: { pullRequestId: beforeStaleRequests.id } })).toBe(mergeOperationCount);
+    expect(await db.auditLog.count({ where: { targetId: beforeStaleRequests.id } })).toBe(pullAuditCount);
+    expect(await db.auditLog.count({ where: { targetId: repository.id } })).toBe(repositoryAuditCount);
+    expect(await db.gitPushOperation.count({ where: { repositoryId: repository.id } })).toBe(pushOperationCount);
+    expect((await git(['--git-dir', bare, 'rev-parse', 'refs/heads/feature/snapshot'])).stdout.trim()).toBe(advancedSourceSha);
+    expect((await git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).stdout.trim()).toBe(snapshot.targetSha);
+  });
+
   it('lets a PR author and repository owner update lifecycle state while denying other WRITE members', async () => {
     const ownerRegistration = await call('POST', 'auth/register', {
       username: 'LifecycleOwner', email: 'lifecycle-owner@example.test', password: 'test-password-123',
