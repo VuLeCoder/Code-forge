@@ -23,7 +23,7 @@ async function responseJson<T>(response: Response): Promise<T> {
   return await response.json() as T;
 }
 
-async function waitForAdvisoryLockWaiter(client: Client, applicationName: string, timeoutMs: number) {
+async function waitForAdvisoryLockWaiter(client: Client, applicationName: string, timeoutMs: number, minimumWaiters = 1) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const result = await client.query<{ count: number }>(`SELECT COUNT(*)::int AS count
@@ -33,10 +33,10 @@ async function waitForAdvisoryLockWaiter(client: Client, applicationName: string
         AND activity.pid <> pg_backend_pid() AND activity.wait_event_type = 'Lock'
         AND activity.wait_event = 'advisory' AND activity.query ILIKE '%pg_advisory_lock%'
         AND lock.locktype = 'advisory' AND NOT lock.granted`, [applicationName]);
-    if ((result.rows[0]?.count ?? 0) > 0) return;
+    if ((result.rows[0]?.count ?? 0) >= minimumWaiters) return;
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
   }
-  throw new Error('Merge request did not enter the repository advisory-lock wait queue.');
+  throw new Error(`Expected ${minimumWaiters} request(s) in the repository advisory-lock wait queue.`);
 }
 
 function killChildProcessTree(child: ChildProcessWithoutNullStreams) {
@@ -474,6 +474,96 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
         .toBe(operationCountBefore);
       expect(await db.auditLog.count({ where: { targetId: created.pullRequest.id, action: 'PULL_REQUEST_MERGED' } }))
         .toBe(successAuditCountBefore);
+    } finally {
+      if (barrierLockHeld) await barrier.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [repository.id]).catch(() => undefined);
+      await barrier.end();
+    }
+  }, 60_000);
+
+  it('rejects a queued merge when an earlier queued PR edit advances its version', async () => {
+    const registration = await call('POST', 'auth/register', {
+      username: 'MergeStaleVersionOwner', email: 'merge-stale-version-owner@example.test', password: 'test-password-123',
+    }, '');
+    expect(registration.status).toBe(201);
+    const staleOwnerCookie = cookie(registration);
+
+    const repositoryResponse = await call('POST', 'repositories', {
+      name: 'MergeStaleVersion', visibility: 'PRIVATE', initializeReadme: true,
+    }, staleOwnerCookie);
+    expect(repositoryResponse.status).toBe(201);
+    const { repository } = await responseJson<{ repository: { id: string } }>(repositoryResponse);
+    const storedRepository = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
+    const bare = join(storageRoot, storedRepository.storageKey);
+    const work = join(storageRoot, 'merge-stale-version-clone');
+    const git = (args: string[]) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    git(['clone', bare, work]);
+    git(['-C', work, 'config', 'user.name', 'Merge Stale Version Owner']);
+    git(['-C', work, 'config', 'user.email', 'merge-stale-version-owner@example.test']);
+    git(['-C', work, 'switch', '-c', 'feature/stale-version']);
+    await writeFile(join(work, 'stale-version.txt'), 'stale version fixture\n');
+    git(['-C', work, 'add', 'stale-version.txt']);
+    git(['-C', work, 'commit', '-m', 'Create stale version fixture']);
+    git(['-C', work, 'push', '--set-upstream', 'origin', 'feature/stale-version']);
+
+    const repoPath = 'repos/mergestaleversion/mergestaleversion/pulls';
+    const createdResponse = await call('POST', repoPath, {
+      title: 'Queued title v1', sourceBranch: 'feature/stale-version', targetBranch: 'main',
+    }, staleOwnerCookie);
+    expect(createdResponse.status).toBe(201);
+    const created = await responseJson<{ pullRequest: { id: string; number: number; version: number } }>(createdResponse);
+    expect(created.pullRequest.version).toBe(1);
+    const detailPath = `${repoPath}/${created.pullRequest.number}`;
+    const comparisonResponse = await call('GET', `${detailPath}/compare`, undefined, staleOwnerCookie);
+    expect(comparisonResponse.status).toBe(200);
+    const comparison = await responseJson<{ state: string; sourceSha: string; targetSha: string; storageGeneration: number }>(comparisonResponse);
+    expect(comparison.state).toBe('READY');
+
+    const refsBefore = git(['--git-dir', bare, 'for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)', 'refs/']);
+    const mergeOperationsBefore = await db.pullRequestMergeOperation.count({ where: { pullRequestId: created.pullRequest.id } });
+    const mergeAuditsBefore = await db.auditLog.count({ where: { targetId: created.pullRequest.id, action: 'PULL_REQUEST_MERGED' } });
+    expect(mergeOperationsBefore).toBe(0);
+    expect(mergeAuditsBefore).toBe(0);
+
+    const barrierUrl = new URL(process.env.DATABASE_URL_UNPOOLED!);
+    barrierUrl.searchParams.set('application_name', `${lockApplicationName}-stale-version-barrier`);
+    const barrier = new Client({ connectionString: barrierUrl.toString(), connectionTimeoutMillis: 5_000 });
+    let barrierLockHeld = false;
+    try {
+      await barrier.connect();
+      await barrier.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [repository.id]);
+      barrierLockHeld = true;
+
+      const editRequest = call('PATCH', detailPath, { title: 'Queued title v2' }, staleOwnerCookie);
+      await waitForAdvisoryLockWaiter(barrier, lockApplicationName, 10_000, 1);
+
+      const mergeRequest = call('POST', `${detailPath}/merge`, {
+        operationId: randomUUID(), expectedSourceSha: comparison.sourceSha, expectedTargetSha: comparison.targetSha,
+        storageGeneration: comparison.storageGeneration, version: created.pullRequest.version,
+      }, staleOwnerCookie);
+      await waitForAdvisoryLockWaiter(barrier, lockApplicationName, 10_000, 2);
+
+      const unlocked = await barrier.query<{ pg_advisory_unlock: boolean }>(
+        'SELECT pg_advisory_unlock(hashtextextended($1, 0))', [repository.id]);
+      expect(unlocked.rows[0]?.pg_advisory_unlock).toBe(true);
+      barrierLockHeld = false;
+
+      const editResponse = await editRequest;
+      expect(editResponse.status).toBe(200);
+      expect(await responseJson<{ pullRequest: { title: string; status: string; version: number } }>(editResponse))
+        .toMatchObject({ pullRequest: { title: 'Queued title v2', status: 'OPEN', version: 2 } });
+
+      const mergeResponse = await mergeRequest;
+      expect(mergeResponse.status).toBe(409);
+      expect(await responseJson<{ error: { code: string } }>(mergeResponse))
+        .toMatchObject({ error: { code: 'STALE_COMPARE' } });
+      expect(git(['--git-dir', bare, 'for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)', 'refs/']))
+        .toBe(refsBefore);
+      expect(await db.pullRequest.findUniqueOrThrow({ where: { id: created.pullRequest.id } }))
+        .toMatchObject({ title: 'Queued title v2', status: 'OPEN', version: 2, mergeCommitSha: null, mergedById: null });
+      expect(await db.pullRequestMergeOperation.count({ where: { pullRequestId: created.pullRequest.id } }))
+        .toBe(mergeOperationsBefore);
+      expect(await db.auditLog.count({ where: { targetId: created.pullRequest.id, action: 'PULL_REQUEST_MERGED' } }))
+        .toBe(mergeAuditsBefore);
     } finally {
       if (barrierLockHeld) await barrier.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [repository.id]).catch(() => undefined);
       await barrier.end();
