@@ -262,6 +262,75 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     expect((await git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).stdout.trim()).toBe(snapshot.targetSha);
   }, 60_000);
 
+  it('rejects pull request creation for unrelated histories without side effects', async () => {
+    const registration = await call('POST', 'auth/register', {
+      username: 'UnrelatedOwner', email: 'unrelated-owner@example.test', password: 'test-password-123',
+    }, '');
+    expect(registration.status).toBe(201);
+    const unrelatedOwnerCookie = cookie(registration);
+
+    const repositoryResponse = await call('POST', 'repositories', {
+      name: 'UnrelatedDemo', visibility: 'PRIVATE', initializeReadme: true,
+    }, unrelatedOwnerCookie);
+    expect(repositoryResponse.status).toBe(201);
+    const { repository } = await responseJson<{ repository: { id: string } }>(repositoryResponse);
+    const storedRepository = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
+
+    const tokenResponse = await call('POST', 'tokens', {
+      name: 'Unrelated history E2E', scopes: ['repo:read', 'repo:write'],
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+    }, unrelatedOwnerCookie);
+    expect(tokenResponse.status).toBe(201);
+    const { secret } = await responseJson<{ secret: string }>(tokenResponse);
+
+    const askpass = join(storageRoot, 'unrelated-askpass.sh');
+    await writeFile(askpass,
+      '#!/bin/sh\ncase "$1" in *Username*) printf "%s\\n" "$TEST_GIT_USER" ;; *) printf "%s\\n" "$TEST_GIT_PAT" ;; esac\n',
+      { mode: 0o700 });
+    const runGit = promisify(execFile);
+    const git = (args: string[]) => runGit('git', ['-c', 'credential.helper=', ...args], {
+      timeout: 20_000,
+      env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(storageRoot, 'empty-git-config'),
+        GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: askpass, TEST_GIT_USER: 'UnrelatedOwner', TEST_GIT_PAT: secret },
+    });
+    const bare = join(storageRoot, storedRepository.storageKey);
+    const repoUrl = `${base}/git/UnrelatedOwner/UnrelatedDemo.git`;
+    const work = join(storageRoot, 'unrelated-writer-clone');
+    await git(['clone', repoUrl, work]);
+    await git(['-C', work, 'config', 'user.name', 'Unrelated Owner']);
+    await git(['-C', work, 'config', 'user.email', 'unrelated-owner@example.test']);
+    await git(['-C', work, 'switch', '--orphan', 'feature/unrelated']);
+    await git(['-C', work, 'rm', '-rf', '.']);
+    await writeFile(join(work, 'unrelated.txt'), 'This root commit has no shared history.\n');
+    await git(['-C', work, 'add', 'unrelated.txt']);
+    await git(['-C', work, 'commit', '-m', 'Create unrelated root history']);
+    await git(['-C', work, 'push', '--set-upstream', 'origin', 'feature/unrelated']);
+
+    const targetShaBefore = (await git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).stdout.trim();
+    const sourceShaBefore = (await git(['--git-dir', bare, 'rev-parse', 'refs/heads/feature/unrelated'])).stdout.trim();
+    expect(sourceShaBefore).not.toBe(targetShaBefore);
+    const owner = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'unrelatedowner' } });
+    const pullCountBefore = await db.pullRequest.count({ where: { repositoryId: repository.id } });
+    const mergeOperationCountBefore = await db.pullRequestMergeOperation.count({ where: { repositoryId: repository.id } });
+    const auditCountBefore = await db.auditLog.count({ where: { actorId: owner.id } });
+    const pushOperationCountBefore = await db.gitPushOperation.count({ where: { repositoryId: repository.id } });
+
+    const createPull = await call('POST', 'repos/unrelatedowner/unrelateddemo/pulls', {
+      title: 'Reject unrelated history', description: 'There is no common ancestor to compare or merge.',
+      sourceBranch: 'feature/unrelated', targetBranch: 'main',
+    }, unrelatedOwnerCookie);
+    expect(createPull.status).toBe(409);
+    expect(await responseJson<{ error: { code: string } }>(createPull))
+      .toMatchObject({ error: { code: 'NO_MERGE_BASE' } });
+
+    expect(await db.pullRequest.count({ where: { repositoryId: repository.id } })).toBe(pullCountBefore);
+    expect(await db.pullRequestMergeOperation.count({ where: { repositoryId: repository.id } })).toBe(mergeOperationCountBefore);
+    expect(await db.auditLog.count({ where: { actorId: owner.id } })).toBe(auditCountBefore);
+    expect(await db.gitPushOperation.count({ where: { repositoryId: repository.id } })).toBe(pushOperationCountBefore);
+    expect((await git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).stdout.trim()).toBe(targetShaBefore);
+    expect((await git(['--git-dir', bare, 'rev-parse', 'refs/heads/feature/unrelated'])).stdout.trim()).toBe(sourceShaBefore);
+  }, 60_000);
+
   it('lets a PR author and repository owner update lifecycle state while denying other WRITE members', async () => {
     const ownerRegistration = await call('POST', 'auth/register', {
       username: 'LifecycleOwner', email: 'lifecycle-owner@example.test', password: 'test-password-123',
