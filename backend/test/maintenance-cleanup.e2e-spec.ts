@@ -35,6 +35,7 @@ describe('MaintenanceJobsService PostgreSQL cleanup and purge', () => {
   let db: PrismaClient | undefined;
   let locks: RepositoryLockService | undefined;
   let maintenance: MaintenanceJobsService | undefined;
+  let purgeService: RepositoryPurgeService | undefined;
   let originalUrl: string | undefined;
   let originalUnpooledUrl: string | undefined;
   let originalStorage: string | undefined;
@@ -77,8 +78,8 @@ describe('MaintenanceJobsService PostgreSQL cleanup and purge', () => {
     jest.spyOn(storage, 'cleanupOrphanedTemporaryDirectories').mockResolvedValue(0);
     locks = new RepositoryLockService(config);
     const pushJournal = new GitPushJournalService(db as never, storage, locks);
-    const purge = new RepositoryPurgeService(db as never, storage, locks, pushJournal);
-    maintenance = new MaintenanceJobsService(db as never, locks, storage, purge, pushJournal);
+    purgeService = new RepositoryPurgeService(db as never, storage, locks, pushJournal);
+    maintenance = new MaintenanceJobsService(db as never, locks, storage, purgeService, pushJournal);
   }, 60_000);
 
   afterAll(async () => {
@@ -234,5 +235,43 @@ describe('MaintenanceJobsService PostgreSQL cleanup and purge', () => {
     await maintenance.runOnce();
     expect(await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId: operation.operationId } }))
       .toMatchObject({ status: 'NEEDS_RECONCILIATION', errorCode: 'REF_OUTCOME_UNKNOWN' });
+  });
+
+  it('retains expired repository storage while a merge journal needs reconciliation', async () => {
+    if (!db || !purgeService || !storageRoot) throw new Error('Maintenance test fixture was not initialized.');
+    const owner = await db.user.create({ data: {
+      username: 'PurgeJournalOwner', normalizedUsername: 'purgejournalowner',
+      email: 'purge-journal-owner@example.test', normalizedEmail: 'purge-journal-owner@example.test', passwordHash: 'test-hash',
+    } });
+    const repositoryId = randomUUID();
+    const storageKey = `${repositoryId}.git`;
+    const repository = await db.repository.create({ data: {
+      id: repositoryId, ownerId: owner.id, name: 'PurgeJournal', normalizedName: 'purgejournal', storageKey,
+      status: 'DELETED', deletedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+      purgeAfter: new Date(Date.now() - 1000),
+    } });
+    const pullRequest = await db.pullRequest.create({ data: {
+      repositoryId: repository.id, number: 1, authorId: owner.id, title: 'Unresolved merge',
+      sourceBranch: 'feature/recovery', targetBranch: 'main', storageGeneration: repository.storageGeneration,
+      sourceSha: 'a'.repeat(40), targetSha: 'b'.repeat(40),
+    } });
+    const operationId = randomUUID();
+    await db.pullRequestMergeOperation.create({ data: {
+      operationId, repositoryId: repository.id, pullRequestId: pullRequest.id, actorId: owner.id,
+      storageGeneration: repository.storageGeneration, expectedSourceSha: pullRequest.sourceSha,
+      expectedTargetSha: pullRequest.targetSha, oldTargetSha: pullRequest.targetSha,
+      status: 'NEEDS_RECONCILIATION', errorCode: 'MERGE_OUTCOME_UNKNOWN',
+    } });
+    const storagePath = join(storageRoot, storageKey);
+    await mkdir(storagePath);
+
+    expect(await purgeService.purgeDue()).toBe(0);
+    expect(await db.repository.findUnique({ where: { id: repository.id } })).not.toBeNull();
+    expect(await pathExists(storagePath)).toBe(true);
+
+    await db.pullRequestMergeOperation.update({ where: { operationId }, data: { status: 'FAILED' } });
+    expect(await purgeService.purgeDue()).toBe(1);
+    expect(await db.repository.findUnique({ where: { id: repository.id } })).toBeNull();
+    expect(await pathExists(storagePath)).toBe(false);
   });
 });
