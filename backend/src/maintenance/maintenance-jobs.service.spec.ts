@@ -275,10 +275,24 @@ describe('MaintenanceJobsService', () => {
 
     await fixture.internals.reconcileMerges();
 
-    expect(fixture.db.pullRequestMergeOperation.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: {
-      status: { in: ['PENDING', 'NEEDS_RECONCILIATION'] },
-      OR: [{ errorCode: null }, { errorCode: { not: 'CROSS_TYPE_OPERATION_UNRESOLVED' } }],
-    } }));
+    const mergeCalls = fixture.db.pullRequestMergeOperation.findMany.mock.calls as unknown as unknown[][];
+    const query = mergeCalls[0]?.[0] as {
+      where: {
+        OR: Array<{ status?: string; createdAt?: { lte?: unknown } }>;
+        AND: Array<{ OR: Array<{ errorCode: null | { not: string } }> }>;
+      };
+    } | undefined;
+    expect(query?.where.OR[0]?.status).toBe('PENDING');
+    const pendingCutoff = query?.where.OR[0]?.createdAt?.lte;
+    expect(pendingCutoff).toBeInstanceOf(Date);
+    const cutoffDelta = Date.now() - (pendingCutoff as Date).getTime();
+    expect(cutoffDelta).toBeGreaterThanOrEqual(119_000);
+    expect(cutoffDelta).toBeLessThanOrEqual(121_000);
+    expect(query?.where.OR[1]?.status).toBe('NEEDS_RECONCILIATION');
+    expect(query?.where.OR[1]?.createdAt).toBeUndefined();
+    expect(query?.where.AND[0]?.OR).toEqual([
+      { errorCode: null }, { errorCode: { not: 'CROSS_TYPE_OPERATION_UNRESOLVED' } },
+    ]);
     expect(fixture.pushJournal.assertNoUnresolvedPush).toHaveBeenCalledWith(fixture.operation.repositoryId);
     expect(fixture.storage.branchSha).not.toHaveBeenCalled();
     expect(fixture.db.pullRequestMergeOperation.updateMany).toHaveBeenCalledWith({ where: {

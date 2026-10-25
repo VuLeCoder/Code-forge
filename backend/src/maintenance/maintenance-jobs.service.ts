@@ -6,6 +6,7 @@ import { RepositoryPurgeService } from '../repositories/repository-purge.service
 import { GitPushJournalService } from '../repositories/git-push-journal.service';
 
 const CROSS_TYPE_UNRESOLVED = 'CROSS_TYPE_OPERATION_UNRESOLVED';
+const MERGE_RECONCILIATION_GRACE_MS = 120_000;
 
 @Injectable()
 export class MaintenanceJobsService implements OnModuleInit, OnModuleDestroy {
@@ -89,9 +90,12 @@ export class MaintenanceJobsService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async reconcileMerges() {
+    const cutoff = new Date(Date.now() - MERGE_RECONCILIATION_GRACE_MS);
     const candidates = await this.db.pullRequestMergeOperation.findMany({
-      where: { status: { in: ['PENDING', 'NEEDS_RECONCILIATION'] },
-        OR: [{ errorCode: null }, { errorCode: { not: CROSS_TYPE_UNRESOLVED } }] },
+      where: { OR: [
+        { status: 'PENDING', createdAt: { lte: cutoff } },
+        { status: 'NEEDS_RECONCILIATION' },
+      ], AND: [{ OR: [{ errorCode: null }, { errorCode: { not: CROSS_TYPE_UNRESOLVED } }] }] },
       orderBy: [{ updatedAt: 'asc' }, { operationId: 'asc' }], take: 25,
       select: { operationId: true, repositoryId: true },
     });

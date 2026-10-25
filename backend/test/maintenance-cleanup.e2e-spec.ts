@@ -191,4 +191,44 @@ describe('MaintenanceJobsService PostgreSQL cleanup and purge', () => {
     expect(await Promise.all([retainedDeletedRepo, activeWithOldPurgeDate, anchorRepo]
       .map(({ storageKey }) => pathExists(join(gitStorageRoot, storageKey))))).toEqual([true, true, true]);
   });
+
+  it('keeps a newly pending merge journal unresolved until its process-exit grace has elapsed', async () => {
+    if (!db || !maintenance) throw new Error('Maintenance test fixture was not initialized.');
+    const owner = await db.user.create({ data: {
+      username: 'MergeGraceOwner', normalizedUsername: 'mergegraceowner',
+      email: 'merge-grace-owner@example.test', normalizedEmail: 'merge-grace-owner@example.test', passwordHash: 'test-hash',
+    } });
+    const repository = await db.repository.create({ data: {
+      ownerId: owner.id, name: 'MergeGrace', normalizedName: 'mergegrace', storageKey: `${randomUUID()}.git`,
+    } });
+    const pullRequest = await db.pullRequest.create({ data: {
+      repositoryId: repository.id, number: 1, authorId: owner.id, title: 'Recovery grace',
+      sourceBranch: 'feature/recovery', targetBranch: 'main', storageGeneration: repository.storageGeneration,
+      sourceSha: 'a'.repeat(40), targetSha: 'b'.repeat(40),
+    } });
+    const operation = await db.pullRequestMergeOperation.create({ data: {
+      operationId: randomUUID(), repositoryId: repository.id, pullRequestId: pullRequest.id, actorId: owner.id,
+      storageGeneration: repository.storageGeneration, expectedSourceSha: pullRequest.sourceSha,
+      expectedTargetSha: pullRequest.targetSha, oldTargetSha: pullRequest.targetSha,
+      createdAt: new Date(Date.now() - 30_000),
+    } });
+    const immediateOperation = await db.pullRequestMergeOperation.create({ data: {
+      operationId: randomUUID(), repositoryId: repository.id, pullRequestId: pullRequest.id, actorId: owner.id,
+      storageGeneration: repository.storageGeneration, expectedSourceSha: pullRequest.sourceSha,
+      expectedTargetSha: pullRequest.targetSha, oldTargetSha: pullRequest.targetSha,
+      status: 'NEEDS_RECONCILIATION', errorCode: 'RECONCILIATION_UNAVAILABLE', createdAt: new Date(),
+    } });
+
+    await maintenance.runOnce();
+    expect((await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId: operation.operationId } }))
+      .status).toBe('PENDING');
+    expect(await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId: immediateOperation.operationId } }))
+      .toMatchObject({ status: 'NEEDS_RECONCILIATION', errorCode: 'REF_OUTCOME_UNKNOWN' });
+
+    await db.pullRequestMergeOperation.update({ where: { operationId: operation.operationId },
+      data: { createdAt: new Date(Date.now() - 121_000) } });
+    await maintenance.runOnce();
+    expect(await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId: operation.operationId } }))
+      .toMatchObject({ status: 'NEEDS_RECONCILIATION', errorCode: 'REF_OUTCOME_UNKNOWN' });
+  });
 });
