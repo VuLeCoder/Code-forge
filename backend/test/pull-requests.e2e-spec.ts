@@ -300,7 +300,6 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     await git(['-C', work, 'config', 'user.name', 'Unrelated Owner']);
     await git(['-C', work, 'config', 'user.email', 'unrelated-owner@example.test']);
     await git(['-C', work, 'switch', '--orphan', 'feature/unrelated']);
-    await git(['-C', work, 'rm', '-rf', '.']);
     await writeFile(join(work, 'unrelated.txt'), 'This root commit has no shared history.\n');
     await git(['-C', work, 'add', 'unrelated.txt']);
     await git(['-C', work, 'commit', '-m', 'Create unrelated root history']);
