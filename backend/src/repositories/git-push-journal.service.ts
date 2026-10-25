@@ -89,7 +89,7 @@ export class GitPushJournalService {
     }
   }
 
-  async reconcileOne(operationId: string) {
+  private async reconcileOne(operationId: string) {
     const operation = await this.db.gitPushOperation.findUnique({ where: { operationId }, include: { repository: true } });
     if (!operation || !UNRESOLVED.includes(operation.status as typeof UNRESOLVED[number])) return;
     if (operation.storageGeneration !== operation.repository.storageGeneration) {

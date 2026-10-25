@@ -123,7 +123,7 @@ export class MaintenanceJobsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async reconcileOperation(operationId: string) {
+  private async reconcileOperation(operationId: string) {
     const operation = await this.db.pullRequestMergeOperation.findUnique({ where: { operationId }, include: { repository: true, pullRequest: true } });
     if (!operation || !['PENDING', 'NEEDS_RECONCILIATION'].includes(operation.status)) return;
     if (operation.storageGeneration !== operation.repository.storageGeneration) {
