@@ -4,9 +4,10 @@ import { AdminController } from './admin.controller';
 import { AdminGuard } from './admin.guard';
 import { AdminService } from './admin.service';
 import { RepositoriesModule } from '../repositories/repositories.module';
+import { MaintenanceModule } from '../maintenance/maintenance.module';
 
 @Module({
-  imports: [AuthModule, RepositoriesModule],
+  imports: [AuthModule, RepositoriesModule, MaintenanceModule],
   controllers: [AdminController],
   providers: [AdminService, AdminGuard],
 })

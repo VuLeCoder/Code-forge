@@ -28,10 +28,14 @@
 .tableWrap td strong, .tableWrap td small { display: block; }
 .tableWrap td small { max-width: 25rem; margin-top: .25rem; color: var(--muted); overflow-wrap: anywhere; }
 .tableWrap code { overflow-wrap: anywhere; font-size: .8rem; }
-.statusActive, .statusLocked { display: inline-flex; align-items: center; padding: .28rem .55rem; border-radius: 999px; font-size: .74rem; font-weight: 750; white-space: nowrap; }
+.statusActive, .statusLocked, .statusPending { display: inline-flex; align-items: center; padding: .28rem .55rem; border-radius: 999px; font-size: .74rem; font-weight: 750; white-space: nowrap; }
 .statusActive { color: #126237; background: #eaf7ef; }
 .statusLocked { color: #8f1d26; background: #fff0f0; }
+.statusPending { color: #8a5700; background: #fff8e6; }
 .tableButton, .inlineButton { border: 0; color: var(--brand-700); background: transparent; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.actionGroup { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+.dialogField { display: grid; gap: .45rem; font-size: .88rem; font-weight: 600; text-align: left; }
+.dialogField select { width: 100%; min-height: 42px; padding: .55rem .7rem; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: .88rem; }
 .muted { color: var(--muted); font-size: .82rem; }
 .empty { padding: 2rem 1rem; text-align: center; color: var(--muted); background: var(--surface); border: 1px dashed var(--border); border-radius: var(--radius-md); }
 .pagination { display: flex; align-items: center; justify-content: space-between; gap: 1rem; color: var(--muted); font-size: .86rem; }
