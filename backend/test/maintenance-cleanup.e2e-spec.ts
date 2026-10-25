@@ -319,5 +319,32 @@ describe('MaintenanceJobsService PostgreSQL cleanup and purge', () => {
     expect(await purgeService.purgeDue()).toBe(1);
     expect(await db.repository.findUnique({ where: { id: repository.id } })).toBeNull();
     expect(await pathExists(storagePath)).toBe(false);
+
+    const needsOnlyRepositoryId = randomUUID();
+    const needsOnlyStorageKey = `${needsOnlyRepositoryId}.git`;
+    const needsOnlyRepository = await db.repository.create({ data: {
+      id: needsOnlyRepositoryId, ownerId: owner.id, name: 'PurgeNeedsOnly', normalizedName: 'purgeneedsonly',
+      storageKey: needsOnlyStorageKey, status: 'DELETED', deletedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+      purgeAfter: new Date(Date.now() - 1000),
+    } });
+    const needsOnlyOperationId = randomUUID();
+    await db.gitPushOperation.create({ data: {
+      operationId: needsOnlyOperationId, repositoryId: needsOnlyRepository.id, actorId: owner.id,
+      storageGeneration: needsOnlyRepository.storageGeneration, beforeRefs: {},
+      status: 'NEEDS_RECONCILIATION', errorCode: 'GIT_CHILD_OUTCOME_UNKNOWN',
+    } });
+    const needsOnlyStoragePath = join(storageRoot, needsOnlyStorageKey);
+    await mkdir(needsOnlyStoragePath);
+
+    expect(await purgeService.purgeDue()).toBe(0);
+    expect(await db.repository.findUnique({ where: { id: needsOnlyRepository.id } })).not.toBeNull();
+    expect(await db.gitPushOperation.findUnique({ where: { operationId: needsOnlyOperationId } }))
+      .toMatchObject({ status: 'NEEDS_RECONCILIATION', errorCode: 'GIT_CHILD_OUTCOME_UNKNOWN' });
+    expect(await pathExists(needsOnlyStoragePath)).toBe(true);
+
+    await db.gitPushOperation.update({ where: { operationId: needsOnlyOperationId }, data: { status: 'FAILED' } });
+    expect(await purgeService.purgeDue()).toBe(1);
+    expect(await db.repository.findUnique({ where: { id: needsOnlyRepository.id } })).toBeNull();
+    expect(await pathExists(needsOnlyStoragePath)).toBe(false);
   });
 });
