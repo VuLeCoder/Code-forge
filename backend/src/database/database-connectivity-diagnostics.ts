@@ -1,10 +1,12 @@
 import { lookup } from 'node:dns/promises';
 import { createConnection, isIP } from 'node:net';
 import type { LookupAddress } from 'node:dns';
+import { Client } from 'pg';
 
 export const DATABASE_CONNECTIVITY_DIAGNOSTICS_ENV = 'DATABASE_CONNECTIVITY_DIAGNOSTICS';
 export const DATABASE_CONNECTIVITY_PROBE_TIMEOUT_MS = 1_000;
-export const PRISMA_RUNTIME_CONNECT_TIMEOUT_SECONDS = 10;
+export const DATABASE_POSTGRES_PROBE_TIMEOUT_MS = 15_000;
+export const PRISMA_RUNTIME_CONNECT_TIMEOUT_SECONDS = 15;
 
 export type ConnectivityOutcome = 'ok' | 'failed' | 'skipped';
 
@@ -13,6 +15,7 @@ export interface DatabaseConnectivityDiagnostic {
   port: number;
   dns: ConnectivityOutcome;
   tcp: ConnectivityOutcome;
+  postgres: ConnectivityOutcome;
   elapsedMs: number;
   errorCode: string;
 }
@@ -20,6 +23,21 @@ export interface DatabaseConnectivityDiagnostic {
 export interface DatabaseConnectivityProbeDependencies {
   lookup: (hostname: string) => Promise<LookupAddress[]>;
   connect: (hostname: string, port: number, timeoutMs: number) => Promise<void>;
+  connectPostgres: (connectionString: string, timeoutMs: number) => Promise<void>;
+}
+
+export async function connectPostgres(connectionString: string, timeoutMs: number): Promise<void> {
+  const client = new Client({ connectionString, connectionTimeoutMillis: timeoutMs });
+  let connected = false;
+  try {
+    await client.connect();
+    connected = true;
+  } finally {
+    // A failed startup handshake may leave the client in a connecting state; calling end()
+    // then can wait for a server response that will never arrive. pg destroys the socket
+    // when its connectionTimeoutMillis expires and closes it on connection errors.
+    if (connected) await client.end().catch(() => undefined);
+  }
 }
 
 const dependencies: DatabaseConnectivityProbeDependencies = {
@@ -27,12 +45,13 @@ const dependencies: DatabaseConnectivityProbeDependencies = {
   // Source: https://nodejs.org/docs/latest-v24.x/api/dns.html#dnslookuphostname-options-callback
   lookup: (hostname) => lookup(hostname, { all: true, order: 'verbatim' }),
   connect: connectTcp,
+  connectPostgres,
 };
 
 /**
- * Neon documents a 10-second connect_timeout workaround for Prisma cold starts;
- * Prisma v6's default is 5 seconds. Preserve any explicitly configured value.
- * Sources: https://neon.com/blog/prisma-dx-improvements
+ * Neon recommends a 15-second connect_timeout for Prisma connections during compute cold starts.
+ * Preserve any explicitly configured value.
+ * Source: https://neon.com/docs/guides/prisma#troubleshooting
  * https://www.prisma.io/docs/orm/v6/overview/databases/postgresql#arguments
  */
 export function withDefaultPrismaConnectTimeout(connectionString: string): string {
@@ -61,8 +80,14 @@ function safeHostname(hostname: string): string {
 
 function errorCode(error: unknown): string {
   if (typeof error === 'object' && error !== null && 'code' in error
-    && typeof error.code === 'string' && /^[A-Z0-9_]{1,32}$/.test(error.code)) {
-    return error.code;
+    && typeof error.code === 'string') {
+    if (/^[0-9A-Z]{5}$/.test(error.code)) return error.code;
+    if (/^ERR_(?:TLS|SSL)_/.test(error.code)) return 'TLS_ERROR';
+    const networkCodes = new Set([
+      'EACCES', 'EADDRNOTAVAIL', 'EAI_AGAIN', 'ECONNREFUSED', 'ECONNRESET',
+      'EHOSTUNREACH', 'ENETDOWN', 'ENETUNREACH', 'ENODATA', 'ENOTFOUND', 'EPIPE', 'ETIMEDOUT',
+    ]);
+    if (networkCodes.has(error.code)) return error.code;
   }
   return 'UNKNOWN';
 }
@@ -114,12 +139,13 @@ function invalidResult(startedAt: number, hostname = '<invalid-host>', port = 54
     port,
     dns: 'skipped',
     tcp: 'skipped',
+    postgres: 'skipped',
     elapsedMs: Math.max(0, Date.now() - startedAt),
     errorCode: 'INVALID_URL',
   };
 }
 
-/** Performs a short, read-free DNS and TCP probe; the result intentionally omits all URL credentials and IPs. */
+/** Performs bounded DNS, TCP, and PostgreSQL startup/authentication probes without issuing SQL. */
 export async function probeDatabaseConnectivity(
   connectionString: string,
   probeDependencies: DatabaseConnectivityProbeDependencies = dependencies,
@@ -151,12 +177,14 @@ export async function probeDatabaseConnectivity(
     if (addresses.length === 0) {
       return {
         hostname, port, dns: 'failed', tcp: 'skipped',
+        postgres: 'skipped',
         elapsedMs: Math.max(0, Date.now() - startedAt), errorCode: 'ENODATA',
       };
     }
   } catch (error) {
     return {
       hostname, port, dns: 'failed', tcp: 'skipped',
+      postgres: 'skipped',
       elapsedMs: Math.max(0, Date.now() - startedAt), errorCode: errorCode(error),
     };
   }
@@ -166,13 +194,23 @@ export async function probeDatabaseConnectivity(
       probeDependencies.connect(rawHostname, port, DATABASE_CONNECTIVITY_PROBE_TIMEOUT_MS),
       DATABASE_CONNECTIVITY_PROBE_TIMEOUT_MS,
     );
+  } catch (error) {
     return {
-      hostname, port, dns: 'ok', tcp: 'ok',
+      hostname, port, dns: 'ok', tcp: 'failed',
+      postgres: 'skipped',
+      elapsedMs: Math.max(0, Date.now() - startedAt), errorCode: errorCode(error),
+    };
+  }
+
+  try {
+    await probeDependencies.connectPostgres(connectionString, DATABASE_POSTGRES_PROBE_TIMEOUT_MS);
+    return {
+      hostname, port, dns: 'ok', tcp: 'ok', postgres: 'ok',
       elapsedMs: Math.max(0, Date.now() - startedAt), errorCode: 'NONE',
     };
   } catch (error) {
     return {
-      hostname, port, dns: 'ok', tcp: 'failed',
+      hostname, port, dns: 'ok', tcp: 'ok', postgres: 'failed',
       elapsedMs: Math.max(0, Date.now() - startedAt), errorCode: errorCode(error),
     };
   }

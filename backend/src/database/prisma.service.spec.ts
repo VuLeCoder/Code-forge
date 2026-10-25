@@ -31,7 +31,8 @@ describe('PrismaService', () => {
     process.env.DATABASE_CONNECTIVITY_DIAGNOSTICS = 'true';
     process.env.DATABASE_URL = 'postgresql://private-user:private-password@db.example.test/app?tag=private-query';
     jest.spyOn(connectivityDiagnostics, 'probeDatabaseConnectivity').mockResolvedValue({
-      hostname: 'db.example.test', port: 5432, dns: 'ok', tcp: 'failed', elapsedMs: 25, errorCode: 'ETIMEDOUT',
+      hostname: 'db.example.test', port: 5432, dns: 'ok', tcp: 'failed', postgres: 'skipped',
+      elapsedMs: 25, errorCode: 'ETIMEDOUT',
     });
     const log = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
     const service = new PrismaService();
@@ -42,6 +43,7 @@ describe('PrismaService', () => {
     const probeLog = log.mock.calls.map(([message]) => String(message)).find((message) => message.includes('Database connectivity probe'));
     expect(probeLog).toContain('"hostname":"db.example.test"');
     expect(probeLog).toContain('"tcp":"failed"');
+    expect(probeLog).toContain('"postgres":"skipped"');
     expect(probeLog).not.toMatch(/private-user|private-password|private-query/);
   });
 

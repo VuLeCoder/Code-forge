@@ -1,5 +1,17 @@
 # Code Forge completion checklist
 
+## Current open release gates (2026-10-25; supersedes older snapshots below)
+
+- Source baseline is `thviet` = `origin/thviet` = `4407e7d2e49d0e43aeb48b1e49ee96e986745a03`; hosted Actions [#92 / `40198015346`](https://github.com/VuLeCoder/Code-forge/actions/runs/40198015346) passed on the exact SHA.
+- [ ] Diagnose Render startup `P1001`. The deployed sanitized probe reported DNS/TCP `ok`; Neon UI showed public internet enabled, `Any IP`, IP allowlist unavailable. These facts do not prove DB authentication/SQL. Do not claim cloud migration or smoke passed.
+- [ ] Review the local candidate: default `connect_timeout=15` (explicit overrides preserved) plus an opt-in bounded PostgreSQL handshake probe. Full backend unit tests pass 20/20 suites / 166 tests, including a focused stalled-server test; backend lint/typecheck/build and `git diff --check` pass; read-only independent review found no actionable issue. Then push to `thviet`, deploy, and inspect safe probe/health/SQL evidence. Do not close Render issue unless the post-change evidence succeeds; no confirmed root cause yet.
+- [ ] Complete direct Render Git transport and release/recovery cloud smoke after connectivity is fixed; include restore from a local clone and document ephemeral source storage.
+- [ ] Close the remaining P3/P4 failure/recovery matrix and reconcile docs to exact release evidence.
+- [ ] Keep issue #6 fail-closed until owner authority/approval policy is decided. Vercel is deferred/out of scope per latest owner objective.
+- [ ] P0–P8 completion checkpoint: not achieved.
+
+AGY's 120-second static review timed out without usable output. Codex static security review had no actionable finding in the reviewed scope but did not run dynamic tests. Older checklist snapshots below are historical and may contain superseded run numbers or task states.
+
 Original plan snapshot: 2026-10-25 14:02 Asia/Saigon. See [plan](plan.md) for estimates, owner roles, skills, risks, and acceptance criteria.
 
 ## Current execution snapshot (2026-10-25)
@@ -20,6 +32,25 @@ Original plan snapshot: 2026-10-25 14:02 Asia/Saigon. See [plan](plan.md) for es
 - [ ] Checkpoint A: focused suites and independent code/security review green.
 - [x] T3: Open-handle root cause diagnosed and resolved in commit `1b0901b` (`git-http` streaming process timer unref and stop-cleanup). Backend E2E clean pass: 9 suites / 39 passed / 2 skipped with 0 open handles and clean command exit.
 - [x] T4 on `thviet`: hosted CI green on exact `25487b5` candidate SHA (run #77).
-- [ ] T5: Cloud P2/P8 smoke, backup/rollback/recovery; Render P1001 remains unresolved and Vercel Git access is owner-dependent.
+- [ ] T5: Cloud P2/P8 smoke, backup/rollback/recovery; Render P1001 remains unresolved. Vercel Git access is deferred/out of scope, not completed.
 - [ ] T6: Reconcile docs and hand off runbooks/evidence.
 - [ ] Final checkpoint: all P0–P8 acceptance evidence present; no cloud/source-durability claims beyond tests performed.
+
+## Current continuation tasks (verified 2026-10-25)
+
+These bounded items refine existing T1–T6 tasks; they do not replace unchecked plan items.
+
+- [x] **T1-AUTH-RACE:** Production logout/refresh family-revocation fix remains in `6d8c827`/`da020f9`. The deterministic two-client concurrency test and both auth-suite loopback `*_test` guards are integrated as `b1c2c2a`. Root serial reruns on the dedicated PostgreSQL test DB passed concurrency 1/1 and HTTP auth 8/8; backend typecheck/lint also passed. No production changes were made in this test-hardening slice.
+- [x] **T1-STORAGE-RESET:** Commit `71a0c48` adds `defaultBranch: main` API/DB assertions. Leader reran `repositories.e2e-spec.ts -t "serializes completed push before missing-storage recovery"` on the dedicated loopback `code_forge_test` DB: 1 passed, 14 intentionally skipped, exit 0. The test checks recovery waits behind push, push journal/audit/ref durability, generation 0→1, repository/API default branch `main`, and recreated Git HEAD `refs/heads/main`.
+- [x] **T1-PR-SNAPSHOT:** Integrated as `c380bac` plus explicit 60-second timeout `52face3`. Root focused real-PostgreSQL/Git rerun passed the snapshot consistency/stale-subrequest test (10 other cases intentionally skipped).
+- [x] **T1-NO-MERGE-BASE:** Integrated as `22d94a5` with orphan fixture correction `6c3a6c3`. Root focused real-PostgreSQL/Git rerun passed the unrelated-history `409 NO_MERGE_BASE` contract; the test verifies no refs, PR, merge operation, audit, or push-operation mutation (10 other cases intentionally skipped).
+- [x] **T2-BOOTSTRAP-SECURITY:** Static review found no secret/privilege defect. Commits `19a908c` and `4b43f71` redact bootstrap test failures and cover repeat-bootstrap idempotence; leader reran the dedicated PostgreSQL E2E 4/4. This closes only bootstrap secret/idempotence acceptance, not the entire P6 admin matrix.
+- [ ] **T5-RENDER-NEON:** Read-only audit confirms runtime/migration image contract but no tracked Render blueprint; root cause of Prisma `P1001` remains unknown. After backend acceptance, use the sanitized bounded connectivity probe on the exact deployed release, verify dashboard values without exposing them, then smoke deploy. No secrets in chat/repo; Vercel is out of scope.
+- [x] **T5-ADMIN-A11Y:** AGY's corrected three-file change was reviewed and integrated as `af80826`. Mobile keeps semantic table headers in the accessibility tree and uses `data-label` for visual cards. Root reran frontend lint, typecheck, Playwright 4/4 (`admin.spec.ts` + `admin-accessibility.spec.ts`) at 1280×800 and 375×812, and `git diff --check`. One earlier combined invocation flaked at the existing narrow dialog focus step; isolated narrow and subsequent full suite both passed. No API, permission, or mutation behavior changed.
+
+- [x] **T2-ADMIN-STATUS-GUARD:** Agent added a unit regression proving deleted repositories cannot be reactivated through the generic status route, with no update/audit and lock released; integrated as `4d0f6a3`, focused spec 6/6 passed.
+- [x] **T2-ADMIN-ROUTE-GUARDS:** Agent added metadata tests for class-level access-token/admin guards and same-origin protection on all mutations; integrated as `7bbe25f`, focused spec 4/4 passed.
+- [x] **T3-BACKEND-REGRESSION:** On the dedicated loopback `code_forge_test` DB, lock E2E passed 2 with 1 POSIX-only Windows skip; repository E2E passed 15/15; complete backend E2E passed 10/10 suites, 49 passed / 2 skipped, exit 0; backend unit passed 20/20 suites / 161 tests. Backend lint/typecheck/build and `git diff --check` passed. Both API and migration Docker images built and passed contents/tooling smoke. Hosted CI and cloud smoke are still separate open gates.
+- [x] **T1-PR-PRIVATE-READ:** Added and independently reviewed E2E assertions requiring anonymous and authenticated non-members to receive 404 with no private markers on PR list/detail/compare/commits/files/diff. Included in the passing full backend E2E run.
+- [ ] **T3-REGRESSION-PUSH:** Review the local database diagnostic source/tests and pending intended backend tests; commit only approved code/test paths, preserve unrelated dirty documentation/config files, push only to `thviet`, and inspect hosted CI on the exact resulting SHA. Never push `main`.
+- [ ] **T5-RENDER-NEON:** Root cause of Render Prisma `P1001` remains unknown. Local opt-in probe now tests a PostgreSQL handshake after DNS/TCP, but has not been deployed. Deploy the reviewed/pushed candidate, inspect only sanitized outcomes, verify endpoint/branch/database mapping without exposing values, and require a successful DB readiness/SQL check before migration or cloud smoke.

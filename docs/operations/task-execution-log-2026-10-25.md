@@ -7,6 +7,43 @@ or private cloud values.
 This is a chronological log: entries labeled **historical/superseded** are
 snapshots, not current status. Current acceptance state is in the task board.
 
+## T-CURRENT-RELEASE — latest verified release snapshot
+
+- Owner: Codex release lead.
+- Status: incomplete; this entry supersedes older current-state claims below.
+- Branch/worktree: `thviet`, `E:\Prj1`, HEAD and `origin/thviet` both
+  `4407e7d2e49d0e43aeb48b1e49ee96e986745a03`.
+- Hosted evidence: GitHub Actions run [#92 / `40198015346`](https://github.com/VuLeCoder/Code-forge/actions/runs/40198015346)
+  succeeded on that exact SHA.
+- Cloud evidence: Render deployment of `4407e7d` failed startup with Prisma
+  `P1001`. The sanitized connectivity probe reported DNS and TCP `ok`. Neon UI
+  showed public internet enabled, `Any IP`, and IP allowlisting unavailable.
+  This confirms only the observed DNS/TCP path; it does not establish database
+  authentication or successful SQL queries. No migration or cloud smoke is
+  claimed as passed.
+- Diagnostic lead (not a confirmed root cause): Neon's [Prisma guide](https://neon.com/docs/guides/prisma)
+  says scale-to-zero wake-up can cause P1001 and shows `connect_timeout=15`.
+  A local unpushed candidate now uses a 15-second default, preserves explicit
+  overrides, and adds an opt-in bounded PostgreSQL handshake probe. Focused
+  focused tests pass (2 suites / 17 tests, including a stalled-server case),
+  and the full backend unit suite passes (20 suites / 166 tests). Backend
+  lint/typecheck/build and `git diff --check` pass. Read-only independent review
+  found no actionable issue after inspecting the pinned `pg@8.23.1` timeout
+  behavior. Push, Render deploy, and post-change DB/health verification remain
+  pending; this is not yet a confirmed fix.
+- Audit evidence: AGY static review timed out after 120 seconds with no usable
+  result. Codex static security review reported no actionable finding in the
+  reviewed scope and did not run dynamic tests.
+- Open controls: P0–P8 are not complete; P2/P8 cloud release/recovery and
+  remaining P3/P4 acceptance are open. Issue #6 remains fail-closed pending the
+  owner authority/approval policy. Vercel is deferred/out of scope per the
+  latest owner objective.
+- Changed paths in this documentation task: `docs/implementation-status.md`,
+  `docs/next-actions.md`, `docs/operations/acceptance-task-board-2026-10-25.md`,
+  `docs/operations/task-execution-log-2026-10-25.md`, `docs/tasks/plan.md`,
+  `docs/tasks/todo.md`, and `docs/remaining-work-breakdown.md`. No secrets,
+  database URLs, or private cloud values are included.
+
 ## T-BASE — historical baseline snapshot (superseded)
 
 - Owner: Codex lead.
@@ -844,3 +881,159 @@ snapshots, not current status. Current acceptance state is in the task board.
   - `corepack pnpm lint`: 0 errors, 0 warnings.
   - `git diff --check`: 0 errors.
   - Pushed to `origin/thviet`.
+
+## T-AGY-ADMIN-RESPONSIVE — plan commit 24e8d85; implementation timed out
+
+- Scope: admin responsive/accessibility task in `docs/agy-plans/2026-10-25-admin-frontend-responsive.md`; local Antigravity skill created at `C:\Users\ADmin\.gemini\config\skills\codeforge-admin-responsive\SKILL.md`.
+- Plan commit `24e8d85` was pushed to `origin/thviet`. Implementation ran in isolated worktree `E:\Prj1-worktrees\agy-admin-responsive`, branch `codex/agy-admin-responsive`, using Gemini 3.8 Flash Medium with permission bypass disabled.
+- Bridge job `102280b4ddec421c82a3b6f2613d9673` terminated as `FAILED` with `agy timed out after 300.0s`. The assigned worktree was checked after termination and had no changed files. No retry was made.
+- The user later said AGY had been started to code; no separate job or file changes were observable in the assigned worktree at the next check. Do not start another job against this worktree until its state is rechecked.
+- Next safe action: continue the user-requested backend tasks; retain this AGY task as timed out, not accepted.
+
+## T-PUSH-PURGE-UNRESOLVED-JOURNAL — commit 6f09ddf, local integration verified
+
+- Worktree: `E:\Prj1-worktrees\push-purge-acceptance`; agent commit `f416fec` was reviewed and cherry-picked onto `thviet` as `6f09ddf`.
+- Owned path: `backend/test/maintenance-cleanup.e2e-spec.ts` only. The test proves purge preserves a deleted repository and Git storage while either a `PENDING` or `NEEDS_RECONCILIATION` push journal remains unresolved, and purges only after both become terminal.
+- Agent verification: focused maintenance E2E 1 suite / 4 tests, backend typecheck, and `git diff --check` passed. Test used the dedicated loopback `code_forge_test` DB with a random schema and test-owned temporary Git directory; no `.env`, other DB, container, or volume was touched.
+- Leader rerun after integration: `corepack pnpm --filter backend exec jest --config test/jest-e2e.json --runInBand test/maintenance-cleanup.e2e-spec.ts` passed 1 suite / 4 tests (exit 0). Expected warning logs show purge deferral while merge/push journals are unresolved.
+- Not pushed yet. Next: include this code commit in the verified backend batch after the remaining review/test commits pass.
+
+## T-MERGE-OWNER-LOCK-RACE — commit 364f854, local integration verified
+
+- Worktree: `E:\Prj1-worktrees\merge-lock-user-state`; agent commit `545db83` was reviewed and cherry-picked onto `thviet` as `364f854`.
+- Owned path: `backend/test/pull-requests.e2e-spec.ts` only. The test holds the repository advisory lock, waits until a real merge request is queued, locks the owner, then releases the lock and verifies the merge is rejected with HTTP 403, refs unchanged, PR still OPEN, and no merge operation or success audit.
+- Agent verification: focused E2E passed (1 test; 8 skipped by test-name filter), backend typecheck, lint, and `git diff --check` passed. Test used only the dedicated loopback test database with a random schema and test-owned temporary Git path; no `.env` or credentials were printed/persisted.
+- Leader rerun after integration: focused owner-lock E2E printed 1 passed / 8 intentionally skipped; an explicit `JEST_EXIT=0` was captured. The surrounding PowerShell wrapper still returned exit 1 during cleanup, so wrapper status is recorded as a harness issue and not as a clean command exit.
+- The root rerun confirms the test body passes. The wrapper cleanup status caveat above remains; agent run had a clean exit. Not pushed yet.
+
+## T-PRE-RECEIVE-BRANCH-LIMIT — commit 89962e3, local integration
+
+- Worktree: `E:\Prj1-worktrees\pre-receive-branch-limit`; agent commit `52d09e9` was reviewed and cherry-picked onto `thviet` as `89962e3`.
+- Owned path: `backend/src/repositories/pre-receive-hook.spec.ts` only. The test builds 999 branches, verifies creation of branch 1,000 is accepted, then verifies branch 1,001 is rejected and the ref set is unchanged.
+- Verification: focused hook spec 5/5, backend typecheck, lint, and `git diff --check` passed; an independent read-only review found no actionable finding. No database/container used.
+- Not pushed yet; root will rerun focused unit verification in the integrated tree.
+
+## T-PUSH-CHILD-SUCCESS-PROOF — commit 8d9caa9, local integration
+
+- Worktree: `E:\Prj1-worktrees\issue5-partial-push-audit`; agent commit `7a9ca90` was reviewed and cherry-picked onto `thviet` as `8d9caa9`.
+- Scope: `git-http.service.ts` and its spec, `git-push-journal.service.ts` and its spec. Receive-pack completion/audit now requires a durable child-success marker; failed, unknown, and legacy rows without that proof remain unresolved and fail-closed. A retryable reconciliation error preserves the child-outcome evidence.
+- Verification in agent worktree: 2 focused unit suites / 37 tests; backend typecheck, lint, and `git diff --check` passed. Independent static review found no actionable finding.
+- Leader integrated rerun: `push-audit.e2e-spec.ts` passed 1/1 with explicit `JEST_EXIT=0` against the dedicated loopback test DB. Full backend unit suite also passed 19 suites / 154 tests; backend typecheck and lint passed.
+
+## T-PURGE-NEEDS-ONLY-REGRESSION — commit 370a6a7, local integration
+
+- Worktree: `E:\Prj1-worktrees\purge-needs-only`; agent commit `0e7c729` was reviewed and cherry-picked onto `thviet` as `370a6a7`.
+- Owned path: `backend/test/maintenance-cleanup.e2e-spec.ts` only. This closes the review gap by isolating `NEEDS_RECONCILIATION` as the only unresolved push journal, proving purge retains the repository/storage, then terminalizing the journal and proving purge proceeds.
+- Static verification: Prisma client generation, backend typecheck/lint, direct ESLint, and diff-check passed; independent review had identified the gap, and the revised test covers it.
+- Leader integrated rerun: `maintenance-cleanup.e2e-spec.ts` passed 4/4 with explicit `JEST_EXIT=0`; expected warnings show purge is deferred while journals remain unresolved. Not pushed yet.
+
+## T-PUSH-DELETE-RACE — commit c5bf02a, local integration verified
+
+- Worktree: `E:\Prj1-worktrees\push-delete-race`; agent commit `c5882cd` was reviewed and cherry-picked onto `thviet` as `c5bf02a`.
+- Owned path: `backend/test/repositories.e2e-spec.ts` only. A valid receive-pack is paused in pre-receive, DELETE is observed waiting on the same repository advisory lock, push completion/audit/ref are checked before deletion, and a subsequent push is denied with refs/audit unchanged.
+- Verification: focused E2E passed 1 test / 13 intentionally skipped; backend typecheck, lint, and `git diff --check` passed. A read-only review found no actionable finding.
+- Test-harness caveat: two earlier E2E setup attempts may have left empty random `repo_test_*` schemas in the dedicated test database. Their names/ownership were not captured, so none were deleted. Application data and Docker volumes were not touched.
+- Not pushed yet.
+
+## T-AUTH-LOGOUT-REFRESH-RACE — P2 finding, remediation in progress
+
+- Read-only auth review found that if refresh rotates an active token before a concurrent logout processes the old token, current logout revokes only the old row and can leave the new session active in the same family.
+- Root verified the code path in `AuthService.refresh()` and `logout()`; this is a security finding, not yet a runtime reproduction.
+- Remediation/test task assigned in an isolated worktree: serialize logout with refresh on the user-row lock; revoke the token family associated with the supplied token; add deterministic service and E2E regression coverage.
+- Root integrated implementation and tests as `6d8c827`/`da020f9`; agent unit suite 11/11, backend typecheck/lint and diff-check passed. The 19-suite backend unit run now passes 156/156; backend typecheck and lint also pass on integrated `thviet`.
+- Root E2E found the fixture's raw node `pg` connection ignored Prisma's `schema=` option; this was corrected. Final serial rerun remained 8/9: refresh queued behind the user-row barrier, but logout did not appear as a second waiter and both handlers emitted sanitized errors. The old waiter-count variant is not accepted; agent stopped further DB retries.
+- Independent review found the E2E setup lacked a guard against non-loopback/non-`_test` databases. The isolated follow-up adds a guard for both URLs and validates they target the same loopback test DB; backend typecheck, file lint and diff-check pass. It remains uncommitted in `E:\Prj1-worktrees\logout-refresh-family`.
+- Independent security review found no confirmed production defect in the family-revocation fix, but confirmed the test observer cannot attribute connections from one shared Prisma pool. A separate test-only real-Postgres `AuthService` concurrency E2E with two uniquely named clients is in progress; no DB run starts until the current bootstrap E2E finishes.
+- Not accepted until E2E passes; production fix is present locally on `thviet`, not pushed.
+
+## T-AGY-ADMIN-RESPONSIVE — correction pending accessibility review
+
+- AGY reported success in `E:\Prj1-worktrees\agy-admin-responsive` with only the three planned frontend files changed. Root reran frontend lint/typecheck and Playwright (4/4) successfully at 1280×800 and 375×812; `git diff --check` passed.
+- Independent review found a screen-reader semantics gap: narrow CSS uses `display:none` on the only table header row while visible labels are CSS-generated. The change is not accepted yet.
+- A bounded corrective AGY job was started in the same worktree with `dangerously_skip_permissions=false`, same three-file ownership and no commit/push permission; job id `1ac37ca652584bb4acc8b1f3` completed without fixing the issue. Current diff still has `display:none` and tests do not assert accessible column headers. Per user preference, Codex provided a precise prompt for the user to send; no further AGY job was dispatched. Not accepted/integrated.
+
+## T-STORAGE-RECOVERY-E2E-ASSERTION — commit 71a0c48, local integration
+
+- Independent static review found the recovery E2E asserted the recreated Git `HEAD` but omitted the repository/API `defaultBranch` metadata.
+- Added `defaultBranch: 'main'` to both response and database assertions in `backend/test/repositories.e2e-spec.ts`; integrated as `71a0c48` on `thviet`.
+- `git diff --check` passed in the agent worktree. Root reran `repositories.e2e-spec.ts -t "serializes completed push before missing-storage recovery"` serially; 1 passed, 14 intentionally skipped, exit 0. It verifies the push journal/audit/ref are durable before storage loss, recovery waits behind the repo lock, API/DB retain default branch `main`, generation increments 0→1, and recreated Git HEAD is `refs/heads/main`.
+
+## T-ADMIN-BOOTSTRAP-IDEMPOTENCE — local integration verified
+
+- Read-only security review of `0587f3f` found no secret-output or privilege-promotion defect. Password is read from stdin, hash is Argon2id, and audit mutation is transactional.
+- Remaining low-severity coverage gap: invoking bootstrap for an account already ADMIN should prove no password/state/audit mutation on repeat.
+- A test-only E2E was added in commit `4b43f71` (`backend/test/admin-bootstrap.e2e-spec.ts` only), after redaction commit `19a908c`. The agent's first harness attempt used the wrong test DB username and failed before schema creation; after correcting it to the dedicated `code_forge` user, agent and leader each verified the suite 4/4 on loopback `code_forge_test`. Password input remains stdin-only, repeated bootstrap leaves role/status/password and audit unchanged. No external DB or Docker volume was touched.
+
+## T-AUTH-SERVICE-CONCURRENCY-E2E — commit d7435ca, first integrated run failed
+
+- Replaced the unreliable shared HTTP-pool waiter observation with a separate real-PostgreSQL `AuthService` E2E using independently named Prisma clients, per-operation barrier waiter checks, and a loopback `_test` guard.
+- Test-only commit `d7435ca` adds `backend/test/auth-session-concurrency.e2e-spec.ts`; static typecheck, direct ESLint, and file diff-check passed.
+- Leader's first focused run failed to observe `auth-refresh-*` as a waiter. A second bounded diagnostic run confirmed app name and schema identity, then showed PostgreSQL reports the blocked refresh connection as `state=idle`, `wait_event_type=Lock`, with the barrier PID in `pg_blocking_pids`. The `state='active'` predicate was too strict. A one-line observer correction (remove that predicate, keep app name/lock/barrier checks) is in progress; one targeted run and then the full auth suite are the remaining gates.
+
+## T-RENDER-NEON-P1001 — local configuration audit
+
+- Read-only audit confirms the API image installs Git, copies built output and Prisma assets, runs non-root and binds `0.0.0.0:$PORT`; migration image contains Prisma CLI/schema and invokes `prisma migrate deploy`.
+- Prisma runtime `DATABASE_URL` is pooled; `DATABASE_URL_UNPOOLED` is direct for migrations and session advisory locks. No tracked Render blueprint was found; dashboard settings are not verified.
+- Render P1001 root cause remains unknown. Local DNS/TCP success does not prove Render connectivity. Safe next diagnostic: enable the existing sanitized `DATABASE_CONNECTIVITY_DIAGNOSTICS=true` on the exact deployed release and compare bounded DNS/TCP probe results with Prisma startup logs. No secrets, deployment, or external mutation occurred.
+
+## T1 P4 gap inventory — snapshot contract and unrelated histories
+
+- Read-only inventory compared current PR service/test behavior against the acceptance checklist and found two specific public-contract gaps, not confirmed product defects: (1) snapshot identity is asserted for commits/files but not diff, and stale snapshot subrequests are not all tested after a ref advance; (2) `NO_MERGE_BASE` is covered by Git-storage unit tests but not the PR API contract.
+- Snapshot test task is in progress in isolated worktree `E:\Prj1-worktrees\pr-snapshot-contract`, owned file `backend/test/pull-requests.e2e-spec.ts`. The unrelated-history test should follow sequentially because it owns the same file and needs the same DB slot.
+
+## T-MERGE-STALE-VERSION-QUEUE — commits 736c108, 9774bf9, ebd2816; local integration verified
+
+- Worktree: `E:\Prj1-worktrees\merge-stale-version-lock-queue`; added a barrier-based E2E where an owner PATCH and merge carrying the old version queue on the same repository lock. The test observes both waiters before release and asserts PATCH v2 wins, merge returns `409 STALE_COMPARE`, refs remain unchanged, PR stays OPEN, and no merge operation/audit is created.
+- Root first rerun exposed an invalid owner slug in the fixture (404); corrected in `ebd2816`. Cleanup now unlocks and awaits both started requests on failure.
+- Leader rerun after the fix: focused E2E passed 1 test / 9 intentionally skipped, `JEST_EXIT=0`, against the dedicated loopback test database. No `.env` read; random schema/temp Git storage were test-owned.
+- Not pushed yet.
+
+## T-AGY-ADMIN-RESPONSIVE — corrected accessibility fix accepted locally
+
+- AGY correction worktree `E:\Prj1-worktrees\agy-admin-responsive` changed only the three allowed paths: `frontend/src/app/admin/admin.module.css`, `frontend/src/app/admin/page.tsx`, and `frontend/test/admin-accessibility.spec.ts`.
+- The mobile table header row now uses a clipped visually-hidden pattern instead of `display:none`; native `<table>`, `<caption>`, and `<th scope="col">` semantics remain. Each of Users, Repositories, and Audit has five accessible column-header assertions; mobile cells retain visible `data-label` values and the tests check button bounds and horizontal overflow.
+- Independent review found no API, authorization, mutation, or source-content exposure changes. An initial full browser run failed once at the existing narrow dialog focus-return sequence (`Khóa bob?`); isolated narrow rerun passed, then the full 4-test suite passed twice including a root integrated rerun.
+- Integrated on `thviet` as commit `af80826` (`fix(admin): preserve mobile table headers for screen readers`). Root verified frontend lint, typecheck, Playwright 4/4 at 1280×800 and 375×812, and `git diff --check`. Not pushed yet.
+
+## T-AUTH-LOGOUT-REFRESH-RACE — deterministic test acceptance in agent worktree
+
+- Agent commit `3dd7e97` (`test(auth): make refresh logout concurrency acceptance deterministic`) changes only the auth E2E tests: direct-service concurrency uses separate named Prisma clients; both auth suites fail closed unless their PostgreSQL URLs are same-database loopback `*_test` URLs; redundant `.env` loading was removed; only the unreliable shared-pool waiter-count HTTP case was removed while sequential refresh/logout HTTP coverage remains.
+- Agent verification: direct-service concurrency E2E 1/1 and HTTP auth E2E 8/8, run serially on dedicated test database with a process-only test JWT secret; backend typecheck, lint for both files, diff-check and test-safety security review passed.
+- Commit is isolated in `E:\Prj1-worktrees\auth-e2e-acceptance`; root integration review/rerun still pending. No push.
+
+## T1 P4 PR snapshot and unrelated-history tests — agent implementation, E2E running
+
+- Agent commits `e711c94`, `f99c49b`, and `2b4b4a5` in `E:\Prj1-worktrees\pr-snapshot-contract` add compare snapshot consistency/stale-subrequest coverage and unrelated-history `NO_MERGE_BASE` API coverage in `backend/test/pull-requests.e2e-spec.ts`; the snapshot test has an explicit 60-second timeout.
+- Agent reports backend typecheck and diff-check pass; focused ESLint matches three diagnostics already present on the baseline. No DB tests had run at handoff.
+- After auth released the serial DB slot, the agent was assigned focused snapshot and unrelated-history E2Es, one after another, against the dedicated loopback test DB. Wait for exact exit codes and independent review before integration. No push.
+
+## T-MAINTENANCE-GRACE-GAP — existing coverage verified
+
+- Agent inspected `maintenance-jobs.service.spec.ts` and `maintenance-cleanup.e2e-spec.ts`; both requested 120-second cutoff precision and immediate `NEEDS_RECONCILIATION` pickup coverage already exist on `thviet`.
+- Focused maintenance unit suite passed 16/16. No duplicate changes were made. E2E remains covered by the existing test; no additional run was needed for this inventory task.
+
+## T1-AUTH-RACE — integrated root rerun passed
+
+- Agent change integrated on `thviet` as `b1c2c2a`. Root reran `auth-session-concurrency.e2e-spec.ts` and `auth.e2e-spec.ts` sequentially on the dedicated loopback `code_forge_test` database: concurrency 1/1 and HTTP auth 8/8 passed, each with exit 0.
+- Root backend typecheck and backend lint also passed after integration. Secrets were process-scoped and not printed; no `.env`/database outside the dedicated loopback test DB was targeted. This closes the race-test acceptance for the current candidate; production implementation remains `6d8c827`/`da020f9`.
+
+## T1-PR-SNAPSHOT / T1-NO-MERGE-BASE — integrated root reruns passed
+
+- Agent implementation was independently reviewed with no actionable finding and integrated as `c380bac`, `52face3`, `22d94a5`, `6c3a6c3` on `thviet`.
+- The first broad file run exposed a test fixture error in orphan branch setup (`git rm -rf .` against an empty index). The exact test-only correction removed that unnecessary command; no production code changed.
+- Root reran the two named cases serially on the dedicated loopback `code_forge_test` DB: snapshot/stale subrequests 1/1 and unrelated history `409 NO_MERGE_BASE` 1/1; 10 other cases intentionally skipped, process exit 0. Test assertions verify stale snapshot ref consistency and no unintended refs/PR/merge-operation/audit/push-operation effects.
+- Agent static verification: backend typecheck and diff-check pass; focused ESLint has only three diagnostics verified identical to baseline. No push.
+
+## T2-ADMIN-STATUS / T2-ADMIN-ROUTE-GUARDS — locally integrated
+
+- Agent added `admin.service.spec.ts` coverage for preventing generic reactivation of a deleted repository; integrated as `4d0f6a3`. Root focused service suite passed 6/6.
+- Agent added a new controller metadata spec for class-level access-token/admin guards and origin guards on all three mutations; integrated as `7bbe25f`. Root focused controller suite passed 4/4 and the new spec's lint/diff-check passed.
+- Both are test-only; no production/controller authorization code changed. Not pushed.
+
+## T3-BACKEND-E2E-REGRESSION — integrated local backend gate passed
+
+- Hardened test teardown in `backend/test/repository-lock.e2e-spec.ts`: wait boundedly for child close, terminate detached process groups where applicable, preserve Git test storage if closure is unconfirmed, and still attempt pool/monitor cleanup. Added missing push-journal methods to test doubles. Repository lifecycle E2Es now delete only the two repository IDs created by their race fixtures, preventing quota leakage into later cases.
+- Added private PR read-isolation assertions in `backend/test/pull-requests.e2e-spec.ts`: anonymous and authenticated non-members receive hidden 404s on list, detail, compare, commits, files, and diff, with no private markers in the body. Independent read-only review found no actionable issue.
+- On the dedicated loopback `code_forge_test` DB, root ran lock E2E (2 passed, 1 POSIX-only test skipped on Windows), repository E2E (15/15), then the complete backend E2E suite serially (10/10 suites, 49 passed, 2 skipped, exit 0; Jest exited cleanly). Backend unit passed 20/20 suites / 161 tests; backend lint, typecheck, build and `git diff --check` passed.
+- Both Docker images built from this tree. API image smoke confirmed Node 24, Git 2.39.5, built entry point and Prisma schema; migration image smoke confirmed Prisma CLI/client 6.19.3 and Linux engine. No migrations were executed by this smoke.
+- This closes the local backend regression subgate only. Hosted CI has not run on the new integrated candidate; cloud Render/Neon smoke and final documentation/handoff remain open. No secrets were displayed or committed; the only database target was the dedicated loopback test DB.

@@ -1,5 +1,15 @@
 # Code Forge: completion and release plan
 
+## Current verified state (2026-10-25; supersedes the older snapshot below)
+
+- `thviet` and `origin/thviet` match at `4407e7d2e49d0e43aeb48b1e49ee96e986745a03`; hosted Actions [#92 / `40198015346`](https://github.com/VuLeCoder/Code-forge/actions/runs/40198015346) passed on that exact SHA.
+- Render deployment of `4407e7d` failed startup with Prisma `P1001`. The sanitized probe reported DNS/TCP `ok`; Neon UI showed public internet enabled, `Any IP`, and IP allowlisting unavailable. This does not prove DB authentication or SQL connectivity. No cloud migration or smoke is passed.
+- Local unpushed candidate: Prisma defaults `connect_timeout` to 15 seconds while preserving explicit overrides, and an opt-in bounded PostgreSQL handshake probe follows DNS/TCP. Backend unit tests pass 20/20 suites / 166 tests; lint/typecheck/build and `git diff --check` pass. The focused suite includes a simulated server that accepts TCP but stalls during startup. Read-only independent review found no actionable issue. The candidate is not yet pushed/deployed and is not a confirmed fix. Neon's guide documents scale-to-zero wake-up as a possible P1001 cause, not the established cause here.
+- AGY's static review timed out at 120 seconds with no usable result. Codex static security review reported no actionable finding in its reviewed scope; it did not run dynamic tests.
+- P0–P8 remain incomplete. P2/P8 cloud release/recovery, remaining P3/P4 failure cases, and final evidence reconciliation are open. Issue #6 remains fail-closed pending owner policy. Vercel is deferred/out of scope per the latest owner objective.
+
+The estimates, dates, and state records below are retained as historical planning context; do not use them as current status.
+
 **Plan origin:** 2026-10-25 14:02 Asia/Saigon (historical estimate; see current execution snapshot below).
 **Current branch / pushed SHA:** `thviet` / `25487b5` (`origin/thviet` matches).
 **Scope:** finish the already user-approved P0–P8 MVP plan; no new product scope.
@@ -118,12 +128,20 @@ flowchart TD
 
 - [x] Local demo is running with a local-only database/storage and a separate normal demo account. This is not cloud acceptance.
 - [ ] Diagnose Render's unresolved Prisma `P1001` startup failure without blind redeploys or exposing connection strings.
-- [ ] U2: complete Vercel GitHub App authorization for the Code Forge personal repo; current integration requires the repo owner to grant/install access.
+- [ ] Diagnose Render/Neon connectivity and complete the cloud checks only after DB authentication and SQL operations are proven. Vercel GitHub App authorization is deferred/out of scope per the latest owner objective; it is not treated as completed or as a cloud gate.
 - [ ] U3: choose hostname/audience and explicitly accept that free Render storage can lose Git source on sleep/restart/redeploy while metadata persists.
 - [ ] Deploy additive migration safely; rehearse metadata backup/restore, application rollback, and failed-migration recovery.
 - [ ] Smoke auth/private/public, PAT, direct Render HTTPS clone/fetch/push (including >4.5 MB), invitations, PR merge, admin/audit, cold start, source-loss warning, and restore from local clone.
 
-**Status:** cloud acceptance remains open. Render `P1001` is unresolved; Vercel Git integration remains owner-dependent. Do not mark any cloud smoke item complete based on the local demo.
+**Historical status:** cloud acceptance remained open in this earlier snapshot. Its Vercel Git integration prerequisite is superseded: Vercel is deferred/out of scope. Current Render/Neon evidence is recorded at the top of this plan and in `docs/implementation-status.md`.
+
+## Latest execution addendum — 2026-10-25
+
+- Root branch `thviet` now includes local commit `af80826` for the corrected admin mobile accessibility presentation. Root gates passed: frontend lint/typecheck, the 4-test admin browser subset twice on the integrated tree, and `git diff --check`; viewports were 1280×800 and 375×812. This closes only T5-ADMIN-A11Y locally, not cloud release.
+- Auth agent's test-only change is integrated as `b1c2c2a`; root reran the real-PostgreSQL AuthService concurrency test 1/1 and HTTP auth E2E 8/8 with loopback `*_test` URLs. No production code changed in this slice.
+- PR agent test commits are integrated as `c380bac`, `52face3`, `22d94a5`, and `6c3a6c3`. Root focused real-PostgreSQL/Git reruns passed snapshot/staleness and unrelated-history `NO_MERGE_BASE` tests (2 passed, 10 intentionally skipped); independent review found no actionable issue.
+- Maintenance 120-second grace test coverage was checked independently; unit coverage is 16/16 and the immediate `NEEDS_RECONCILIATION` E2E case already exists. No duplicate changes were made.
+- The root worktree still contains other existing uncommitted test/documentation changes. Preserve them; do not push until the integrated candidate and required full regression are reviewed. Cloud P1001 remains unresolved.
 
 ### T6 — Documentation and handoff
 
@@ -137,8 +155,19 @@ flowchart TD
 
 ## Owner decisions required
 
-- **U2:** cloud resource/project access for Vercel, Render, Neon.
+- **U2:** confirm Render/Neon resource access. Vercel remains deferred/out of scope and is not considered resolved.
 - **U3:** demo hostname/audience and acceptance of ephemeral Git-source storage.
 - **U4:** authority and approval count for permanently ambiguous merge/push journals.
 
 No secrets are requested in chat. These choices only gate the affected cloud/operator tasks; local implementation can proceed independently where safe.
+
+## Execution addendum — latest verified state (2026-10-25)
+
+This addendum supersedes older “current” snapshots above; historical run/commit records remain historical evidence.
+
+- Local branch `thviet` is at `71a0c48541a34e6e7a057854b6b06ccbb79724eb`, 16 commits ahead of `origin/thviet` (`24e8d85effac0c511ca9a890eafe6385b154c1d7`). Do not push the unaccepted batch yet. Existing unrelated user documentation/config changes remain in the worktree and must be preserved.
+- Integrated backend gates on this candidate: unit 19 suites / 156 tests passed; backend typecheck, lint, build and `git diff --check` passed.
+- Auth logout/refresh security fix is in local commits `6d8c827` and `da020f9`, but the new concurrent PostgreSQL E2E remains unaccepted: 8/9 tests passed; refresh was observed queued behind the row lock, but logout did not appear as a second waiter and both handlers emitted sanitized errors. Independent review says the shared-pool waiter count cannot identify requests. A new test-only AuthService E2E with separately named PostgreSQL clients is in progress; the loopback/`_test` URL guard remains uncommitted in `E:\Prj1-worktrees\logout-refresh-family`.
+- Storage-recovery E2E has the missing `defaultBranch: main` response/DB assertions in `71a0c48`; its real PostgreSQL/Git E2E has not yet been rerun after integration.
+- Admin responsive AGY changes remain unaccepted: frontend lint/typecheck and browser tests pass 4/4 at 1280×800 and 375×812, but the narrow CSS hides table headers from assistive technology. User will manually send the corrective AGY prompt; Codex must not dispatch another AGY job without request.
+- Backend work remains priority. Next gates: (1) finish the isolated AuthService concurrency E2E, then run it serially; (2) finish admin-bootstrap idempotence E2E; (3) run the storage recovery E2E serially on the dedicated loopback `*_test` database; (4) rerun full backend acceptance on the integrated candidate; (5) push only to `thviet` after required tests and review pass. Render/Neon P1001 diagnosis follows backend acceptance; ignore Vercel per owner plan.
