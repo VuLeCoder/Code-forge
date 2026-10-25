@@ -1,13 +1,15 @@
 # Code Forge — remaining work breakdown
 
-State date: 2026-10-25. Branch: `thviet`. Latest pushed code commit: `2955e36` (same-operation merge and admin HTTP E2E); latest backend runtime hardening remains `1227730`. This register decomposes the approved P0–P8 plan; it does not narrow or replace that scope.
+State date: 2026-10-25. Branch: `thviet`. Latest pushed code commit: `2305390` (PR conflict and admin restore E2E); its full hosted workflow `40145289400` succeeded. This register decomposes the approved P0–P8 plan; it does not narrow or replace that scope.
 
 ## Current verified state
 
 - Full hosted workflow `40144424454` on `2955e36` passes; it includes all 7 backend E2E suites / 28 tests and the full frontend/Docker/migration gates.
+- A docs-only commit `a5739cd` passed hosted workflow `40145063512`. Code commit `2305390` adds real-Git merge-conflict and AdminController restore E2E; hosted workflow `40145289400` passed all steps. Local backend lint/typecheck/unit (14 suites / 86 tests) pass; the E2E safety guard rejects the configured non-`*_test` DB before setup.
 - Earlier authenticated logs for `40142759395`/`40143199809` identified double-read response and an incorrect assumption about internal journal fields in the detail API. `0403bda` fixed the test contract; `40143448486` passed.
 - Local backend unit (14 suites/86 tests), lint/typecheck, frontend lint/typecheck and Playwright (49/49) pass. Local Docker Engine/PostgreSQL remains unavailable; local E2E is not established.
-- Hosted merge recovery, same-operation concurrency, admin lock→session/PAT rejection, private-repository boundaries, and audit-detail filtering pass. Broader conflict/process-crash/quota/lifecycle cases remain open.
+- Hosted merge recovery, same-operation concurrency, admin lock→session/PAT rejection, private-repository boundaries, audit-detail filtering, real-Git merge conflict invariants, and admin restore route success/audit pass in CI. Process-crash/quota/lifecycle cases remain open.
+- Security audit found no confirmed exploitable vulnerability in reviewed PR/admin/lock paths, but found ordinary Git pushes have no durable attributable audit of actual ref changes. New issue [#5](https://github.com/VuLeCoder/Code-forge/issues/5) tracks a crash-safe journal, reconciliation, privacy, and acceptance matrix.
 - Docker Desktop process is open, but Docker Engine commands do not return promptly and PostgreSQL `localhost:5433` is unavailable; do not reset containers or volumes. Local image/PostgreSQL smoke remains unverified.
 - Public issue pages identify issues #3 (PR/Git race/recovery) and #4 (Docker/CI/cloud release) as open at the time checked. Drafts are updated with current CI evidence; only post to the existing issues after the owner chooses which comments to publish.
 
@@ -45,7 +47,7 @@ State date: 2026-10-25. Branch: `thviet`. Latest pushed code commit: `2955e36` (
 - **Dependency:** T0/T1 pass; first compare existing integration tests to avoid duplicate cases.
 - **Writable scope:** Targeted backend repository/PR integration tests and smallest necessary backend implementation files.
 - **Cases still to inventory:** conflict/no ref movement; stale source/target/version; source missing or storage generation reset; permission/state change before mutation; merge quota and branch-count limits; process crash around CAS/DB boundary; lock-loss/timeout cancellation; push/merge/delete/reset interactions not already covered.
-- **Audit result (2026-10-25):** Existing real PostgreSQL/Git E2E covers distinct-operation concurrent merges, push–merge, merge–soft-delete, DB metadata failure/reconciliation and sequential idempotent retry. `2955e36` adds and `40144424454` verifies same-operation concurrent replay with one ref advancement/journal/audit. Service/unit tests cover conflict/quota rejection without CAS, but not combined HTTP+real-Git+DB invariants. End-to-end source reset/missing branch, lock-loss cancellation and abrupt process-kill remain gaps.
+- **Audit result (2026-10-25):** Existing real PostgreSQL/Git E2E covers distinct-operation concurrent merges, push–merge, merge–soft-delete, DB metadata failure/reconciliation and sequential idempotent retry. `2955e36` adds and `40144424454` verifies same-operation concurrent replay with one ref advancement/journal/audit. `2305390` adds conflict/no-ref-movement real-Git HTTP E2E, verified by `40145289400`. End-to-end source reset/missing branch, lock-loss cancellation, abrupt process-kill, and quota HTTP invariants remain gaps.
 - **Acceptance:** For each implemented case, isolated PostgreSQL/Git assertions prove whether Git refs and metadata moved, audit outcome, operation state, and retry behavior. No case is counted from mock-only tests when the plan requires real Git/database behavior.
 
 ### T4 — Finish P6 admin and maintenance acceptance
@@ -55,7 +57,7 @@ State date: 2026-10-25. Branch: `thviet`. Latest pushed code commit: `2955e36` (
 - **Files:** Admin/auth/maintenance tests first; UI agent owns only `frontend/src/app/admin/page.tsx`, `frontend/src/app/admin/admin.module.css`, and `frontend/test/admin.spec.ts` if UI changes are required.
 - **Acceptance:** Isolated integration proves locked user session/PAT rejection, public repository anonymous reads still work, admin cannot read private source or merge, last active admin cannot be locked, restore retention works, and audit omits secrets/source. Maintenance jobs remain batch/idempotent after repeated startup/run.
 - **Progress:** Hosted DB-backed bootstrap create/promote is verified in `40136064222`; `40144424454` verifies AdminController lock/unlock, old session revoked, valid PAT Git request 200→401 after lock, non-member admin private source/PR/merge denial without ref movement, and audit API secret filtering. Unit/browser coverage includes final-admin/self-lock, expired restore behavior, audit allowlist, admin status UI and keyboard/focus.
-- **Acceptance gap:** Admin restore route success/audit and source reset disclosure have no DB-backed AdminController E2E; job batch/idempotence and sleeping-service timing remain to verify.
+- **Acceptance gap:** `2305390` adds DB-backed AdminController restore success/audit/source-reset disclosure assertions, verified in `40145289400`. Durable ordinary Git push audit is separately tracked by issue #5. Job batch/idempotence, sleeping-service timing and upgrade-from-production snapshot remain to verify.
 
 ### T5 — Accessibility and responsive review for existing PR/admin UI
 
@@ -64,7 +66,7 @@ State date: 2026-10-25. Branch: `thviet`. Latest pushed code commit: `2955e36` (
 - **Candidate AGY-owned paths:** PR list/detail components and their CSS module plus frontend UI tests; admin page/CSS only in a separate task. AGY must not edit backend, API proxy routes, global auth, shared contracts, or migration files.
 - **Acceptance:** Keyboard-only flow, visible focus, semantic names/roles, state announcements for merge/reconciliation, 375px and desktop layouts, browser tests, lint/typecheck. Report any screen-reader limitations and manual checks still outstanding.
 - **Progress:** Commit `851013e` fixes empty-state trigger focus restoration and distinguishes/retries branch-fetch failures. Commit `141f749` adds Admin role/status actions and confirmation dialog focus/keyboard assertions. Local lint/typecheck and Playwright pass (49/49); hosted browser/full-stack gates pass in `40144424454`. Screen-reader/manual multi-viewport review remains open.
-- **AGY review:** A bounded read-only review of the admin UI and deploy-origin guidance timed out at 60 seconds with no usable result; no AGY approval is claimed.
+- **AGY review:** A bounded read-only review of admin UI/deploy-origin guidance timed out at 60 seconds, and a focused PR/admin accessibility review timed out at 120 seconds; neither produced usable findings, and no AGY approval is claimed. Future local CLI calls are pinned by `scripts/agy.ps1` to `gemini-3.8-flash-medium`; the Codex AGY bridge has no model argument and continues to use its configured default.
 
 ### T6 — Local Docker runtime smoke
 
