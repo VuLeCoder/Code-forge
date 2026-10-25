@@ -54,6 +54,26 @@ describe('AdminService restore and audit privacy', () => {
   const repositoryId = '33333333-3333-4333-8333-333333333333';
   const actorId = '22222222-2222-4222-8222-222222222222';
 
+  it('does not let the status endpoint reactivate a deleted repository outside the restore flow', async () => {
+    const release = jest.fn().mockResolvedValue(undefined);
+    const findRepository = jest.fn().mockResolvedValue({ id: repositoryId, status: 'DELETED' });
+    const updateRepository = jest.fn();
+    const createAudit = jest.fn();
+    const tx = { repository: { findUnique: findRepository, update: updateRepository }, auditLog: { create: createAudit } };
+    const db = { $transaction: jest.fn((callback: (client: unknown) => unknown) => Promise.resolve(callback(tx))) };
+    const locks = { acquire: jest.fn().mockResolvedValue({ release }) };
+    const service = new AdminService(db as unknown as PrismaService, locks as unknown as RepositoryLockService,
+      { assertNoUnresolved: jest.fn().mockResolvedValue(undefined) } as never);
+
+    const error = await service.setRepositoryStatus(actorId, repositoryId, 'ACTIVE').catch((value: unknown) => value);
+
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as ConflictException).getResponse()).toMatchObject({ error: { code: 'REPOSITORY_DELETED' } });
+    expect(updateRepository).not.toHaveBeenCalled();
+    expect(createAudit).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects an expired restore without updating or auditing and releases its repository lock', async () => {
     const release = jest.fn().mockResolvedValue(undefined);
     const findRepository = jest.fn().mockResolvedValue({
