@@ -1,14 +1,16 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile, execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { request as httpRequest } from 'node:http';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
+import { Client } from 'pg';
 import { MaintenanceJobsService } from '../src/maintenance/maintenance-jobs.service';
 // cookie-parser is CommonJS; its default import is undefined at runtime in this test runner.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -18,6 +20,18 @@ const requireFromBackend = createRequire(__filename);
 
 async function responseJson<T>(response: Response): Promise<T> {
   return await response.json() as T;
+}
+
+function killChildProcessTree(child: ChildProcessWithoutNullStreams) {
+  if (!child.pid) throw new Error('Child API process has no PID.');
+  if (process.platform === 'win32') {
+    execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+    return;
+  }
+  try { process.kill(-child.pid, 'SIGKILL'); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+  }
 }
 
 describe('Pull request HTTP + PostgreSQL + Git', () => {
@@ -732,6 +746,391 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     git(['clone', '--branch', 'release/recovery-target', bare, fetched]);
     expect(git(['-C', fetched, 'show', 'HEAD:recovered.txt'])).toBe('recovered merge content\n');
   }, 60_000);
+
+  const processCrashTest = process.platform === 'win32' ? it.skip : it;
+  processCrashTest('reconciles a Git-updated merge after the API process dies before metadata commit', async () => {
+    const registered = await call('POST', 'auth/register', {
+      username: 'CrashOwner', email: 'crash-owner@example.test', password: 'test-password-123',
+    });
+    expect(registered.status).toBe(201);
+    const crashCookie = cookie(registered);
+    const createdRepo = await call('POST', 'repositories', {
+      name: 'MergeCrash', visibility: 'PRIVATE', initializeReadme: true,
+    }, crashCookie);
+    expect(createdRepo.status).toBe(201);
+    const { repository } = await responseJson<{ repository: { id: string } }>(createdRepo);
+    const storedRepo = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
+    const bare = join(storageRoot, storedRepo.storageKey);
+    const work = join(storageRoot, 'merge-crash-clone');
+    const git = (args: string[]) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    git(['clone', bare, work]);
+    git(['-C', work, 'config', 'user.name', 'Crash Owner']);
+    git(['-C', work, 'config', 'user.email', 'crash-owner@example.test']);
+    git(['-C', work, 'switch', '-c', 'release/crash-target']);
+    git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/release/crash-target']);
+    git(['-C', work, 'switch', 'main']);
+    git(['-C', work, 'switch', '-c', 'feature/crash-recovery']);
+    await writeFile(join(work, 'crash-recovered.txt'), 'recovered after API process death\n');
+    git(['-C', work, 'add', 'crash-recovered.txt']);
+    git(['-C', work, 'commit', '-m', 'Add crash recovery fixture']);
+    const sourceSha = git(['-C', work, 'rev-parse', 'HEAD']).trim();
+    git(['-C', work, 'push', 'origin', 'feature/crash-recovery']);
+    const targetSha = git(['--git-dir', bare, 'rev-parse', 'refs/heads/release/crash-target']).trim();
+    const repoPath = 'repos/crashowner/mergecrash/pulls';
+    const createdPull = await call('POST', repoPath, {
+      title: 'Recover after API process death', description: 'Verify crash-safe Git and PostgreSQL reconciliation.',
+      sourceBranch: 'feature/crash-recovery', targetBranch: 'release/crash-target',
+    }, crashCookie);
+    expect(createdPull.status).toBe(201);
+    const { pullRequest } = await responseJson<{ pullRequest: { id: string; number: number } }>(createdPull);
+    const detailResponse = await call('GET', `${repoPath}/${pullRequest.number}`, undefined, crashCookie);
+    const detail = await responseJson<{ pullRequest: { version: number }; }>(detailResponse);
+    expect(detailResponse.status).toBe(200);
+    const compareResponse = await call('GET', `${repoPath}/${pullRequest.number}/compare`, undefined, crashCookie);
+    const comparison = await responseJson<{ sourceSha: string; targetSha: string; storageGeneration: number }>(compareResponse);
+    expect(compareResponse.status).toBe(200);
+
+    const triggerName = `pause_merge_${schema.slice(-12)}`;
+    const functionName = `${triggerName}_fn`;
+    const operationId = randomUUID();
+    let candidateSha = '';
+    let child: ChildProcessWithoutNullStreams | undefined;
+    let replacementChild: ChildProcessWithoutNullStreams | undefined;
+    let barrierClient: Client | undefined;
+    let barrierLockHeld = false;
+    const childApplicationName = `merge-crash-${schema.slice(-12)}`;
+    const replacementApplicationName = `merge-recovery-${schema.slice(-12)}`;
+    const barrierKey = `merge-crash-barrier-${schema.slice(-12)}`;
+    const parentMaintenance = app.get(MaintenanceJobsService);
+    let parentMaintenancePaused = false;
+    try {
+      const barrierConnectionUrl = new URL(process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL!);
+      barrierConnectionUrl.searchParams.set('application_name', `${childApplicationName}-barrier`);
+      const barrier = new Client({ connectionString: barrierConnectionUrl.toString(), connectionTimeoutMillis: 5_000 });
+      barrierClient = barrier;
+      await barrier.connect();
+      await barrier.query("SET statement_timeout = '5s'");
+      await barrier.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [barrierKey]);
+      barrierLockHeld = true;
+      await admin.$executeRawUnsafe(`CREATE FUNCTION "${schema}"."${functionName}"() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.id = '${pullRequest.id}' AND NEW.status = 'MERGED' THEN
+            -- Linux-only test setting: let PostgreSQL notice that the killed API client's TCP socket closed
+            -- even while this backend is waiting on the test advisory barrier.
+            PERFORM set_config('client_connection_check_interval', '50', true);
+            PERFORM pg_advisory_lock(hashtextextended('${barrierKey}', 0));
+            PERFORM pg_advisory_unlock(hashtextextended('${barrierKey}', 0));
+          END IF;
+          RETURN NEW;
+        END $$`);
+      await admin.$executeRawUnsafe(`CREATE TRIGGER "${triggerName}" BEFORE UPDATE ON "${schema}"."pull_requests"
+        FOR EACH ROW EXECUTE FUNCTION "${schema}"."${functionName}"()`);
+
+      // The child and test app may run startup maintenance concurrently. The
+      // PENDING journal stays younger than the 120s cutoff through crash proof;
+      // age it only after all child PostgreSQL sessions have naturally exited.
+      const childScript = `
+        require('reflect-metadata');
+        const { NestFactory } = require('@nestjs/core');
+        const { ValidationPipe } = require('@nestjs/common');
+        const cookieParser = require('cookie-parser');
+        (async () => {
+          const { AppModule } = require(process.env.CODE_FORGE_TEST_APP_MODULE);
+          const app = await NestFactory.create(AppModule, { logger: false });
+          app.use(cookieParser());
+          app.setGlobalPrefix('api/v1');
+          app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+          await app.listen(0, '127.0.0.1');
+          process.stdout.write('CODE_FORGE_TEST_READY:' + await app.getUrl() + '\\n');
+        })().catch(() => process.exit(2));
+      `;
+      const backendRoot = resolve(__dirname, '..');
+      const startApi = async (applicationName: string) => {
+        const databaseUrl = new URL(process.env.DATABASE_URL!);
+        databaseUrl.searchParams.set('application_name', applicationName);
+        const apiProcess = spawn(process.execPath, ['-r', requireFromBackend.resolve('ts-node/register'), '-e', childScript], {
+          detached: true,
+          cwd: backendRoot,
+          env: { ...process.env, DATABASE_URL: databaseUrl.toString(),
+            DATABASE_URL_UNPOOLED: databaseUrl.toString(), GIT_STORAGE_PATH: storageRoot,
+            CODE_FORGE_TEST_APP_MODULE: join(backendRoot, 'src', 'app.module.ts') },
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        let output = '';
+        let errorOutput = '';
+        let isReady = false;
+        apiProcess.stderr.setEncoding('utf8');
+        apiProcess.stderr.on('data', (chunk: string) => { errorOutput += chunk; });
+        try {
+          const apiBase = await new Promise<string>((resolveReady, rejectReady) => {
+            const timeout = setTimeout(() => rejectReady(new Error('Child API did not become ready.')), 12_000);
+            apiProcess.stdout.setEncoding('utf8');
+            apiProcess.stdout.on('data', (chunk: string) => {
+              output += chunk;
+              const ready = output.match(/CODE_FORGE_TEST_READY:(http:\/\/127\.0\.0\.1:\d+)/);
+              if (ready) { isReady = true; clearTimeout(timeout); resolveReady(`${ready[1]}/api/v1`); }
+            });
+            apiProcess.on('error', (error) => {
+              if (!isReady) { clearTimeout(timeout); rejectReady(error); }
+            });
+            apiProcess.once('exit', () => {
+              clearTimeout(timeout);
+              if (!isReady) rejectReady(new Error('Child API exited before becoming ready.'));
+            });
+          });
+          return { process: apiProcess, base: apiBase };
+        } catch (startupError) {
+          let cleanupError: unknown;
+          if (apiProcess.pid && apiProcess.exitCode === null && apiProcess.signalCode === null) {
+            const processExited = new Promise<void>((resolveExited) => {
+              if (apiProcess.exitCode !== null || apiProcess.signalCode !== null) { resolveExited(); return; }
+              apiProcess.once('exit', () => resolveExited());
+            });
+            try {
+              killChildProcessTree(apiProcess);
+              await processExited;
+            } catch (error) { cleanupError = error; }
+          }
+          const diagnostic = startupError instanceof Error ? startupError.message
+            : typeof startupError === 'string' ? startupError : 'Child API failed to start for an unknown reason.';
+          const stderr = errorOutput.slice(-2000);
+          const cleanupDiagnostic = cleanupError instanceof Error ? cleanupError.message
+            : typeof cleanupError === 'string' ? cleanupError : cleanupError ? 'Unknown cleanup error.' : undefined;
+          throw new Error([diagnostic, stderr && `Child API stderr:\n${stderr}`,
+            cleanupDiagnostic && `Child API cleanup failed: ${cleanupDiagnostic}`].filter(Boolean).join('\n'),
+          { cause: startupError });
+        }
+      };
+      const waitForApiSessionsToExit = async (applicationName: string, timeoutMs: number) => {
+        const deadline = Date.now() + timeoutMs;
+        let sessions: Array<{ pid: number; state: string | null; wait_event_type: string | null;
+          wait_event: string | null; application_name: string; client_addr: string | null; backend_start: Date }> = [];
+        while (Date.now() < deadline) {
+          const rows = await barrier.query<{ pid: number; state: string | null; wait_event_type: string | null;
+            wait_event: string | null; application_name: string; client_addr: string | null; backend_start: Date }>(
+            `SELECT pid, state, wait_event_type, wait_event, application_name, client_addr, backend_start FROM pg_stat_activity
+             WHERE application_name = $1 AND pid <> pg_backend_pid()`, [applicationName]);
+          sessions = rows.rows;
+          if (sessions.length === 0) break;
+          await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+        }
+        return sessions;
+      };
+      const startedApi = await startApi(childApplicationName);
+      child = startedApi.process;
+      const childProcess = child;
+      const childBase = startedApi.base;
+      let mergeResponseStatus: number | undefined;
+      let mergeRequestError: Error | undefined;
+      const mergeRequest = httpRequest(`${childBase}/${repoPath}/${pullRequest.number}/merge`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: origin, Cookie: crashCookie },
+      }, (response) => {
+        mergeResponseStatus = response.statusCode;
+        response.resume();
+      });
+      mergeRequest.on('error', (error) => { mergeRequestError = error; });
+      const mergeRequestClosed = new Promise<void>((resolveClosed) => mergeRequest.once('close', resolveClosed));
+      mergeRequest.end(JSON.stringify({ operationId, expectedSourceSha: comparison.sourceSha,
+        expectedTargetSha: comparison.targetSha, storageGeneration: comparison.storageGeneration,
+        version: detail.pullRequest.version }));
+
+      const refDeadline = Date.now() + 15_000;
+      let movedTargetSha = targetSha;
+      while (Date.now() < refDeadline && movedTargetSha === targetSha) {
+        movedTargetSha = git(['--git-dir', bare, 'rev-parse', 'refs/heads/release/crash-target']).trim();
+        if (movedTargetSha === targetSha) await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+      }
+      expect(movedTargetSha).not.toBe(targetSha);
+      candidateSha = movedTargetSha;
+      const pendingOperation = await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId } });
+      expect(pendingOperation).toMatchObject({ status: 'PENDING', candidateSha });
+      const childWaitDeadline = Date.now() + 5_000;
+      let childWaitingOnBarrier = 0;
+      while (Date.now() < childWaitDeadline && childWaitingOnBarrier === 0) {
+        const result = await barrier.query<{ count: number }>(`SELECT COUNT(*)::int AS count
+          FROM pg_stat_activity WHERE application_name = $1 AND wait_event_type = 'Lock' AND wait_event = 'advisory'`,
+        [childApplicationName]);
+        childWaitingOnBarrier = result.rows[0]?.count ?? 0;
+        if (childWaitingOnBarrier === 0) await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+      }
+      expect(childWaitingOnBarrier).toBeGreaterThan(0);
+
+      // Git's ref CAS has happened; the trigger holds PostgreSQL before the PR
+      // metadata transaction commits. Kill the separate API process at this boundary.
+      const childClosed = new Promise<void>((resolveClosed, rejectClosed) => {
+        if (childProcess.exitCode !== null || childProcess.signalCode !== null) { resolveClosed(); return; }
+        const timeout = setTimeout(() => rejectClosed(new Error('Child API did not stop after SIGKILL.')), 5_000);
+        childProcess.once('close', () => { clearTimeout(timeout); resolveClosed(); });
+        childProcess.once('error', () => { clearTimeout(timeout); rejectClosed(new Error('Child API process could not be stopped.')); });
+        killChildProcessTree(childProcess);
+      });
+      await childClosed;
+      expect(childProcess.exitCode !== null || childProcess.signalCode !== null).toBe(true);
+      mergeRequest.destroy(new Error('Merge request canceled after child API process termination.'));
+      let requestCloseTimeout: NodeJS.Timeout | undefined;
+      try {
+        await Promise.race([mergeRequestClosed, new Promise<void>((_, rejectTimeout) => {
+          requestCloseTimeout = setTimeout(() => rejectTimeout(new Error('Merge HTTP request socket did not close.')), 5_000);
+        })]);
+      } finally { if (requestCloseTimeout) clearTimeout(requestCloseTimeout); }
+      expect(mergeResponseStatus).toBeUndefined();
+      expect(mergeRequestError).toBeDefined();
+      const childSessions = await waitForApiSessionsToExit(childApplicationName, 60_000);
+      expect(childSessions).toHaveLength(0);
+      const barrierReleased = await barrier.query<{ pg_advisory_unlock: boolean }>(
+        'SELECT pg_advisory_unlock(hashtextextended($1, 0))', [barrierKey]);
+      expect(barrierReleased.rows[0]?.pg_advisory_unlock).toBe(true);
+      barrierLockHeld = false;
+      expect(await db.pullRequest.findUniqueOrThrow({ where: { id: pullRequest.id } }))
+        .toMatchObject({ status: 'OPEN', mergeCommitSha: null });
+      expect(await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId } }))
+        .toMatchObject({ status: 'PENDING', candidateSha });
+      const parents = git(['--git-dir', bare, 'rev-list', '--parents', '-n', '1', candidateSha]).trim().split(' ');
+      expect(parents).toHaveLength(3);
+      expect(parents.slice(1).sort()).toEqual([targetSha, sourceSha].sort());
+
+      // Disable this test process's scheduler so only the replacement API's
+      // onModuleInit startup run can perform the restart reconciliation.
+      await parentMaintenance.onModuleDestroy();
+      parentMaintenancePaused = true;
+      const agedOperation = await db.pullRequestMergeOperation.updateMany({ where: { operationId, status: 'PENDING' },
+        data: { createdAt: new Date(Date.now() - 121_000) } });
+      expect(agedOperation.count).toBe(1);
+      const replacement = await startApi(replacementApplicationName);
+      replacementChild = replacement.process;
+      const replacementDeadline = Date.now() + 20_000;
+      let replacementRecovered = false;
+      while (Date.now() < replacementDeadline) {
+        const [operation, pull] = await Promise.all([
+          db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId } }),
+          db.pullRequest.findUniqueOrThrow({ where: { id: pullRequest.id } }),
+        ]);
+        if (operation.status === 'COMPLETED' && pull.status === 'MERGED') {
+          replacementRecovered = true;
+          break;
+        }
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 50));
+      }
+      expect(replacementRecovered).toBe(true);
+      const replacementClosed = new Promise<void>((resolveClosed, rejectClosed) => {
+        if (replacement.process.exitCode !== null || replacement.process.signalCode !== null) { resolveClosed(); return; }
+        const timeout = setTimeout(() => rejectClosed(new Error('Replacement API did not stop after reconciliation.')), 5_000);
+        replacement.process.once('close', () => { clearTimeout(timeout); resolveClosed(); });
+        replacement.process.once('error', () => { clearTimeout(timeout); rejectClosed(new Error('Replacement API process could not be stopped.')); });
+        killChildProcessTree(replacement.process);
+      });
+      await replacementClosed;
+      expect(await waitForApiSessionsToExit(replacementApplicationName, 5_000)).toHaveLength(0);
+      replacementChild = undefined;
+      const recoveredDetailResponse = await call('GET', `${repoPath}/${pullRequest.number}`, undefined, crashCookie);
+      expect(recoveredDetailResponse.status).toBe(200);
+      const recoveredDetail = await responseJson<{
+        pullRequest: { status: string; mergedById: string | null; mergeCommitSha: string | null };
+        mergeOperation: { operationId: string; status: string; errorCode: string | null } | null;
+      }>(recoveredDetailResponse);
+      const crashOwner = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'crashowner' } });
+      expect(recoveredDetail).toMatchObject({
+        pullRequest: { status: 'MERGED', mergedById: crashOwner.id, mergeCommitSha: candidateSha },
+        mergeOperation: { operationId, status: 'COMPLETED' },
+      });
+      expect(await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId } }))
+        .toMatchObject({ status: 'COMPLETED', resultingSha: candidateSha, actorId: crashOwner.id });
+      expect(git(['--git-dir', bare, 'rev-parse', 'refs/heads/release/crash-target']).trim()).toBe(candidateSha);
+      expect(await db.auditLog.count({ where: { targetId: pullRequest.id, action: 'PULL_REQUEST_MERGE_RECONCILED' } })).toBe(1);
+
+      const tokenResponse = await call('POST', 'tokens', {
+        name: 'Merge crash recovery E2E', scopes: ['repo:read', 'repo:write'],
+        expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+      }, crashCookie);
+      expect(tokenResponse.status).toBe(201);
+      const token = await responseJson<{ token: { id: string }; secret: string }>(tokenResponse);
+      const askpass = join(storageRoot, 'merge-crash-askpass.sh');
+      await writeFile(askpass,
+        '#!/bin/sh\ncase "$1" in *Username*) printf "%s\\n" "$TEST_GIT_USER" ;; *) printf "%s\\n" "$TEST_GIT_PAT" ;; esac\n',
+        { mode: 0o700 });
+      const runGit = promisify(execFile);
+      const gitHttp = (args: string[]) => runGit('git', ['-c', 'credential.helper=', ...args], {
+        timeout: 20_000,
+        env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(storageRoot, 'empty-git-config'),
+          GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: askpass, TEST_GIT_USER: 'CrashOwner', TEST_GIT_PAT: token.secret },
+      });
+      await gitHttp(['-C', work, 'remote', 'set-url', 'origin', `${base}/git/CrashOwner/MergeCrash.git`]);
+      git(['-C', work, 'fetch', bare, 'refs/heads/release/crash-target']);
+      git(['-C', work, 'switch', '--detach', 'FETCH_HEAD']);
+      git(['-C', work, 'switch', '-c', 'feature/after-crash']);
+      await writeFile(join(work, 'post-crash.txt'), 'push after crash reconciliation\n');
+      git(['-C', work, 'add', 'post-crash.txt']);
+      git(['-C', work, 'commit', '-m', 'Push after crash reconciliation']);
+      await gitHttp(['-C', work, 'push', 'origin', 'HEAD:refs/heads/release/crash-target']);
+      const pushedAfterRecoverySha = git(['-C', work, 'rev-parse', 'HEAD']).trim();
+      expect(git(['--git-dir', bare, 'rev-parse', 'refs/heads/release/crash-target']).trim()).toBe(pushedAfterRecoverySha);
+      const retry = await call('POST', `${repoPath}/${pullRequest.number}/merge`, {
+        operationId, expectedSourceSha: comparison.sourceSha, expectedTargetSha: comparison.targetSha,
+        storageGeneration: comparison.storageGeneration, version: detail.pullRequest.version,
+      }, crashCookie);
+      expect(retry.status).toBe(200);
+      expect(await responseJson(retry)).toMatchObject({ status: 'MERGED', operationId, mergeCommitSha: candidateSha });
+      expect(await db.auditLog.count({ where: { targetId: pullRequest.id, action: 'PULL_REQUEST_MERGE_RECONCILED' } })).toBe(1);
+      const fetched = join(storageRoot, 'merge-crash-fetch');
+      git(['clone', '--branch', 'release/crash-target', bare, fetched]);
+      expect(git(['-C', fetched, 'show', 'HEAD:crash-recovered.txt'])).toBe('recovered after API process death\n');
+    } finally {
+      try {
+        if (replacementChild && replacementChild.exitCode === null && replacementChild.signalCode === null) {
+          await new Promise<void>((resolveClosed, rejectClosed) => {
+            const timeout = setTimeout(() => rejectClosed(new Error('Replacement API cleanup timed out.')), 5_000);
+            replacementChild!.once('close', () => { clearTimeout(timeout); resolveClosed(); });
+            killChildProcessTree(replacementChild!);
+          });
+        }
+      } finally {
+        try {
+          if (child && child.exitCode === null && child.signalCode === null) {
+            await new Promise<void>((resolveClosed, rejectClosed) => {
+              const timeout = setTimeout(() => rejectClosed(new Error('Child API cleanup timed out.')), 5_000);
+              child!.once('close', () => { clearTimeout(timeout); resolveClosed(); });
+              killChildProcessTree(child!);
+            });
+          }
+        } finally {
+          try {
+            if (barrierClient) {
+              for (const applicationName of [childApplicationName, replacementApplicationName]) {
+                const childBackends = await barrierClient.query<{ pid: number }>(
+                  'SELECT pid FROM pg_stat_activity WHERE application_name = $1 AND pid <> pg_backend_pid()',
+                  [applicationName]);
+                for (const backend of childBackends.rows) {
+                  await barrierClient.query('SELECT pg_terminate_backend($1)', [backend.pid]);
+                }
+              }
+            }
+          } finally {
+            try {
+              if (barrierLockHeld && barrierClient) {
+                await barrierClient.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [barrierKey]);
+                barrierLockHeld = false;
+              }
+            } finally {
+              try {
+                await admin.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "${triggerName}" ON "${schema}"."pull_requests"`);
+              } finally {
+                try {
+                  await admin.$executeRawUnsafe(`DROP FUNCTION IF EXISTS "${schema}"."${functionName}"()`);
+                } finally {
+                  try {
+                    await barrierClient?.end();
+                  } finally {
+                    if (parentMaintenancePaused) parentMaintenance.onModuleInit();
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }, 119_000);
 
   it('serializes a source-branch push against a merge snapshot', async () => {
     const registered = await call('POST', 'auth/register', {
