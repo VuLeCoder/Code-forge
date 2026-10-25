@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Prisma, type PullRequestStatus } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { RepositoryPolicy } from './repository.policy';
@@ -9,6 +9,9 @@ import { GitPushJournalService } from './git-push-journal.service';
 
 @Injectable()
 export class PullRequestsService {
+  private activeCompareCount = 0;
+  private readonly maxConcurrentCompares = 2;
+
   constructor(private readonly db: PrismaService, private readonly policy: RepositoryPolicy,
     private readonly storage: GitStorageService, private readonly locks: RepositoryLockService,
     private readonly pushJournal: GitPushJournalService) {}
@@ -26,6 +29,19 @@ export class PullRequestsService {
     const canWrite = !!userId && (repo.ownerId === userId || repo.members.some((member) => member.userId === userId && member.role === 'WRITE'));
     return { canCreate: canWrite, canEdit: canWrite && !!authorId && (authorId === userId || repo.ownerId === userId),
       canMerge: !!userId && repo.ownerId === userId };
+  }
+
+  private acquireCompareCapacity() {
+    if (this.activeCompareCount >= this.maxConcurrentCompares) {
+      throw new ServiceUnavailableException({ error: { code: 'COMPARE_CAPACITY_EXCEEDED', message: 'Đang có quá nhiều lượt so sánh. Vui lòng thử lại sau.' } });
+    }
+    this.activeCompareCount++;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.activeCompareCount--;
+    };
   }
 
   private nextPage(page?: string) {
@@ -96,19 +112,22 @@ export class PullRequestsService {
   }
 
   async compare(owner: string, name: string, userId: string | undefined, number: number) {
-    const repoBefore = await this.repository(owner, name, userId);
-    const lock = await this.locks.acquire(repoBefore.id);
+    const releaseCapacity = this.acquireCompareCapacity();
     try {
-      const { pullRequest } = await this.detail(owner, name, userId, number);
-      const repo = await this.repository(owner, name, userId);
-      if (pullRequest.storageGeneration !== repo.storageGeneration) {
-        return { state: 'STORAGE_RESET' as const, sourceSha: pullRequest.sourceSha, targetSha: pullRequest.targetSha,
-          storageGeneration: repo.storageGeneration, commits: [], files: [], diff: '', diffTruncated: false };
-      }
-      const current = await this.storage.compare(repo.storageKey, pullRequest.sourceBranch, pullRequest.targetBranch, lock.signal);
-      return { ...current, storageGeneration: repo.storageGeneration,
-        stale: current.sourceSha !== pullRequest.sourceSha || current.targetSha !== pullRequest.targetSha };
-    } finally { await lock.release(); }
+      const repoBefore = await this.repository(owner, name, userId);
+      const lock = await this.locks.acquire(repoBefore.id);
+      try {
+        const { pullRequest } = await this.detail(owner, name, userId, number);
+        const repo = await this.repository(owner, name, userId);
+        if (pullRequest.storageGeneration !== repo.storageGeneration) {
+          return { state: 'STORAGE_RESET' as const, sourceSha: pullRequest.sourceSha, targetSha: pullRequest.targetSha,
+            storageGeneration: repo.storageGeneration, commits: [], files: [], diff: '', diffTruncated: false };
+        }
+        const current = await this.storage.compare(repo.storageKey, pullRequest.sourceBranch, pullRequest.targetBranch, lock.signal);
+        return { ...current, storageGeneration: repo.storageGeneration,
+          stale: current.sourceSha !== pullRequest.sourceSha || current.targetSha !== pullRequest.targetSha };
+      } finally { await lock.release(); }
+    } finally { releaseCapacity(); }
   }
 
   async update(owner: string, name: string, userId: string, number: number, dto: UpdatePullRequestDto) {

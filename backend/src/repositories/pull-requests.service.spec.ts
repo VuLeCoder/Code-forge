@@ -81,6 +81,34 @@ describe('PullRequestsService', () => {
     expect(result).toMatchObject({ stale: true, sourceSha: 'c'.repeat(40), targetSha, storageGeneration: 2 });
   });
 
+  it('caps concurrent compare work before it can occupy the shared repository lock pool', async () => {
+    const snapshot = { state: 'READY' as const, sourceSha, targetSha, commits: [{ sha: sourceSha }], files: [], diff: '', diffTruncated: false };
+    let releaseCompare!: (value: typeof snapshot) => void;
+    let resolveBothStarted!: () => void;
+    let compareCalls = 0;
+    const pendingCompare = new Promise<typeof snapshot>((resolve) => { releaseCompare = resolve; });
+    const bothStarted = new Promise<void>((resolve) => { resolveBothStarted = resolve; });
+    storage.compare.mockImplementation(() => {
+      compareCalls++;
+      if (compareCalls === 2) resolveBothStarted();
+      return compareCalls <= 2 ? pendingCompare : Promise.resolve(snapshot);
+    });
+
+    const first = service.compare('owner', 'repo', writerId, 4);
+    const second = service.compare('owner', 'repo', writerId, 4);
+    const started = await Promise.race([bothStarted.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 100))]);
+    try {
+      expect(started).toBe(true);
+      await expect(service.compare('owner', 'repo', writerId, 4)).rejects.toMatchObject({
+        response: { error: { code: 'COMPARE_CAPACITY_EXCEEDED' } },
+      });
+      expect(locks.acquire).toHaveBeenCalledTimes(2);
+    } finally {
+      releaseCompare(snapshot);
+    }
+    await Promise.all([first, second]);
+  });
+
   it('returns the stored result for a completed merge operation without creating another merge', async () => {
     db.pullRequestMergeOperation.findUnique.mockResolvedValueOnce({ operationId, repositoryId: repoId, pullRequestId: pullId,
       expectedSourceSha: sourceSha, expectedTargetSha: targetSha, storageGeneration: 2, status: 'COMPLETED', resultingSha: 'd'.repeat(40) });

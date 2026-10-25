@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, Get, HttpCode, Param, ParseIntPipe, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import type { PullRequestStatus } from '@prisma/client';
 import type { Request, Response } from 'express';
+import { Throttle } from '@nestjs/throttler';
 import { AccessTokenGuard } from '../auth/access-token.guard';
 import { OriginGuard } from '../auth/origin.guard';
 import type { AuthenticatedRequest, AuthPrincipal } from '../auth/auth.types';
@@ -34,6 +35,7 @@ export class PullRequestsController {
   }
 
   @Get(':number/compare')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @UseGuards(OptionalAccessTokenGuard)
   compare(@Param('owner') owner: string, @Param('repo') repo: string, @Param('number', ParseIntPipe) number: number,
     @Req() request: Request & { user?: AuthPrincipal }) {
