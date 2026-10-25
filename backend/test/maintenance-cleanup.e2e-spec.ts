@@ -274,4 +274,50 @@ describe('MaintenanceJobsService PostgreSQL cleanup and purge', () => {
     expect(await db.repository.findUnique({ where: { id: repository.id } })).toBeNull();
     expect(await pathExists(storagePath)).toBe(false);
   });
+
+  it('retains expired repository storage while a push journal is unresolved', async () => {
+    if (!db || !purgeService || !storageRoot) throw new Error('Maintenance test fixture was not initialized.');
+    const owner = await db.user.create({ data: {
+      username: 'PurgePushJournalOwner', normalizedUsername: 'purgepushjournalowner',
+      email: 'purge-push-journal-owner@example.test', normalizedEmail: 'purge-push-journal-owner@example.test', passwordHash: 'test-hash',
+    } });
+    const repositoryId = randomUUID();
+    const storageKey = `${repositoryId}.git`;
+    const repository = await db.repository.create({ data: {
+      id: repositoryId, ownerId: owner.id, name: 'PurgePushJournal', normalizedName: 'purgepushjournal', storageKey,
+      status: 'DELETED', deletedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+      purgeAfter: new Date(Date.now() - 1000),
+    } });
+    const pendingOperationId = randomUUID();
+    const reconciliationOperationId = randomUUID();
+    await db.gitPushOperation.createMany({ data: [
+      { operationId: pendingOperationId, repositoryId: repository.id, actorId: owner.id,
+        storageGeneration: repository.storageGeneration, beforeRefs: {}, status: 'PENDING' },
+      { operationId: reconciliationOperationId, repositoryId: repository.id, actorId: owner.id,
+        storageGeneration: repository.storageGeneration, beforeRefs: {},
+        status: 'NEEDS_RECONCILIATION', errorCode: 'GIT_CHILD_OUTCOME_UNKNOWN' },
+    ] });
+    const storagePath = join(storageRoot, storageKey);
+    await mkdir(storagePath);
+
+    expect(await purgeService.purgeDue()).toBe(0);
+    expect(await db.repository.findUnique({ where: { id: repository.id } })).not.toBeNull();
+    expect(await db.gitPushOperation.findMany({ where: { repositoryId: repository.id }, orderBy: { operationId: 'asc' } }))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ operationId: pendingOperationId, status: 'PENDING' }),
+        expect.objectContaining({ operationId: reconciliationOperationId,
+          status: 'NEEDS_RECONCILIATION', errorCode: 'GIT_CHILD_OUTCOME_UNKNOWN' }),
+      ]));
+    expect(await pathExists(storagePath)).toBe(true);
+
+    await db.gitPushOperation.update({ where: { operationId: reconciliationOperationId }, data: { status: 'FAILED' } });
+    expect(await purgeService.purgeDue()).toBe(0);
+    expect(await db.repository.findUnique({ where: { id: repository.id } })).not.toBeNull();
+    expect(await pathExists(storagePath)).toBe(true);
+
+    await db.gitPushOperation.update({ where: { operationId: pendingOperationId }, data: { status: 'FAILED' } });
+    expect(await purgeService.purgeDue()).toBe(1);
+    expect(await db.repository.findUnique({ where: { id: repository.id } })).toBeNull();
+    expect(await pathExists(storagePath)).toBe(false);
+  });
 });
