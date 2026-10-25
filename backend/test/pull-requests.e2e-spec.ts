@@ -755,6 +755,102 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     }
   }, 60_000);
 
+  it('rejects a queued merge after an earlier queued close changes the PR state', async () => {
+    const registration = await call('POST', 'auth/register', {
+      username: 'MergeCloseRaceOwner', email: 'merge-close-race-owner@example.test', password: 'test-password-123',
+    }, '');
+    expect(registration.status).toBe(201);
+    const closeRaceOwnerCookie = cookie(registration);
+
+    const repositoryResponse = await call('POST', 'repositories', {
+      name: 'MergeCloseRace', visibility: 'PRIVATE', initializeReadme: true,
+    }, closeRaceOwnerCookie);
+    expect(repositoryResponse.status).toBe(201);
+    const { repository } = await responseJson<{ repository: { id: string } }>(repositoryResponse);
+    const storedRepository = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
+    const bare = join(storageRoot, storedRepository.storageKey);
+    const work = join(storageRoot, 'merge-close-race-clone');
+    const git = (args: string[]) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    git(['clone', bare, work]);
+    git(['-C', work, 'config', 'user.name', 'Merge Close Race Owner']);
+    git(['-C', work, 'config', 'user.email', 'merge-close-race-owner@example.test']);
+    git(['-C', work, 'switch', '-c', 'feature/close-race']);
+    await writeFile(join(work, 'close-race.txt'), 'close before queued merge\n');
+    git(['-C', work, 'add', 'close-race.txt']);
+    git(['-C', work, 'commit', '-m', 'Create close race fixture']);
+    git(['-C', work, 'push', '--set-upstream', 'origin', 'feature/close-race']);
+
+    const repoPath = 'repos/mergecloseraceowner/mergecloserace/pulls';
+    const createdResponse = await call('POST', repoPath, {
+      title: 'Close while merge is queued', sourceBranch: 'feature/close-race', targetBranch: 'main',
+    }, closeRaceOwnerCookie);
+    expect(createdResponse.status).toBe(201);
+    const created = await responseJson<{ pullRequest: { id: string; number: number; version: number } }>(createdResponse);
+    const detailPath = `${repoPath}/${created.pullRequest.number}`;
+    const comparisonResponse = await call('GET', `${detailPath}/compare`, undefined, closeRaceOwnerCookie);
+    expect(comparisonResponse.status).toBe(200);
+    const comparison = await responseJson<{ state: string; sourceSha: string; targetSha: string; storageGeneration: number }>(comparisonResponse);
+    expect(comparison.state).toBe('READY');
+
+    const refsBefore = git(['--git-dir', bare, 'for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)', 'refs/']);
+    const mergeOperationsBefore = await db.pullRequestMergeOperation.count({ where: { pullRequestId: created.pullRequest.id } });
+    const mergeAuditsBefore = await db.auditLog.count({ where: { targetId: created.pullRequest.id, action: 'PULL_REQUEST_MERGED' } });
+    expect(mergeOperationsBefore).toBe(0);
+    expect(mergeAuditsBefore).toBe(0);
+
+    const barrierUrl = new URL(process.env.DATABASE_URL_UNPOOLED!);
+    barrierUrl.searchParams.set('application_name', `${lockApplicationName}-close-race-barrier`);
+    const barrier = new Client({ connectionString: barrierUrl.toString(), connectionTimeoutMillis: 5_000 });
+    let barrierLockHeld = false;
+    let closeRequest: Promise<Response> | undefined;
+    let mergeRequest: Promise<Response> | undefined;
+    try {
+      await barrier.connect();
+      await barrier.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [repository.id]);
+      barrierLockHeld = true;
+
+      // Queue the state transition first, then the merge against the identical snapshot.
+      // PostgreSQL grants the repository advisory lock in queue order after release.
+      closeRequest = call('PATCH', detailPath, { state: 'CLOSED' }, closeRaceOwnerCookie);
+      await waitForAdvisoryLockWaiter(barrier, lockApplicationName, 10_000, 1);
+
+      mergeRequest = call('POST', `${detailPath}/merge`, {
+        operationId: randomUUID(), expectedSourceSha: comparison.sourceSha, expectedTargetSha: comparison.targetSha,
+        storageGeneration: comparison.storageGeneration, version: created.pullRequest.version,
+      }, closeRaceOwnerCookie);
+      await waitForAdvisoryLockWaiter(barrier, lockApplicationName, 10_000, 2);
+
+      const unlocked = await barrier.query<{ pg_advisory_unlock: boolean }>(
+        'SELECT pg_advisory_unlock(hashtextextended($1, 0))', [repository.id]);
+      expect(unlocked.rows[0]?.pg_advisory_unlock).toBe(true);
+      barrierLockHeld = false;
+
+      const closeResponse = await closeRequest;
+      expect(closeResponse.status).toBe(200);
+      expect(await responseJson<{ pullRequest: { status: string; version: number } }>(closeResponse))
+        .toMatchObject({ pullRequest: { status: 'CLOSED', version: created.pullRequest.version + 1 } });
+
+      const mergeResponse = await mergeRequest;
+      expect(mergeResponse.status).toBe(409);
+      expect(await responseJson<{ error: { code: string } }>(mergeResponse))
+        .toMatchObject({ error: { code: 'PULL_REQUEST_NOT_OPEN' } });
+      expect(git(['--git-dir', bare, 'for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)', 'refs/']))
+        .toBe(refsBefore);
+      expect(await db.pullRequest.findUniqueOrThrow({ where: { id: created.pullRequest.id } }))
+        .toMatchObject({ status: 'CLOSED', version: created.pullRequest.version + 1, mergeCommitSha: null, mergedById: null, mergedAt: null });
+      expect(await db.pullRequestMergeOperation.count({ where: { pullRequestId: created.pullRequest.id } }))
+        .toBe(mergeOperationsBefore);
+      expect(await db.auditLog.count({ where: { targetId: created.pullRequest.id,
+        action: { in: ['PULL_REQUEST_MERGED', 'PULL_REQUEST_MERGE_RECONCILED'] } } }))
+        .toBe(mergeAuditsBefore);
+      expect(await db.auditLog.count({ where: { targetId: created.pullRequest.id, action: 'PULL_REQUEST_UPDATED' } })).toBe(1);
+    } finally {
+      if (barrierLockHeld) await barrier.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [repository.id]).catch(() => undefined);
+      await Promise.allSettled([closeRequest, mergeRequest].filter((request): request is Promise<Response> => request !== undefined));
+      await barrier.end();
+    }
+  }, 60_000);
+
   it('creates, enforces private PR read isolation, and owner-merges while preserving both Git parents', async () => {
     const registered = await call('POST', 'auth/register', {
       username: 'PullOwner', email: 'pull-owner@example.test', password: 'test-password-123',

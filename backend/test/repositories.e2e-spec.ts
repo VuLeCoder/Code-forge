@@ -1381,6 +1381,67 @@ process.exit(result.status ?? 1);
     }
   });
 
+  it('blocks repository deletion while a merge journal needs reconciliation', async () => {
+    const id = randomUUID();
+    const pullRequestId = randomUUID();
+    const name = 'UnresolvedMergeDelete';
+    const storageKey = `${id}.git`;
+    const operationId = randomUUID();
+    const storage = app.get(GitStorageService);
+    let repositoryCreated = false;
+    let pullRequestCreated = false;
+    let operationCreated = false;
+    try {
+      const stored = await db.repository.create({ data: {
+        id, ownerId, name, normalizedName: name.toLowerCase(), storageKey, visibility: 'PRIVATE',
+      } });
+      repositoryCreated = true;
+      await storage.create(storageKey, stored.defaultBranch, true, name);
+      const bare = join(storageRoot, storageKey);
+      const targetSha = execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim();
+      execFileSync('git', ['--git-dir', bare, 'update-ref', 'refs/heads/feature/unresolved-merge', targetSha]);
+      const refsBefore = execFileSync('git', ['--git-dir', bare, 'for-each-ref', '--sort=refname',
+        '--format=%(refname)%09%(objectname)', 'refs/'], { encoding: 'utf8' });
+      const pullRequest = await db.pullRequest.create({ data: {
+        id: pullRequestId, repositoryId: stored.id, number: 1, authorId: ownerId,
+        title: 'Unresolved merge', sourceBranch: 'feature/unresolved-merge', targetBranch: 'main',
+        storageGeneration: stored.storageGeneration, sourceSha: targetSha, targetSha,
+      } });
+      pullRequestCreated = true;
+      const operation = await db.pullRequestMergeOperation.create({ data: {
+        operationId, repositoryId: stored.id, pullRequestId: pullRequest.id, actorId: ownerId,
+        storageGeneration: stored.storageGeneration, expectedSourceSha: targetSha,
+        expectedTargetSha: targetSha, oldTargetSha: targetSha,
+        status: 'NEEDS_RECONCILIATION', errorCode: 'MERGE_OUTCOME_UNKNOWN',
+      } });
+      operationCreated = true;
+      const repositoryBefore = await db.repository.findUniqueOrThrow({ where: { id: stored.id } });
+      const pullRequestBefore = await db.pullRequest.findUniqueOrThrow({ where: { id: pullRequest.id } });
+      const operationBefore = await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId } });
+      const auditBefore = await db.auditLog.findMany({ where: { targetId: { in: [stored.id, pullRequest.id] } },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+
+      const response = await call('DELETE', `repos/owner/${name.toLowerCase()}`, ownerCookie);
+
+      expect(response.status).toBe(409);
+      expect((await response.json()).error.code).toBe('MERGE_RECONCILIATION_REQUIRED');
+      expect(await db.repository.findUniqueOrThrow({ where: { id: stored.id } })).toEqual(repositoryBefore);
+      expect(await db.pullRequest.findUniqueOrThrow({ where: { id: pullRequest.id } })).toEqual(pullRequestBefore);
+      expect(await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId } })).toEqual(operationBefore);
+      expect(await db.auditLog.findMany({ where: { targetId: { in: [stored.id, pullRequest.id] } },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] })).toEqual(auditBefore);
+      expect(existsSync(bare)).toBe(true);
+      expect(execFileSync('git', ['--git-dir', bare, 'for-each-ref', '--sort=refname',
+        '--format=%(refname)%09%(objectname)', 'refs/'], { encoding: 'utf8' })).toBe(refsBefore);
+      expect(execFileSync('git', ['--git-dir', bare, 'show', 'HEAD:README.md'], { encoding: 'utf8' })).toBe(`# ${name}\n`);
+    } finally {
+      if (operationCreated) await db.pullRequestMergeOperation.deleteMany({ where: { operationId } });
+      if (pullRequestCreated) await db.pullRequest.deleteMany({ where: { id: pullRequestId } });
+      await storage.remove(storageKey);
+      if (repositoryCreated) await db.repository.deleteMany({ where: { id } });
+    }
+  });
+
   it('soft-deletes, computes configured retention and reserves the deleted name', async () => {
     expect((await call('DELETE', 'repos/owner/renamed', ownerCookie)).status).toBe(204);
     const deleted = await db.repository.findFirstOrThrow({ where: { ownerId, normalizedName: 'renamed' } });

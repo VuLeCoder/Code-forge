@@ -84,11 +84,40 @@ describe('Git HTTP process lifecycle', () => {
   });
 
   it('times out stalled CGI before headers and rejects malformed CGI', async () => {
-    jest.replaceProperty(service, 'timeoutMs', 80);
-    script = 'setInterval(() => {}, 1000);';
-    expect((await fetch(`${url}/info/refs?service=git-upload-pack`)).status).toBe(504);
-    script = 'process.stdout.write("x".repeat(9000)); setInterval(() => {}, 1000);';
-    expect((await fetch(`${url}/info/refs?service=git-upload-pack`)).status).toBe(503);
+    const timeout = jest.replaceProperty(service, 'timeoutMs', 60_000);
+    const controllers = Array.from({ length: 3 }, () => new AbortController());
+    try {
+      for (const controller of controllers) {
+        expect((await fetch(`${url}/info/refs?service=git-upload-pack`, { signal: controller.signal })).status).toBe(200);
+      }
+
+      timeout.replaceValue(80);
+      script = 'setInterval(() => {}, 1000);';
+      let timedOutChildClose: Promise<[number | null, NodeJS.Signals | null]> | undefined;
+      start.mockImplementationOnce(() => {
+        const child = spawn(process.execPath, ['-e', script], { detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
+        children.push(child);
+        timedOutChildClose = new Promise((resolve) => child.once('close', (code, signal) => resolve([code, signal])));
+        return child;
+      });
+      const timeoutResponse = await fetch(`${url}/info/refs?service=git-upload-pack`);
+      expect(timeoutResponse.status).toBe(504);
+      expect(await timeoutResponse.text()).toBe('Git request unavailable.\n');
+      expect(timedOutChildClose).toBeDefined();
+      expect(await timedOutChildClose!).toEqual([null, 'SIGKILL']);
+
+      script = `process.stdout.end(${JSON.stringify(header + '0000')});`;
+      const recoveredResponse = await fetch(`${url}/info/refs?service=git-upload-pack`);
+      expect(recoveredResponse.status).toBe(200);
+      expect(await recoveredResponse.text()).toBe('0000');
+
+      script = 'process.stdout.write("x".repeat(9000)); setInterval(() => {}, 1000);';
+      expect((await fetch(`${url}/info/refs?service=git-upload-pack`)).status).toBe(503);
+    } finally {
+      const blockersClosed = children.slice(0, 3).map((child) => once(child, 'close'));
+      controllers.forEach((controller) => controller.abort());
+      await Promise.all(blockersClosed);
+    }
   });
 
   it('limits concurrent processes and releases capacity after cancellation', async () => {
