@@ -506,6 +506,58 @@ describe('Repository HTTP + PostgreSQL', () => {
     }
     expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(first);
 
+    const sameRefBranch = 'parallel/same-ref';
+    await git(['-C', work, 'push', 'origin', `${first}:refs/heads/${sameRefBranch}`]);
+    const sameRefPushes = [
+      { directory: join(storageRoot, 'm4-same-ref-race-a'), file: 'same-ref-a.txt', content: 'same-ref A\n', sha: '' },
+      { directory: join(storageRoot, 'm4-same-ref-race-b'), file: 'same-ref-b.txt', content: 'same-ref B\n', sha: '' },
+    ];
+    for (const candidate of sameRefPushes) {
+      await git(['clone', url, candidate.directory]);
+      await git(['-C', candidate.directory, 'checkout', '-b', sameRefBranch, `origin/${sameRefBranch}`]);
+      await git(['-C', candidate.directory, 'config', 'user.name', 'M4 Same-Ref Tester']);
+      await git(['-C', candidate.directory, 'config', 'user.email', 'm4-same-ref@example.test']);
+      await writeFile(join(candidate.directory, candidate.file), candidate.content);
+      await git(['-C', candidate.directory, 'add', candidate.file]);
+      await git(['-C', candidate.directory, 'commit', '-m', `Same-ref push ${candidate.file}`]);
+      candidate.sha = (await git(['-C', candidate.directory, 'rev-parse', 'HEAD'])).stdout.trim();
+    }
+    const operationsBeforeSameRefRace = new Set((await db.gitPushOperation.findMany({
+      where: { repositoryId: repo.id }, select: { operationId: true },
+    })).map(({ operationId }) => operationId));
+    const auditBeforeSameRefRace = new Set((await db.auditLog.findMany({
+      where: { targetId: repo.id, action: 'GIT_PUSH_COMPLETED' }, select: { id: true },
+    })).map(({ id }) => id));
+    const sameRefResults = await Promise.allSettled(sameRefPushes.map((candidate) =>
+      git(['-C', candidate.directory, 'push', 'origin', `HEAD:refs/heads/${sameRefBranch}`]),
+    ));
+    expect(sameRefResults.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+    expect(sameRefResults.filter(({ status }) => status === 'rejected')).toHaveLength(1);
+
+    const sameRef = execFileSync('git', ['--git-dir', bare, 'rev-parse', `refs/heads/${sameRefBranch}`], { encoding: 'utf8' }).trim();
+    expect(sameRefPushes.map(({ sha }) => sha)).toContain(sameRef);
+    expect(execFileSync('git', ['--git-dir', bare, 'for-each-ref', '--format=%(refname)', 'refs/heads'], { encoding: 'utf8' }).trim().split(/\r?\n/).sort())
+      .toEqual(['refs/heads/main', 'refs/heads/parallel/race-a', 'refs/heads/parallel/race-b', `refs/heads/${sameRefBranch}`].sort());
+    for (const branch of ['main', 'parallel/race-a', 'parallel/race-b']) {
+      expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', `refs/heads/${branch}`], { encoding: 'utf8' }).trim())
+        .toBe(branch === 'main' ? first : concurrentPushes.find(({ branch: candidateBranch }) => candidateBranch === branch)!.sha);
+    }
+    expect(() => execFileSync('git', ['--git-dir', bare, 'fsck', '--connectivity-only'], { stdio: 'pipe' })).not.toThrow();
+
+    const sameRefOperations = (await db.gitPushOperation.findMany({ where: { repositoryId: repo.id } }))
+      .filter(({ operationId }) => !operationsBeforeSameRefRace.has(operationId));
+    expect(sameRefOperations).toHaveLength(2);
+    const completedOperation = sameRefOperations.find(({ status }) => status === 'COMPLETED');
+    const rejectedOperation = sameRefOperations.find(({ status }) => status === 'FAILED');
+    expect(completedOperation).toMatchObject({ changedRefCount: 1, errorCode: null });
+    expect(rejectedOperation).toMatchObject({ changedRefCount: null, errorCode: 'NO_REF_CHANGE' });
+    const sameRefAudit = (await db.auditLog.findMany({
+      where: { targetId: repo.id, action: 'GIT_PUSH_COMPLETED' },
+    })).filter(({ id }) => !auditBeforeSameRefRace.has(id));
+    expect(sameRefAudit).toHaveLength(1);
+    expect(sameRefAudit[0]?.details).toMatchObject({ operationId: completedOperation?.operationId, changedRefCount: 1 });
+    expect(sameRefAudit[0]?.details).not.toMatchObject({ operationId: rejectedOperation?.operationId });
+
     const byteLimitBranch = `${'é'.repeat(63)}a/${'é'.repeat(63)}a`;
     const overByteLimitBranch = `${'é'.repeat(64)}/${'é'.repeat(63)}a`;
     expect(Buffer.byteLength(byteLimitBranch, 'utf8')).toBe(255);
