@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigService } from '@nestjs/config';
 import { ThrottlerStorage } from '@nestjs/throttler';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
@@ -21,6 +21,22 @@ const requireFromBackend = createRequire(__filename);
 
 async function responseJson<T>(response: Response): Promise<T> {
   return await response.json() as T;
+}
+
+async function waitForAdvisoryLockWaiter(client: Client, applicationName: string, timeoutMs: number) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const result = await client.query<{ count: number }>(`SELECT COUNT(*)::int AS count
+      FROM pg_stat_activity AS activity
+      JOIN pg_locks AS lock ON lock.pid = activity.pid
+      WHERE activity.application_name = $1 AND activity.datname = current_database()
+        AND activity.pid <> pg_backend_pid() AND activity.wait_event_type = 'Lock'
+        AND activity.wait_event = 'advisory' AND activity.query ILIKE '%pg_advisory_lock%'
+        AND lock.locktype = 'advisory' AND NOT lock.granted`, [applicationName]);
+    if ((result.rows[0]?.count ?? 0) > 0) return;
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+  }
+  throw new Error('Merge request did not enter the repository advisory-lock wait queue.');
 }
 
 function killChildProcessTree(child: ChildProcessWithoutNullStreams) {
@@ -37,6 +53,7 @@ function killChildProcessTree(child: ChildProcessWithoutNullStreams) {
 
 describe('Pull request HTTP + PostgreSQL + Git', () => {
   const schema = `pull_request_test_${randomBytes(8).toString('hex')}`;
+  const lockApplicationName = `pull-requests-${schema.slice(-12)}`;
   let admin: PrismaClient;
   let db: PrismaClient;
   let app: INestApplication;
@@ -47,6 +64,8 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
   let originalUrl: string | undefined;
   let originalUnpooledUrl: string | undefined;
   let originalStorage: string | undefined;
+  let originalJwtAccessSecret: string | undefined;
+  let originalCwd: string | undefined;
   let storageRoot: string;
   let schemaCreated = false;
 
@@ -59,10 +78,11 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
   });
 
   beforeAll(async () => {
-    await ConfigModule.forRoot({ envFilePath: '.env' });
+    originalCwd = process.cwd();
     originalUrl = process.env.DATABASE_URL;
     originalUnpooledUrl = process.env.DATABASE_URL_UNPOOLED;
     originalStorage = process.env.GIT_STORAGE_PATH;
+    originalJwtAccessSecret = process.env.JWT_ACCESS_SECRET;
     if (!originalUrl) throw new Error('DATABASE_URL is required for integration tests');
     const targetDatabase = new URL(originalUrl);
     const databaseName = decodeURIComponent(targetDatabase.pathname.replace(/^\/+/, ''));
@@ -83,6 +103,14 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       env: process.env, stdio: 'pipe', timeout: 30_000,
     });
     db = new PrismaClient({ datasourceUrl: isolatedUrl.toString() });
+
+    // This suite receives its DB settings from the test process. A disposable
+    // cwd prevents Nest's default ConfigModule setup from reading backend/.env.
+    process.chdir(storageRoot);
+    process.env.JWT_ACCESS_SECRET = randomBytes(48).toString('hex');
+    const lockUrl = new URL(isolatedUrl.toString());
+    lockUrl.searchParams.set('application_name', lockApplicationName);
+    process.env.DATABASE_URL_UNPOOLED = lockUrl.toString();
 
     const { AppModule } = await import('../src/app.module');
     const module = await Test.createTestingModule({ imports: [AppModule] })
@@ -107,11 +135,13 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       if (schemaCreated) await admin.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
       await admin.$disconnect();
     }
+    if (originalCwd) process.chdir(originalCwd);
     if (storageRoot) await rm(storageRoot, { recursive: true, force: true });
     for (const [key, value] of Object.entries({
       DATABASE_URL: originalUrl,
       DATABASE_URL_UNPOOLED: originalUnpooledUrl,
       GIT_STORAGE_PATH: originalStorage,
+      JWT_ACCESS_SECRET: originalJwtAccessSecret,
     })) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -363,6 +393,90 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       expect(await db.pullRequestMergeOperation.count({ where: { pullRequestId: created.pullRequest.id } })).toBe(0);
       expect(await db.auditLog.count({ where: { targetId: created.pullRequest.id, action: 'PULL_REQUEST_MERGED' } })).toBe(0);
       expect(await db.auditLog.count({ where: { targetId: created.pullRequest.id } })).toBe(auditRowsBeforeMerge);
+    }
+  }, 60_000);
+
+  it('rechecks owner lock state after a merge leaves the advisory-lock wait queue', async () => {
+    const registration = await call('POST', 'auth/register', {
+      username: 'MergeLockOwner', email: 'merge-lock-owner@example.test', password: 'test-password-123',
+    }, '');
+    expect(registration.status).toBe(201);
+    const ownerCookieForTest = cookie(registration);
+    const registeredOwner = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'mergelockowner' } });
+
+    const repositoryResponse = await call('POST', 'repositories', {
+      name: 'MergeLockState', visibility: 'PRIVATE', initializeReadme: true,
+    }, ownerCookieForTest);
+    expect(repositoryResponse.status).toBe(201);
+    const { repository } = await responseJson<{ repository: { id: string } }>(repositoryResponse);
+    const storedRepository = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
+    const bare = join(storageRoot, storedRepository.storageKey);
+    const work = join(storageRoot, 'merge-lock-state-clone');
+    const git = (args: string[]) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    git(['clone', bare, work]);
+    git(['-C', work, 'config', 'user.name', 'Merge Lock Owner']);
+    git(['-C', work, 'config', 'user.email', 'merge-lock-owner@example.test']);
+    git(['-C', work, 'switch', '-c', 'feature/owner-lock-race']);
+    await writeFile(join(work, 'owner-lock.txt'), 'owner lock race fixture\n');
+    git(['-C', work, 'add', 'owner-lock.txt']);
+    git(['-C', work, 'commit', '-m', 'Create owner lock race fixture']);
+    git(['-C', work, 'push', '--set-upstream', 'origin', 'feature/owner-lock-race']);
+
+    const repoPath = 'repos/mergelockowner/mergelockstate/pulls';
+    const createdResponse = await call('POST', repoPath, {
+      title: 'Recheck owner lock before merge', sourceBranch: 'feature/owner-lock-race', targetBranch: 'main',
+    }, ownerCookieForTest);
+    expect(createdResponse.status).toBe(201);
+    const created = await responseJson<{ pullRequest: { id: string; number: number; version: number } }>(createdResponse);
+    const comparisonResponse = await call('GET', `${repoPath}/${created.pullRequest.number}/compare`, undefined, ownerCookieForTest);
+    expect(comparisonResponse.status).toBe(200);
+    const comparison = await responseJson<{ state: string; sourceSha: string; targetSha: string; storageGeneration: number }>(comparisonResponse);
+    expect(comparison.state).toBe('READY');
+
+    const refsBeforeMerge = git(['--git-dir', bare, 'for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)', 'refs/']);
+    const operationCountBefore = await db.pullRequestMergeOperation.count({ where: { pullRequestId: created.pullRequest.id } });
+    const successAuditCountBefore = await db.auditLog.count({ where: { targetId: created.pullRequest.id, action: 'PULL_REQUEST_MERGED' } });
+    expect(operationCountBefore).toBe(0);
+    expect(successAuditCountBefore).toBe(0);
+
+    const barrierUrl = new URL(process.env.DATABASE_URL_UNPOOLED!);
+    barrierUrl.searchParams.set('application_name', `${lockApplicationName}-barrier`);
+    const barrier = new Client({ connectionString: barrierUrl.toString(), connectionTimeoutMillis: 5_000 });
+    let barrierLockHeld = false;
+    try {
+      await barrier.connect();
+      await barrier.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [repository.id]);
+      barrierLockHeld = true;
+
+      const operationId = randomUUID();
+      const mergeRequest = call('POST', `${repoPath}/${created.pullRequest.number}/merge`, {
+        operationId, expectedSourceSha: comparison.sourceSha, expectedTargetSha: comparison.targetSha,
+        storageGeneration: comparison.storageGeneration, version: created.pullRequest.version,
+      }, ownerCookieForTest);
+
+      // The PostgreSQL wait event proves the request passed authentication and
+      // initial owner authorization, then queued specifically on the test lock.
+      await waitForAdvisoryLockWaiter(barrier, lockApplicationName, 10_000);
+      await db.user.update({ where: { id: registeredOwner.id }, data: { status: 'LOCKED', lockedAt: new Date() } });
+
+      const unlocked = await barrier.query<{ pg_advisory_unlock: boolean }>(
+        'SELECT pg_advisory_unlock(hashtextextended($1, 0))', [repository.id]);
+      expect(unlocked.rows[0]?.pg_advisory_unlock).toBe(true);
+      barrierLockHeld = false;
+
+      const mergeResponse = await mergeRequest;
+      expect(mergeResponse.status).toBe(403);
+      expect(git(['--git-dir', bare, 'for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)', 'refs/']))
+        .toBe(refsBeforeMerge);
+      expect(await db.pullRequest.findUniqueOrThrow({ where: { id: created.pullRequest.id } }))
+        .toMatchObject({ status: 'OPEN', mergeCommitSha: null, mergedById: null });
+      expect(await db.pullRequestMergeOperation.count({ where: { pullRequestId: created.pullRequest.id } }))
+        .toBe(operationCountBefore);
+      expect(await db.auditLog.count({ where: { targetId: created.pullRequest.id, action: 'PULL_REQUEST_MERGED' } }))
+        .toBe(successAuditCountBefore);
+    } finally {
+      if (barrierLockHeld) await barrier.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [repository.id]).catch(() => undefined);
+      await barrier.end();
     }
   }, 60_000);
 
