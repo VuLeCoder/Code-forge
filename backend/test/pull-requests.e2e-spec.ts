@@ -528,15 +528,17 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     barrierUrl.searchParams.set('application_name', `${lockApplicationName}-stale-version-barrier`);
     const barrier = new Client({ connectionString: barrierUrl.toString(), connectionTimeoutMillis: 5_000 });
     let barrierLockHeld = false;
+    let editRequest: Promise<Response> | undefined;
+    let mergeRequest: Promise<Response> | undefined;
     try {
       await barrier.connect();
       await barrier.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [repository.id]);
       barrierLockHeld = true;
 
-      const editRequest = call('PATCH', detailPath, { title: 'Queued title v2' }, staleOwnerCookie);
+      editRequest = call('PATCH', detailPath, { title: 'Queued title v2' }, staleOwnerCookie);
       await waitForAdvisoryLockWaiter(barrier, lockApplicationName, 10_000, 1);
 
-      const mergeRequest = call('POST', `${detailPath}/merge`, {
+      mergeRequest = call('POST', `${detailPath}/merge`, {
         operationId: randomUUID(), expectedSourceSha: comparison.sourceSha, expectedTargetSha: comparison.targetSha,
         storageGeneration: comparison.storageGeneration, version: created.pullRequest.version,
       }, staleOwnerCookie);
@@ -566,6 +568,7 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
         .toBe(mergeAuditsBefore);
     } finally {
       if (barrierLockHeld) await barrier.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [repository.id]).catch(() => undefined);
+      await Promise.allSettled([editRequest, mergeRequest].filter((request): request is Promise<Response> => request !== undefined));
       await barrier.end();
     }
   }, 60_000);
