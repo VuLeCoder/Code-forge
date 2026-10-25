@@ -47,16 +47,17 @@ describe('Admin bootstrap CLI + PostgreSQL', () => {
 
   function runBootstrap(input: string) {
     const backend = process.cwd();
-    return spawnSync(process.execPath, ['-r', 'ts-node/register', 'src/admin/bootstrap-admin.ts'], {
+    const args = ['-r', 'ts-node/register', 'src/admin/bootstrap-admin.ts'];
+    return { ...spawnSync(process.execPath, args, {
       cwd: backend,
       env: { ...process.env, DATABASE_URL: isolatedUrl, DATABASE_URL_UNPOOLED: isolatedUrl },
       input,
       encoding: 'utf8',
       timeout: 45_000,
-    });
+    }), args };
   }
 
-  it('creates an active admin and does not echo the password supplied on stdin', async () => {
+  it('creates an active admin with the password supplied only on stdin', async () => {
     const password = 'Admin-Password-123!';
     const result = runBootstrap(`RootAdmin\nroot-admin@example.test\n${password}\n${password}\n`);
 
@@ -64,6 +65,7 @@ describe('Admin bootstrap CLI + PostgreSQL', () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('Đã tạo tài khoản ADMIN RootAdmin.');
     expect(result.stderr).toBe('');
+    expect(result.args.join('\0')).not.toContain(password);
     expect(result.stdout).not.toContain(password);
     const user = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'rootadmin' } });
     expect(user).toMatchObject({ systemRole: 'ADMIN', status: 'ACTIVE', lockedAt: null });
@@ -93,5 +95,21 @@ describe('Admin bootstrap CLI + PostgreSQL', () => {
     await expect(db.auditLog.findMany({ where: { targetId: user.id } })).resolves.toEqual([
       expect.objectContaining({ actorId: null, action: 'SYSTEM_ADMIN_PROMOTED', details: { channel: 'bootstrap_cli' } }),
     ]);
+  });
+
+  it('does not promote an existing user when the supplied username and email do not match', async () => {
+    const user = await db.user.create({ data: {
+      username: 'MismatchAdmin', normalizedUsername: 'mismatchadmin', email: 'real@example.test',
+      normalizedEmail: 'real@example.test', passwordHash: 'existing-hash',
+    } });
+    const result = runBootstrap('MismatchAdmin\nother@example.test\n');
+
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(1);
+    expect(result.stdout).not.toContain('ADMIN');
+    expect(result.stderr).toContain('Username và email không khớp với cùng một tài khoản.');
+    await expect(db.user.findUniqueOrThrow({ where: { id: user.id } })).resolves.toMatchObject({ systemRole: 'USER' });
+    await expect(db.auditLog.findMany({ where: { targetId: user.id } })).resolves.toEqual([]);
+    await expect(db.user.findUnique({ where: { normalizedEmail: 'other@example.test' } })).resolves.toBeNull();
   });
 });
