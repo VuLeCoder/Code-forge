@@ -138,6 +138,20 @@ describe('PullRequestsService', () => {
     expect(failedOperationData).toEqual({ status: 'FAILED', errorCode: 'MERGE_FILE_QUOTA_EXCEEDED' });
   });
 
+  it('makes a Git-updated merge immediately eligible when metadata persistence fails', async () => {
+    db.$transaction.mockRejectedValueOnce(new Error('temporary metadata failure'));
+    db.pullRequestMergeOperation.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    const result = await service.merge('owner', 'repo', ownerId, 4, { operationId, expectedSourceSha: sourceSha,
+      expectedTargetSha: targetSha, storageGeneration: 2, version: 3 });
+
+    expect(result).toEqual({ status: 'RECONCILING', operationId });
+    expect(storage.compareAndSwapBranch).toHaveBeenCalledWith(repo.storageKey, pullRequest.targetBranch,
+      'd'.repeat(40), targetSha, expect.any(AbortSignal));
+    expect(db.pullRequestMergeOperation.updateMany).toHaveBeenCalledWith({ where: { operationId, status: 'PENDING' },
+      data: { status: 'NEEDS_RECONCILIATION', errorCode: 'MERGE_METADATA_PENDING' } });
+  });
+
   it('rechecks current WRITE membership under the repository lock before editing a pull request', async () => {
     db.repository.findUnique.mockResolvedValueOnce({ ...repo, members: [] });
     await expect(service.update('owner', 'repo', writerId, 4, { title: 'Still allowed?' })).rejects.toBeInstanceOf(NotFoundException);

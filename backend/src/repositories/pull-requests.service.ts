@@ -239,6 +239,10 @@ export class PullRequestsService {
         return { status: 'MERGED', operationId: dto.operationId, mergeCommitSha: candidateSha };
       } catch {
         // Git refs are durable and cannot be safely rolled back after a database error.
+        // This process knows the Git child has finished; make the journal immediately
+        // eligible for reconciliation instead of waiting for the crash-exit grace.
+        await this.db.pullRequestMergeOperation.updateMany({ where: { operationId: dto.operationId, status: 'PENDING' },
+          data: { status: 'NEEDS_RECONCILIATION', errorCode: 'MERGE_METADATA_PENDING' } }).catch(() => undefined);
         return { status: 'RECONCILING', operationId: dto.operationId };
       }
     } finally {

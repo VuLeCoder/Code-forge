@@ -663,7 +663,7 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       const pending = await call('GET', `${repoPath}/${pullRequest.number}`, undefined, recoveryCookie);
       expect(await responseJson<{ pullRequest: { status: string; mergedById: string | null };
         mergeOperation: { status: string } }>(pending)).toMatchObject({
-        pullRequest: { status: 'OPEN', mergedById: null }, mergeOperation: { status: 'PENDING' },
+        pullRequest: { status: 'OPEN', mergedById: null }, mergeOperation: { status: 'NEEDS_RECONCILIATION' },
       });
       expect(await db.auditLog.count({ where: { targetId: pullRequest.id, action: 'PULL_REQUEST_MERGED' } })).toBe(0);
 
