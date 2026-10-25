@@ -65,7 +65,16 @@ async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
   child.stdin.write('release\n');
   child.stdin.end();
   const closed = once(child, 'close').then(() => true);
-  const exited = await Promise.race([closed, delay(2_000).then(() => false)]);
+  const timeout = new AbortController();
+  let exited: boolean;
+  try {
+    exited = await Promise.race([
+      closed,
+      delay(2_000, undefined, { signal: timeout.signal }).then(() => false),
+    ]);
+  } finally {
+    timeout.abort();
+  }
   if (exited) return;
   child.kill();
   await withTimeout(closed, 2_000, 'Child lock process shutdown');

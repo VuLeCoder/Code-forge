@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
 import { MaintenanceJobsService } from '../src/maintenance/maintenance-jobs.service';
@@ -452,6 +452,131 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       expect(raceDbPullRequest).toMatchObject({ status: 'OPEN', mergeCommitSha: null });
       expect(raceMergeOperations).toHaveLength(0);
       expect(raceMergeAudits).toBe(0);
+    }
+  }, 60_000);
+
+  it('rejects a merge over repository quota without moving refs or merging metadata, while an in-quota merge preserves both parents', async () => {
+    const registered = await call('POST', 'auth/register', {
+      username: 'QuotaOwner', email: 'quota-owner@example.test', password: 'test-password-123',
+    }, '');
+    expect(registered.status).toBe(201);
+    ownerCookie = cookie(registered);
+    const createdRepo = await call('POST', 'repositories', {
+      name: 'MergeQuota', visibility: 'PRIVATE', initializeReadme: true,
+    });
+    expect(createdRepo.status).toBe(201);
+    const { repository } = await responseJson<{ repository: { id: string } }>(createdRepo);
+    const storedRepo = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
+    const bare = join(storageRoot, storedRepo.storageKey);
+    const work = join(storageRoot, 'merge-quota-clone');
+    const git = (args: string[], input?: string) => execFileSync('git', args, {
+      encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], input,
+    }).trim();
+    const logicalObjectBytes = () => {
+      const ids = git(['--git-dir', bare, 'rev-list', '--objects', '--all'])
+        .split('\n').filter(Boolean).map((line) => line.split(' ')[0]!);
+      const sizes = git(['--git-dir', bare, 'cat-file', '--batch-check=%(objectname) %(objecttype) %(objectsize)'],
+        `${ids.join('\n')}\n`);
+      return sizes.split('\n').filter(Boolean).reduce((sum, line) => sum + Number(line.split(' ')[2]), 0);
+    };
+    const publishBranch = (branch: string, sha: string) => {
+      git(['--git-dir', bare, 'fetch', work, sha]);
+      git(['--git-dir', bare, 'update-ref', `refs/heads/${branch}`, sha]);
+    };
+    git(['clone', bare, work]);
+    git(['-C', work, 'config', 'user.name', 'Quota Owner']);
+    git(['-C', work, 'config', 'user.email', 'quota-owner@example.test']);
+    const repoPath = 'repos/quotaowner/mergequota/pulls';
+    const configuration = app.get(ConfigService);
+    const originalMaxFileBytes = configuration.getOrThrow<number>('MAX_FILE_BYTES');
+    const originalMaxRepositoryBytes = configuration.getOrThrow<number>('MAX_REPOSITORY_BYTES');
+
+    try {
+      configuration.set('MAX_FILE_BYTES', 100);
+      configuration.set('MAX_REPOSITORY_BYTES', 1_000_000);
+
+      await git(['-C', work, 'switch', '-c', 'feature/within-quota']);
+      await writeFile(join(work, 'within.txt'), 'small in-quota content\n');
+      git(['-C', work, 'add', 'within.txt']);
+      git(['-C', work, 'commit', '-m', 'Add in-quota content']);
+      const withinSourceSha = git(['-C', work, 'rev-parse', 'HEAD']);
+      publishBranch('feature/within-quota', withinSourceSha);
+      const withinCreated = await call('POST', repoPath, {
+        title: 'Within repository quota', description: 'A merge below the configured quota.',
+        sourceBranch: 'feature/within-quota', targetBranch: 'main',
+      });
+      expect(withinCreated.status).toBe(201);
+      const withinPull = await responseJson<{ pullRequest: { id: string; number: number } }>(withinCreated);
+      const withinDetailResponse = await call('GET', `${repoPath}/${withinPull.pullRequest.number}`);
+      const withinDetail = await responseJson<{ pullRequest: { version: number } }>(withinDetailResponse);
+      const withinCompareResponse = await call('GET', `${repoPath}/${withinPull.pullRequest.number}/compare`);
+      const withinCompare = await responseJson<{ sourceSha: string; targetSha: string; storageGeneration: number }>(withinCompareResponse);
+      expect(withinDetailResponse.status).toBe(200);
+      expect(withinCompareResponse.status).toBe(200);
+      expect(withinCompare.sourceSha).toBe(withinSourceSha);
+      const withinOperationId = randomUUID();
+      const withinMergeResponse = await call('POST', `${repoPath}/${withinPull.pullRequest.number}/merge`, {
+        operationId: withinOperationId, expectedSourceSha: withinCompare.sourceSha,
+        expectedTargetSha: withinCompare.targetSha, storageGeneration: withinCompare.storageGeneration,
+        version: withinDetail.pullRequest.version,
+      });
+      expect(withinMergeResponse.status).toBe(200);
+      const withinMerge = await responseJson<{ status: string; mergeCommitSha: string }>(withinMergeResponse);
+      const withinParents = git(['--git-dir', bare, 'rev-list', '--parents', '-n', '1', withinMerge.mergeCommitSha]).split(' ');
+      expect(withinMerge.status).toBe('MERGED');
+      expect(withinParents).toHaveLength(3);
+      expect(withinParents.slice(1).sort()).toEqual([withinCompare.targetSha, withinSourceSha].sort());
+      expect(git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).toBe(withinMerge.mergeCommitSha);
+
+      git(['-C', work, 'fetch', 'origin', 'main']);
+      git(['-C', work, 'switch', '-C', 'main', 'refs/remotes/origin/main']);
+      git(['-C', work, 'switch', '-c', 'feature/over-quota']);
+      await writeFile(join(work, 'over.txt'), 'small over-quota content\n');
+      git(['-C', work, 'add', 'over.txt']);
+      git(['-C', work, 'commit', '-m', 'Add over-quota candidate']);
+      const overSourceSha = git(['-C', work, 'rev-parse', 'HEAD']);
+      publishBranch('feature/over-quota', overSourceSha);
+      const overCreated = await call('POST', repoPath, {
+        title: 'Over repository quota', description: 'A merge whose new commit exceeds remaining quota.',
+        sourceBranch: 'feature/over-quota', targetBranch: 'main',
+      });
+      expect(overCreated.status).toBe(201);
+      const overPull = await responseJson<{ pullRequest: { id: string; number: number } }>(overCreated);
+      const overDetailResponse = await call('GET', `${repoPath}/${overPull.pullRequest.number}`);
+      const overDetail = await responseJson<{ pullRequest: { version: number; status: string } }>(overDetailResponse);
+      const overCompareResponse = await call('GET', `${repoPath}/${overPull.pullRequest.number}/compare`);
+      const overCompare = await responseJson<{ sourceSha: string; targetSha: string; storageGeneration: number }>(overCompareResponse);
+      expect(overDetailResponse.status).toBe(200);
+      expect(overCompareResponse.status).toBe(200);
+      expect(overCompare.sourceSha).toBe(overSourceSha);
+
+      const baselineBytes = logicalObjectBytes();
+      expect(baselineBytes).toBeGreaterThan(100);
+      configuration.set('MAX_REPOSITORY_BYTES', baselineBytes);
+      const refsBefore = git(['--git-dir', bare, 'for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)']);
+      const auditsBefore = await db.auditLog.count({ where: { targetId: overPull.pullRequest.id, action: 'PULL_REQUEST_MERGED' } });
+      const operationId = randomUUID();
+      const rejectedResponse = await call('POST', `${repoPath}/${overPull.pullRequest.number}/merge`, {
+        operationId, expectedSourceSha: overCompare.sourceSha, expectedTargetSha: overCompare.targetSha,
+        storageGeneration: overCompare.storageGeneration, version: overDetail.pullRequest.version,
+      });
+      expect(rejectedResponse.status).toBe(409);
+      expect(await responseJson<{ error: { code: string } }>(rejectedResponse)).toMatchObject({
+        error: { code: 'MERGE_REPOSITORY_QUOTA_EXCEEDED' },
+      });
+      expect(git(['--git-dir', bare, 'for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)']))
+        .toBe(refsBefore);
+      const overPullAfter = await db.pullRequest.findUniqueOrThrow({ where: { id: overPull.pullRequest.id } });
+      expect(overPullAfter).toMatchObject({ status: 'OPEN', version: overDetail.pullRequest.version,
+        mergeCommitSha: null, mergedById: null });
+      const failedOperation = await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId } });
+      expect(failedOperation).toMatchObject({ status: 'FAILED', errorCode: 'MERGE_REPOSITORY_QUOTA_EXCEEDED',
+        oldTargetSha: overCompare.targetSha, resultingSha: null });
+      expect(await db.auditLog.count({ where: { targetId: overPull.pullRequest.id, action: 'PULL_REQUEST_MERGED' } }))
+        .toBe(auditsBefore);
+    } finally {
+      configuration.set('MAX_FILE_BYTES', originalMaxFileBytes);
+      configuration.set('MAX_REPOSITORY_BYTES', originalMaxRepositoryBytes);
     }
   }, 60_000);
 
