@@ -138,6 +138,32 @@ describe('Milestone 1 HTTP + PostgreSQL', () => {
     expect((await call('auth/me', undefined, cookie(rotated))).status).toBe(401);
   });
 
+  it('revokes a rotated successor when logout races after refresh used the old cookie', async () => {
+    const loggedIn = await call('auth/login', { login: 'alice', password: account.password });
+    expect(loggedIn.status).toBe(200);
+    const oldCookie = cookie(loggedIn);
+    const rotated = await call('auth/refresh', {}, oldCookie);
+    expect(rotated.status).toBe(200);
+
+    const oldRefreshToken = refreshToken(loggedIn);
+    const rotatedRefreshToken = refreshToken(rotated);
+    expect(oldRefreshToken).toBeTruthy();
+    expect(rotatedRefreshToken).toBeTruthy();
+    const oldSession = await db.session.findUniqueOrThrow({ where: {
+      tokenHash: createHash('sha256').update(oldRefreshToken!).digest('hex'),
+    } });
+    const rotatedSession = await db.session.findUniqueOrThrow({ where: {
+      tokenHash: createHash('sha256').update(rotatedRefreshToken!).digest('hex'),
+    } });
+    expect(rotatedSession.familyId).toBe(oldSession.familyId);
+
+    expect((await call('auth/logout', {}, oldCookie)).status).toBe(204);
+
+    const loggedOutSuccessor = await db.session.findUniqueOrThrow({ where: { id: rotatedSession.id } });
+    expect(loggedOutSuccessor.revokedAt).not.toBeNull();
+    expect((await call('auth/me', undefined, cookie(rotated))).status).toBe(401);
+  });
+
   it('revokes refresh on logout and rejects locked users at login, me and refresh', async () => {
     const login = () => call('auth/login', { login: 'alice', password: account.password });
     const first = cookie(await login());

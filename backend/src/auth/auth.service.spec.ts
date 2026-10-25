@@ -161,4 +161,32 @@ describe('AuthService', () => {
     await service.logout(undefined);
     expect(sessionApi.updateMany).not.toHaveBeenCalled();
   });
+
+  it('makes logout idempotent for an unknown refresh token', async () => {
+    sessionApi.findUnique.mockResolvedValue(null);
+
+    await service.logout('unknown-refresh-token');
+
+    expect(transaction).not.toHaveBeenCalled();
+    expect(sessionApi.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('revokes the session family when logout receives a refresh token that was just rotated', async () => {
+    sessionApi.findUnique.mockResolvedValue({ ...session, revokedAt: now });
+    txQueryRaw.mockResolvedValue([{ id: user.id }]);
+    txUpdateSessions.mockResolvedValue({ count: 1 });
+    transaction.mockImplementation(async (callback: (client: Prisma.TransactionClient) => Promise<unknown>) =>
+      callback(tx as never),
+    );
+
+    await service.logout('already-rotated-refresh-token');
+
+    expect(txQueryRaw).toHaveBeenCalled();
+    const revokeInput = txUpdateSessions.mock.calls[0]?.[0] as
+      | { where: { familyId: string; revokedAt: null }; data: { revokedAt: Date } }
+      | undefined;
+    expect(revokeInput?.where).toEqual({ familyId: session.familyId, revokedAt: null });
+    expect(revokeInput?.data.revokedAt).toBeInstanceOf(Date);
+    expect(sessionApi.updateMany).not.toHaveBeenCalled();
+  });
 });
