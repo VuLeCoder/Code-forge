@@ -210,7 +210,8 @@ describe('Git push audit HTTP + PostgreSQL + Git', () => {
     }[]>`SELECT operation_id, status, changed_ref_count FROM git_push_operations
       WHERE repository_id = ${repository.id}::uuid ORDER BY created_at ASC`;
     expect(afterMultiRefOperations).toHaveLength(2);
-    expect(afterMultiRefOperations[1]).toMatchObject({ status: 'COMPLETED', changed_ref_count: 2 });
+    const multiRefOperation = afterMultiRefOperations.find(({ operation_id }) => operation_id !== operation.operation_id);
+    expect(multiRefOperation).toMatchObject({ status: 'COMPLETED', changed_ref_count: 2 });
     expect(await db.$queryRaw<{ count: bigint }[]>`SELECT COUNT(*) AS count FROM audit_logs
       WHERE action = 'GIT_PUSH_COMPLETED' AND details->>'repositoryId' = ${repository.id}`)
       .toEqual([{ count: 2n }]);
@@ -236,16 +237,27 @@ describe('Git push audit HTTP + PostgreSQL + Git', () => {
     }[]>`SELECT operation_id, status, changed_ref_count FROM git_push_operations
       WHERE repository_id = ${repository.id}::uuid ORDER BY created_at ASC`;
     expect(afterDeleteOperations).toHaveLength(3);
-    expect(afterDeleteOperations[2]).toMatchObject({ status: 'COMPLETED', changed_ref_count: 2 });
+    const updateDeleteOperation = afterDeleteOperations.find(({ operation_id }) =>
+      !afterMultiRefOperations.some((previous) => previous.operation_id === operation_id));
+    expect(updateDeleteOperation).toMatchObject({ status: 'COMPLETED', changed_ref_count: 2 });
     const successAuditsAfterDelete = await db.$queryRaw<{
-      details: Record<string, unknown>;
-    }[]>`SELECT details FROM audit_logs WHERE action = 'GIT_PUSH_COMPLETED'
+      actor_id: string; details: Record<string, unknown>;
+    }[]>`SELECT actor_id, details FROM audit_logs WHERE action = 'GIT_PUSH_COMPLETED'
       AND details->>'repositoryId' = ${repository.id}`;
     expect(successAuditsAfterDelete).toHaveLength(3);
     expect(successAuditsAfterDelete.map(({ details }) => details.operationId).sort()).toEqual(
       afterDeleteOperations.map(({ operation_id }) => operation_id).sort());
+    const expectedAuditChangeCounts = new Map<string, number>([
+      [operation.operation_id, 1],
+      [multiRefOperation!.operation_id, 2],
+      [updateDeleteOperation!.operation_id, 2],
+    ]);
     for (const audit of successAuditsAfterDelete) {
       expect(Object.keys(audit.details).sort()).toEqual(['changedRefCount', 'operationId', 'repositoryId', 'storageGeneration']);
+      expect(audit.actor_id).toBe(owner.id);
+      const operationId = audit.details.operationId as string;
+      expect(expectedAuditChangeCounts.has(operationId)).toBe(true);
+      expect(audit.details.changedRefCount).toBe(expectedAuditChangeCounts.get(operationId));
       expect(JSON.stringify(audit.details)).not.toContain(ownerToken.secret);
       expect(JSON.stringify(audit.details)).not.toContain(readOnlyToken.secret);
       expect(JSON.stringify(audit.details)).not.toContain(expectedSha);
