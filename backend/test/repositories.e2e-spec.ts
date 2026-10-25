@@ -707,8 +707,11 @@ describe('Repository HTTP + PostgreSQL', () => {
       userId: ownerId, name: 'Push storage recovery acceptance', scopes: ['repo:read', 'repo:write'], expiresAt,
       tokenPrefix, tokenHash: createHash('sha256').update(secret).digest('hex'),
     } });
-    const askpass = join(storageRoot, 'push-storage-reset-askpass.sh');
-    await writeFile(askpass, '#!/bin/sh\ncase "$1" in *Username*) printf "%s\\n" "$TEST_GIT_USER" ;; *) printf "%s\\n" "$TEST_GIT_PAT" ;; esac\n', { mode: 0o700 });
+    const askpass = join(storageRoot, process.platform === 'win32' ? 'push-storage-reset-askpass.cmd' : 'push-storage-reset-askpass.sh');
+    await writeFile(askpass, process.platform === 'win32'
+      ? '@echo off\r\necho %TEST_GIT_PAT%\r\n'
+      : '#!/bin/sh\ncase "$1" in *Username*) printf "%s\\n" "$TEST_GIT_USER" ;; *) printf "%s\\n" "$TEST_GIT_PAT" ;; esac\n',
+    { mode: 0o700 });
     const run = promisify(execFile);
     const git = (args: string[]) => run('git', ['-c', 'credential.helper=', ...args], {
       timeout: 20_000,
