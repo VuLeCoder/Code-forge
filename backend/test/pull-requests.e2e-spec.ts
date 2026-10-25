@@ -1689,15 +1689,15 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       if (!barrier) throw new Error('Crash-recovery barrier client is not connected.');
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
-        const result = await barrier.query<{ active: boolean }>(`SELECT EXISTS (
+        const result = await barrier.query<{ holdsLock: boolean }>(`SELECT EXISTS (
           SELECT 1 FROM pg_stat_activity AS activity
           JOIN pg_locks AS lock ON lock.pid = activity.pid
           WHERE activity.pid = $1 AND activity.datname = current_database()
-            AND activity.pid <> pg_backend_pid() AND activity.state = 'active'
+            AND activity.pid <> pg_backend_pid()
             AND lock.locktype = 'relation' AND lock.relation = to_regclass($2)
             AND lock.mode = 'AccessShareLock' AND lock.granted
-        ) AS active`, [pid, mergeJournalTable]);
-        if (!result.rows[0]?.active) return;
+        ) AS "holdsLock"`, [pid, mergeJournalTable]);
+        if (!result.rows[0]?.holdsLock) return;
         await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
       }
       const snapshot = await barrier.query<{ pid: number; state: string; waitEventType: string | null; waitEvent: string | null; query: string }>(`
@@ -1710,7 +1710,7 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
           AND lock.locktype = 'relation' AND lock.relation = to_regclass($2)
           AND lock.mode = 'AccessShareLock'
         LIMIT 1`, [pid, mergeJournalTable]);
-      throw new Error(`Maintenance PID ${pid} still has an active merge-table query after the barrier; snapshot: ${JSON.stringify(snapshot.rows)}.`);
+      throw new Error(`Maintenance PID ${pid} still holds the merge-table lock after the barrier; snapshot: ${JSON.stringify(snapshot.rows)}.`);
     };
     const waitForMergeReconciliationWaiter = async (applicationName: string, timeoutMs: number): Promise<number> => {
       if (!barrier) throw new Error('Crash-recovery barrier client is not connected.');
@@ -1720,7 +1720,7 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
           FROM pg_stat_activity AS activity
           JOIN pg_locks AS lock ON lock.pid = activity.pid
           WHERE activity.application_name = $1 AND activity.datname = current_database()
-            AND activity.pid <> pg_backend_pid() AND activity.state = 'active'
+            AND activity.pid <> pg_backend_pid()
             AND lock.locktype = 'relation' AND lock.relation = to_regclass($2)
             AND lock.mode = 'AccessShareLock' AND NOT lock.granted`,
         [applicationName, mergeJournalTable]);
