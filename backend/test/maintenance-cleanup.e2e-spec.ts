@@ -237,6 +237,81 @@ describe('MaintenanceJobsService PostgreSQL cleanup and purge', () => {
       .toMatchObject({ status: 'NEEDS_RECONCILIATION', errorCode: 'REF_OUTCOME_UNKNOWN' });
   });
 
+  it('keeps a cross-type ambiguous merge fail-closed across repeated maintenance runs', async () => {
+    if (!db || !maintenance || !storageRoot) throw new Error('Maintenance test fixture was not initialized.');
+    const owner = await db.user.create({ data: {
+      username: 'CrossTypeOwner', normalizedUsername: 'crosstypeowner',
+      email: 'cross-type-owner@example.test', normalizedEmail: 'cross-type-owner@example.test', passwordHash: 'test-hash',
+    } });
+    const repositoryId = randomUUID();
+    const storageKey = `${repositoryId}.git`;
+    const repository = await db.repository.create({ data: {
+      id: repositoryId, ownerId: owner.id, name: 'CrossType', normalizedName: 'crosstype', storageKey,
+    } });
+    const bare = join(storageRoot, storageKey);
+    execFileSync('git', ['init', '--bare', '--quiet', bare], { stdio: 'pipe' });
+    const git = (args: string[], input = '') => execFileSync('git', ['--git-dir', bare, ...args], {
+      encoding: 'utf8', input, stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    const emptyTree = git(['mktree']);
+    const makeCommit = (message: string, parents: string[] = []) => git([
+      '-c', 'user.name=Maintenance test', '-c', 'user.email=maintenance@example.test', 'commit-tree', emptyTree,
+      ...parents.flatMap((parent) => ['-p', parent]), '-m', message,
+    ]);
+    const baseSha = makeCommit('base');
+    const targetSha = makeCommit('target', [baseSha]);
+    const sourceSha = makeCommit('source', [baseSha]);
+    const candidateSha = makeCommit('ambiguous merge candidate', [targetSha, sourceSha]);
+    git(['update-ref', 'refs/heads/main', candidateSha]);
+    git(['update-ref', 'refs/heads/feature/ambiguous', sourceSha]);
+
+    const pullRequest = await db.pullRequest.create({ data: {
+      repositoryId: repository.id, number: 1, authorId: owner.id, title: 'Ambiguous merge remains fenced',
+      sourceBranch: 'feature/ambiguous', targetBranch: 'main', storageGeneration: repository.storageGeneration,
+      sourceSha, targetSha,
+    } });
+    const pushOperationId = randomUUID();
+    await db.gitPushOperation.create({ data: {
+      operationId: pushOperationId, repositoryId: repository.id, actorId: owner.id,
+      storageGeneration: repository.storageGeneration, beforeRefs: { 'refs/heads/main': targetSha },
+      status: 'NEEDS_RECONCILIATION', errorCode: 'GIT_CHILD_FAILED',
+    } });
+    const operationId = randomUUID();
+    await db.pullRequestMergeOperation.create({ data: {
+      operationId, repositoryId: repository.id, pullRequestId: pullRequest.id, actorId: owner.id,
+      status: 'NEEDS_RECONCILIATION', storageGeneration: repository.storageGeneration,
+      expectedSourceSha: sourceSha, expectedTargetSha: targetSha, oldTargetSha: targetSha, candidateSha,
+      errorCode: 'RECONCILIATION_UNAVAILABLE',
+    } });
+    const refsBefore = git(['for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)']);
+
+    await maintenance.runOnce();
+
+    expect(await db.gitPushOperation.findUniqueOrThrow({ where: { operationId: pushOperationId } }))
+      .toMatchObject({ status: 'NEEDS_RECONCILIATION', errorCode: 'GIT_CHILD_FAILED' });
+    expect(await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId } }))
+      .toMatchObject({ status: 'NEEDS_RECONCILIATION', errorCode: 'CROSS_TYPE_OPERATION_UNRESOLVED',
+        candidateSha, resultingSha: null });
+    expect(await db.pullRequest.findUniqueOrThrow({ where: { id: pullRequest.id } }))
+      .toMatchObject({ status: 'OPEN', version: 1, mergeCommitSha: null, mergedById: null });
+    expect(git(['for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)'])).toBe(refsBefore);
+    expect(await db.auditLog.count({ where: { targetId: pullRequest.id,
+      action: { in: ['PULL_REQUEST_MERGED', 'PULL_REQUEST_MERGE_RECONCILED'] } } })).toBe(0);
+
+    await maintenance.runOnce();
+
+    expect(await db.gitPushOperation.findUniqueOrThrow({ where: { operationId: pushOperationId } }))
+      .toMatchObject({ status: 'NEEDS_RECONCILIATION', errorCode: 'GIT_CHILD_FAILED' });
+    expect(await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId } }))
+      .toMatchObject({ status: 'NEEDS_RECONCILIATION', errorCode: 'CROSS_TYPE_OPERATION_UNRESOLVED',
+        candidateSha, resultingSha: null });
+    expect(await db.pullRequest.findUniqueOrThrow({ where: { id: pullRequest.id } }))
+      .toMatchObject({ status: 'OPEN', version: 1, mergeCommitSha: null, mergedById: null });
+    expect(git(['for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)'])).toBe(refsBefore);
+    expect(await db.auditLog.count({ where: { targetId: pullRequest.id,
+      action: { in: ['PULL_REQUEST_MERGED', 'PULL_REQUEST_MERGE_RECONCILED'] } } })).toBe(0);
+  });
+
   it('retains expired repository storage while a merge journal needs reconciliation', async () => {
     if (!db || !purgeService || !storageRoot) throw new Error('Maintenance test fixture was not initialized.');
     const owner = await db.user.create({ data: {
