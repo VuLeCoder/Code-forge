@@ -81,6 +81,18 @@ describe('PullRequestsService', () => {
     expect(result).toMatchObject({ stale: true, sourceSha: 'c'.repeat(40), targetSha, storageGeneration: 2 });
   });
 
+  it('maps a missing merge-time ref to a stale comparison conflict', async () => {
+    storage.compare.mockRejectedValueOnce(new NotFoundException({ error: { code: 'REF_NOT_FOUND' } }));
+
+    await expect(service.merge('owner', 'repo', ownerId, 4, { operationId, expectedSourceSha: sourceSha,
+      expectedTargetSha: targetSha, storageGeneration: 2, version: 3 })).rejects.toMatchObject({
+      response: { error: { code: 'STALE_COMPARE' } },
+      status: 409,
+    });
+    expect(db.pullRequestMergeOperation.create).not.toHaveBeenCalled();
+    expect(storage.compareAndSwapBranch).not.toHaveBeenCalled();
+  });
+
   it('caps concurrent compare work before it can occupy the shared repository lock pool', async () => {
     const snapshot = { state: 'READY' as const, sourceSha, targetSha, commits: [{ sha: sourceSha }], files: [], diff: '', diffTruncated: false };
     let releaseCompare!: (value: typeof snapshot) => void;

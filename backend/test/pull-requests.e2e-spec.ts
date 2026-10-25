@@ -277,6 +277,93 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     expect(await db.pullRequestMergeOperation.count({ where: { pullRequestId } })).toBe(0);
   }, 60_000);
 
+  it('rejects merges when compared refs advance or disappear without changing refs or merge metadata', async () => {
+    const registration = await call('POST', 'auth/register', {
+      username: 'StaleRefsOwner', email: 'stale-refs-owner@example.test', password: 'test-password-123',
+    }, '');
+    expect(registration.status).toBe(201);
+    const staleRefsCookie = cookie(registration);
+    const repositoryResponse = await call('POST', 'repositories', {
+      name: 'StaleRefs', visibility: 'PRIVATE', initializeReadme: true,
+    }, staleRefsCookie);
+    expect(repositoryResponse.status).toBe(201);
+    const { repository } = await responseJson<{ repository: { id: string } }>(repositoryResponse);
+    const storedRepository = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
+    const bare = join(storageRoot, storedRepository.storageKey);
+    const git = (args: string[], input?: string) => execFileSync('git', ['--git-dir', bare, ...args], {
+      encoding: 'utf8', input, stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    const branchSha = (branch: string) => {
+      const refs = git(['for-each-ref', '--format=%(refname)%09%(objectname)', 'refs/heads/']);
+      return refs.split('\n').map((line) => line.split('\t')).find(([ref]) => ref === `refs/heads/${branch}`)?.[1];
+    };
+    const commitWithFile = (parentSha: string, filename: string, content: string, message: string) => {
+      const blobSha = git(['hash-object', '-w', '--stdin'], content);
+      const treeSha = git(['mktree'], `100644 blob ${blobSha}\t${filename}\n`);
+      return git(['-c', 'user.name=E2E', '-c', 'user.email=e2e@example.test', 'commit-tree', treeSha,
+        '-p', parentSha, '-m', message]);
+    };
+    const initialTargetSha = git(['rev-parse', 'refs/heads/main']);
+    const cases = [
+      { name: 'source-sha-advanced', mutation: 'advance-source' },
+      { name: 'target-sha-advanced', mutation: 'advance-target' },
+      { name: 'source-deleted', mutation: 'delete-source' },
+      { name: 'target-deleted', mutation: 'delete-target' },
+    ] as const;
+
+    for (const scenario of cases) {
+      const targetBranch = `target/${scenario.name}`;
+      const sourceBranch = `feature/${scenario.name}`;
+      git(['update-ref', `refs/heads/${targetBranch}`, initialTargetSha]);
+      const sourceSha = commitWithFile(initialTargetSha, `${scenario.name}.txt`, `original ${scenario.name}\n`, scenario.name);
+      git(['update-ref', `refs/heads/${sourceBranch}`, sourceSha]);
+
+      const repoPath = 'repos/stalerefsowner/stalerefs/pulls';
+      const createdResponse = await call('POST', repoPath, {
+        title: `Stale refs ${scenario.name}`, sourceBranch, targetBranch,
+      }, staleRefsCookie);
+      expect(createdResponse.status).toBe(201);
+      const created = await responseJson<{ pullRequest: { id: string; number: number; version: number } }>(createdResponse);
+      const comparisonResponse = await call('GET', `${repoPath}/${created.pullRequest.number}/compare`, undefined, staleRefsCookie);
+      expect(comparisonResponse.status).toBe(200);
+      const comparison = await responseJson<{ sourceSha: string; targetSha: string; storageGeneration: number }>(comparisonResponse);
+      expect(comparison).toMatchObject({ sourceSha, targetSha: initialTargetSha, storageGeneration: storedRepository.storageGeneration });
+
+      let expectedSourceSha = sourceSha;
+      let expectedTargetSha = initialTargetSha;
+      if (scenario.mutation === 'advance-source') {
+        expectedSourceSha = commitWithFile(sourceSha, `${scenario.name}.txt`, `advanced ${scenario.name}\n`, 'advance source');
+        git(['update-ref', `refs/heads/${sourceBranch}`, expectedSourceSha]);
+      } else if (scenario.mutation === 'advance-target') {
+        expectedTargetSha = commitWithFile(initialTargetSha, `target-${scenario.name}.txt`, 'advanced target\n', 'advance target');
+        git(['update-ref', `refs/heads/${targetBranch}`, expectedTargetSha]);
+      } else if (scenario.mutation === 'delete-source') {
+        git(['update-ref', '-d', `refs/heads/${sourceBranch}`]);
+        expectedSourceSha = '';
+      } else {
+        git(['update-ref', '-d', `refs/heads/${targetBranch}`]);
+        expectedTargetSha = '';
+      }
+
+      const refsBeforeMerge = git(['for-each-ref', '--format=%(refname)%09%(objectname)', 'refs/heads/']);
+      const mergeResponse = await call('POST', `${repoPath}/${created.pullRequest.number}/merge`, {
+        operationId: randomUUID(), expectedSourceSha: comparison.sourceSha, expectedTargetSha: comparison.targetSha,
+        storageGeneration: comparison.storageGeneration, version: created.pullRequest.version,
+      }, staleRefsCookie);
+      if (mergeResponse.status !== 409) {
+        throw new Error(`Unexpected merge response for ${scenario.name}: ${JSON.stringify(await mergeResponse.clone().json())}`);
+      }
+      expect(await responseJson<{ error: { code: string } }>(mergeResponse)).toMatchObject({ error: { code: 'STALE_COMPARE' } });
+      expect(git(['for-each-ref', '--format=%(refname)%09%(objectname)', 'refs/heads/'])).toBe(refsBeforeMerge);
+      expect(branchSha(sourceBranch) ?? '').toBe(expectedSourceSha);
+      expect(branchSha(targetBranch) ?? '').toBe(expectedTargetSha);
+      expect(await db.pullRequest.findUniqueOrThrow({ where: { id: created.pullRequest.id } }))
+        .toMatchObject({ status: 'OPEN', version: created.pullRequest.version, mergeCommitSha: null, mergedById: null });
+      expect(await db.pullRequestMergeOperation.count({ where: { pullRequestId: created.pullRequest.id } })).toBe(0);
+      expect(await db.auditLog.count({ where: { targetId: created.pullRequest.id, action: 'PULL_REQUEST_MERGED' } })).toBe(0);
+    }
+  }, 60_000);
+
   it('creates, compares, and owner-merges a PR while preserving both Git parents', async () => {
     const registered = await call('POST', 'auth/register', {
       username: 'PullOwner', email: 'pull-owner@example.test', password: 'test-password-123',

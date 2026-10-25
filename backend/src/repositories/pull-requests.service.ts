@@ -266,7 +266,18 @@ export class PullRequestsService {
       if (unresolved) throw new ConflictException({ error: { code: 'MERGE_RECONCILIATION_REQUIRED', message: 'Một merge trước đó cần được đối soát trước khi merge tiếp.' } });
       if (pullRequest.version !== dto.version || repo.storageGeneration !== dto.storageGeneration ||
         pullRequest.storageGeneration !== dto.storageGeneration) throw new ConflictException({ error: { code: 'STALE_COMPARE', message: 'Pull request hoặc storage đã thay đổi. Hãy tải lại diff.' } });
-      const snapshot = await this.storage.compare(repo.storageKey, pullRequest.sourceBranch, pullRequest.targetBranch, lock.signal);
+      let snapshot: Awaited<ReturnType<GitStorageService['compare']>>;
+      try {
+        snapshot = await this.storage.compare(repo.storageKey, pullRequest.sourceBranch, pullRequest.targetBranch, lock.signal);
+      } catch (error) {
+        const response = error instanceof NotFoundException
+          ? error.getResponse() as { error?: { code?: string } }
+          : undefined;
+        if (response?.error?.code === 'REF_NOT_FOUND') {
+          throw new ConflictException({ error: { code: 'STALE_COMPARE', message: 'Branch nguồn hoặc đích đã bị xóa. Hãy tải lại diff.' } });
+        }
+        throw error;
+      }
       if (snapshot.state === 'NO_MERGE_BASE') throw new ConflictException({ error: { code: 'NO_MERGE_BASE', message: 'Branch không còn merge-base chung.' } });
       if (snapshot.state !== 'READY' || snapshot.sourceSha !== dto.expectedSourceSha || snapshot.targetSha !== dto.expectedTargetSha) {
         throw new ConflictException({ error: { code: 'STALE_COMPARE', message: 'Branch đã thay đổi. Hãy tải lại diff.' } });
