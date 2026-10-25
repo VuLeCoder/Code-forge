@@ -257,10 +257,11 @@ describe('GitStorageService with real Git', () => {
     const result = await storage.compare(key, 'feature/file-states', 'main');
 
     expect(result.files).toEqual(expect.arrayContaining([
-      expect.objectContaining({ path: 'text.txt', diffStatus: 'TEXT', diff: expect.stringContaining('+small text') }),
+      expect.objectContaining({ path: 'text.txt', diffStatus: 'TEXT' }),
       expect.objectContaining({ path: 'binary.dat', diffStatus: 'BINARY' }),
       expect.objectContaining({ path: 'large.txt', diffStatus: 'TRUNCATED' }),
     ]));
+    expect(result.files.find((file) => file.path === 'text.txt')?.diff).toContain('+small text');
     expect(result.diff).toContain('+small text');
     expect(result.diff).not.toContain('x'.repeat(140 * 1024));
     expect(result.diffTruncated).toBe(true);
