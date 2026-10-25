@@ -755,7 +755,7 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     }
   }, 60_000);
 
-  it('creates, compares, and owner-merges a PR while preserving both Git parents', async () => {
+  it('creates, enforces private PR read isolation, and owner-merges while preserving both Git parents', async () => {
     const registered = await call('POST', 'auth/register', {
       username: 'PullOwner', email: 'pull-owner@example.test', password: 'test-password-123',
     });
@@ -875,7 +875,29 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     expect(diffPage)
       .toMatchObject({ files: [{ path: 'feature.txt', diffStatus: 'TEXT', diff: expect.stringContaining('+button: enabled') }] });
 
-    expect((await call('GET', `${repoPath}/${number}/files?${pageQuery}`, undefined, '')).status).toBe(404);
+    const outsiderRegistration = await call('POST', 'auth/register', {
+      username: 'PullOutsider', email: 'pull-outsider@example.test', password: 'test-password-123',
+    }, '');
+    expect(outsiderRegistration.status).toBe(201);
+    const outsiderCookie = cookie(outsiderRegistration);
+    const privateReadPaths = [
+      repoPath,
+      `${repoPath}/${number}`,
+      `${repoPath}/${number}/compare`,
+      `${repoPath}/${number}/commits?${pageQuery}`,
+      `${repoPath}/${number}/files?${pageQuery}`,
+      `${repoPath}/${number}/diff?${pageQuery}`,
+    ];
+    const privateMarkers = ['Add feature', 'Exercise the server-backed PR flow.', 'feature/ui/add-button',
+      sourceSha, targetSha, 'button: enabled'];
+    for (const actor of [{ label: 'anonymous', cookies: '' }, { label: 'authenticated non-member', cookies: outsiderCookie }]) {
+      for (const path of privateReadPaths) {
+        const hiddenResponse = await call('GET', path, undefined, actor.cookies);
+        expect(hiddenResponse.status).toBe(404);
+        const body = await hiddenResponse.text();
+        for (const marker of privateMarkers) expect(body).not.toContain(marker);
+      }
+    }
     expect((await call('GET', `${repoPath}/${number}/commits?${new URLSearchParams({ ...Object.fromEntries(new URLSearchParams(pageQuery)), storageGeneration: '1' })}`)).status).toBe(409);
     expect((await call('GET', `${repoPath}/${number}/files?${new URLSearchParams({ ...Object.fromEntries(new URLSearchParams(pageQuery)), sourceSha: 'c'.repeat(40) })}`)).status).toBe(409);
     expect((await call('GET', `${repoPath}/${number}/diff?${new URLSearchParams({ ...Object.fromEntries(new URLSearchParams(pageQuery)), pageSize: '101' })}`)).status).toBe(400);
