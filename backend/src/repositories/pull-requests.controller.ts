@@ -38,8 +38,39 @@ export class PullRequestsController {
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @UseGuards(OptionalAccessTokenGuard)
   compare(@Param('owner') owner: string, @Param('repo') repo: string, @Param('number', ParseIntPipe) number: number,
-    @Req() request: Request & { user?: AuthPrincipal }) {
-    return this.pulls.compare(owner, repo, request.user?.id, number);
+    @Req() request: Request & { user?: AuthPrincipal }, @Query('summary') summary?: string) {
+    if (summary !== undefined && summary !== 'true' && summary !== 'false') throw new BadRequestException('summary phải là true hoặc false.');
+    return this.pulls.compare(owner, repo, request.user?.id, number, summary === 'true');
+  }
+
+  @Get(':number/commits')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseGuards(OptionalAccessTokenGuard)
+  compareCommits(@Param('owner') owner: string, @Param('repo') repo: string, @Param('number', ParseIntPipe) number: number,
+    @Req() request: Request & { user?: AuthPrincipal }, @Query('sourceSha') sourceSha?: string,
+    @Query('targetSha') targetSha?: string, @Query('storageGeneration') storageGeneration?: string,
+    @Query('page') page?: string, @Query('pageSize') pageSize?: string) {
+    return this.pulls.comparePage(owner, repo, request.user?.id, number, 'commits', { sourceSha, targetSha, storageGeneration, page, pageSize });
+  }
+
+  @Get(':number/files')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseGuards(OptionalAccessTokenGuard)
+  compareFiles(@Param('owner') owner: string, @Param('repo') repo: string, @Param('number', ParseIntPipe) number: number,
+    @Req() request: Request & { user?: AuthPrincipal }, @Query('sourceSha') sourceSha?: string,
+    @Query('targetSha') targetSha?: string, @Query('storageGeneration') storageGeneration?: string,
+    @Query('page') page?: string, @Query('pageSize') pageSize?: string) {
+    return this.pulls.comparePage(owner, repo, request.user?.id, number, 'files', { sourceSha, targetSha, storageGeneration, page, pageSize });
+  }
+
+  @Get(':number/diff')
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseGuards(OptionalAccessTokenGuard)
+  compareDiff(@Param('owner') owner: string, @Param('repo') repo: string, @Param('number', ParseIntPipe) number: number,
+    @Req() request: Request & { user?: AuthPrincipal }, @Query('sourceSha') sourceSha?: string,
+    @Query('targetSha') targetSha?: string, @Query('storageGeneration') storageGeneration?: string,
+    @Query('page') page?: string, @Query('pageSize') pageSize?: string) {
+    return this.pulls.comparePage(owner, repo, request.user?.id, number, 'diff', { sourceSha, targetSha, storageGeneration, page, pageSize });
   }
 
   @Patch(':number')

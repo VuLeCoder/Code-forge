@@ -13,6 +13,10 @@ const MAX_ORPHAN_TEMP_REMOVALS_PER_ROOT = 25;
 const STAGE_DIRECTORY_NAME = /^\.stage-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const README_TEMP_DIRECTORY_NAME = /^code-forge-readme-[A-Za-z0-9]{6}$/;
 
+type CompareSection = 'commits' | 'files' | 'diff';
+type CompareFile = { status: string; path: string; previousPath?: string };
+type CompareFileDiff = CompareFile & { diffStatus: 'TEXT' | 'BINARY' | 'TRUNCATED' | 'UNAVAILABLE'; diff?: string };
+
 @Injectable()
 export class GitStorageService {
   constructor(private readonly config: ConfigService) {}
@@ -220,6 +224,139 @@ export class GitStorageService {
     }
   }
 
+  async compareSummary(key: string, sourceBranch: string, targetBranch: string, signal?: AbortSignal) {
+    const compareSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000);
+    this.validateRef(sourceBranch);
+    this.validateRef(targetBranch);
+    const branches = await this.branches(key, targetBranch, undefined, compareSignal);
+    const source = branches.branches.find((branch) => branch.name === sourceBranch);
+    const target = branches.branches.find((branch) => branch.name === targetBranch);
+    if (!source || !target) throw new NotFoundException({ error: { code: 'REF_NOT_FOUND', message: 'Branch nguồn hoặc đích không tồn tại.' } });
+    return this.compareShaSummary(key, source.commitSha, target.commitSha, compareSignal);
+  }
+
+  async comparePage(key: string, sourceSha: string, targetSha: string, section: CompareSection, page: number,
+    pageSize: number, signal?: AbortSignal) {
+    this.validateCommitSha(sourceSha);
+    this.validateCommitSha(targetSha);
+    if (!['commits', 'files', 'diff'].includes(section) || !Number.isSafeInteger(page) || page < 1 || page > 1000 ||
+      !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100) {
+      throw new BadRequestException({ error: { code: 'INVALID_COMPARE_PAGE', message: 'Trang phải từ 1 đến 1000, kích thước từ 1 đến 100.' } });
+    }
+    const compareSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000);
+    const args = ['--git-dir', this.path(key)];
+    const summary = await this.compareShaSummary(key, sourceSha, targetSha, compareSignal);
+    if (summary.state === 'NO_MERGE_BASE') {
+      return { ...summary, items: [], page, pageSize, totalItems: 0, hasMore: false };
+    }
+
+    try {
+      let items: unknown[];
+      let totalItems: number;
+      if (section === 'commits') {
+        const countOutput = (await this.git([...args, 'rev-list', '--max-count=201', '--count', `${targetSha}..${sourceSha}`], undefined, 128 * 1024, compareSignal)).stdout.trim();
+        totalItems = Number(countOutput);
+        if (!Number.isSafeInteger(totalItems) || totalItems < 0) throw this.commitUnavailable();
+        if (totalItems > 200) throw this.compareLimitExceeded();
+        const output = (await this.git([...args, 'log', '--topo-order', '--no-notes', '-z', `--format=format:${this.commitFormat}`,
+          `--max-count=${pageSize}`, `--skip=${(page - 1) * pageSize}`, `${targetSha}..${sourceSha}`, '--'], undefined, 128 * 1024, compareSignal)).stdout;
+        items = this.parseCommits(output);
+      } else {
+        const files = await this.listCompareFiles(args, summary.mergeBase, sourceSha, compareSignal);
+        totalItems = files.length;
+        if (section === 'files') items = files.slice((page - 1) * pageSize, page * pageSize);
+        else {
+          const selected = files.slice((page - 1) * pageSize, page * pageSize);
+          items = await this.readCompareFileDiffs(args, summary.mergeBase, sourceSha, selected, compareSignal);
+        }
+      }
+      return { ...summary, items, page, pageSize, totalItems, hasMore: page * pageSize < totalItems };
+    } catch (error) {
+      if (error instanceof BadRequestException || error instanceof NotFoundException || error instanceof ServiceUnavailableException) throw error;
+      throw new ServiceUnavailableException({ error: { code: 'GIT_COMPARE_UNAVAILABLE', message: 'Không thể tải trang so sánh trong giới hạn cho phép.' } });
+    }
+  }
+
+  private compareLimitExceeded() {
+    return new ServiceUnavailableException({ error: { code: 'GIT_COMPARE_LIMIT_EXCEEDED', message: 'So sánh vượt giới hạn 200 commit hoặc 200 file.' } });
+  }
+
+  private async compareShaSummary(key: string, sourceSha: string, targetSha: string, signal: AbortSignal) {
+    this.validateCommitSha(sourceSha);
+    this.validateCommitSha(targetSha);
+    const args = ['--git-dir', this.path(key)];
+    let mergeBase: string;
+    try { mergeBase = (await this.git([...args, 'merge-base', targetSha, sourceSha], undefined, 128 * 1024, signal)).stdout.trim(); }
+    catch (error) {
+      if ([1, 128].includes((error as { code: number }).code)) {
+        return { state: 'NO_MERGE_BASE' as const, sourceSha, targetSha, mergeBase: null };
+      }
+      throw new ServiceUnavailableException({ error: { code: 'GIT_COMPARE_UNAVAILABLE', message: 'Không thể so sánh hai branch.' } });
+    }
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(mergeBase)) throw this.commitUnavailable();
+    const countOutput = (await this.git([...args, 'rev-list', '--max-count=201', '--count', `${targetSha}..${sourceSha}`], undefined, 128 * 1024, signal)).stdout.trim();
+    const commitCount = Number(countOutput);
+    if (!Number.isSafeInteger(commitCount) || commitCount < 0) throw this.commitUnavailable();
+    if (commitCount > 200) throw this.compareLimitExceeded();
+    return { state: commitCount ? 'READY' as const : 'ALREADY_MERGED' as const, sourceSha, targetSha, mergeBase };
+  }
+
+  private async listCompareFiles(args: string[], mergeBase: string, sourceSha: string, signal: AbortSignal): Promise<CompareFile[]> {
+    const rawFiles = (await this.git([...args, 'diff', '--name-status', '-z', '--find-renames', mergeBase, sourceSha], undefined, 128 * 1024, signal)).stdout;
+    const tokens = rawFiles.split('\0').filter(Boolean);
+    const files: CompareFile[] = [];
+    for (let i = 0; i < tokens.length;) {
+      const status = tokens[i++]!;
+      if (/^R\d+$/.test(status) || /^C\d+$/.test(status)) {
+        const previousPath = tokens[i++]; const path = tokens[i++];
+        if (!previousPath || !path) throw this.commitUnavailable();
+        files.push({ status: status[0]!, previousPath, path });
+      } else {
+        const path = tokens[i++];
+        if (!path || !/^[A-Z]$/.test(status)) throw this.commitUnavailable();
+        files.push({ status, path });
+      }
+    }
+    if (files.length > 200) throw this.compareLimitExceeded();
+    return files;
+  }
+
+  private async readCompareFileDiffs(args: string[], mergeBase: string, sourceSha: string, files: CompareFile[], signal: AbortSignal): Promise<CompareFileDiff[]> {
+    const result: CompareFileDiff[] = [];
+    let usedBytes = 0;
+    for (const file of files) {
+      if (usedBytes >= 1024 * 1024) {
+        result.push({ ...file, diffStatus: 'UNAVAILABLE' });
+        continue;
+      }
+      const paths = [file.previousPath, file.path].filter((value): value is string => Boolean(value));
+      const pathspecs = [...new Set(paths)].map((path) => `:(literal)${path}`);
+      let diff: string;
+      try {
+        diff = (await this.git([...args, 'diff', '--no-ext-diff', '--no-color', '--no-textconv', '--unified=3', '--find-renames',
+          mergeBase, sourceSha, '--', ...pathspecs], undefined, 128 * 1024 + 8192, signal)).stdout;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+          result.push({ ...file, diffStatus: 'TRUNCATED' });
+          continue;
+        }
+        throw error;
+      }
+      if (/^(?:Binary files .* differ|GIT binary patch)$/m.test(diff)) {
+        result.push({ ...file, diffStatus: 'BINARY' });
+        continue;
+      }
+      const fileBytes = Buffer.byteLength(diff, 'utf8');
+      if (fileBytes > 128 * 1024 || usedBytes + fileBytes > 1024 * 1024) {
+        result.push({ ...file, diffStatus: 'TRUNCATED' });
+        continue;
+      }
+      result.push({ ...file, diffStatus: 'TEXT', diff });
+      usedBytes += fileBytes;
+    }
+    return result;
+  }
+
   async createMergeCandidate(key: string, targetBranch: string, targetSha: string, sourceSha: string, pullRequestNumber: number, signal?: AbortSignal) {
     this.validateRef(targetBranch);
     this.validateCommitSha(targetSha);
@@ -302,10 +439,10 @@ export class GitStorageService {
     }
   }
 
-  async branchSha(key: string, branch: string) {
+  async branchSha(key: string, branch: string, signal?: AbortSignal) {
     this.validateRef(branch);
     try {
-      const sha = (await this.git(['--git-dir', this.path(key), 'rev-parse', '--verify', `refs/heads/${branch}^{commit}`])).stdout.trim();
+      const sha = (await this.git(['--git-dir', this.path(key), 'rev-parse', '--verify', `refs/heads/${branch}^{commit}`], undefined, 128 * 1024, signal)).stdout.trim();
       this.validateCommitSha(sha);
       return sha;
     } catch (error) {

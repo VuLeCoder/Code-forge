@@ -368,6 +368,41 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     expect(comparison.files.map((file: { path: string }) => file.path)).toContain('feature.txt');
     expect(comparison.diff).toContain('button: enabled');
 
+    const summaryResponse = await call('GET', `${repoPath}/${number}/compare?summary=true`);
+    expect(summaryResponse.status).toBe(200);
+    const summary = await responseJson<Record<string, unknown>>(summaryResponse);
+    expect(summary).toMatchObject({ state: 'READY', sourceSha, targetSha, storageGeneration: 0, stale: false });
+    expect(summary).not.toHaveProperty('commits');
+    expect(summary).not.toHaveProperty('files');
+    expect(summary).not.toHaveProperty('diff');
+
+    const pageQuery = new URLSearchParams({ sourceSha, targetSha, storageGeneration: '0', page: '1', pageSize: '20' }).toString();
+    const commitsPageResponse = await call('GET', `${repoPath}/${number}/commits?${pageQuery}`, undefined, writerCookie);
+    expect(commitsPageResponse.status).toBe(200);
+    expect(await responseJson<{ snapshot: { sourceSha: string; targetSha: string; storageGeneration: number };
+      pagination: { page: number; pageSize: number; totalItems: number; hasMore: boolean }; commits: { sha: string }[] }>(commitsPageResponse))
+      .toMatchObject({ snapshot: { sourceSha, targetSha, storageGeneration: 0 },
+        pagination: { page: 1, pageSize: 20, totalItems: 1, hasMore: false }, commits: [{ sha: sourceSha }] });
+
+    const filesPageResponse = await call('GET', `${repoPath}/${number}/files?${pageQuery}`, undefined, writerCookie);
+    expect(filesPageResponse.status).toBe(200);
+    expect(await responseJson<{ snapshot: { sourceSha: string; targetSha: string; storageGeneration: number };
+      files: { path: string; status: string }[] }>(filesPageResponse))
+      .toMatchObject({ snapshot: { sourceSha, targetSha, storageGeneration: 0 }, files: [{ path: 'feature.txt', status: 'A' }] });
+
+    const diffPageResponse = await call('GET', `${repoPath}/${number}/diff?${pageQuery}`, undefined, writerCookie);
+    expect(diffPageResponse.status).toBe(200);
+    const diffPage = await responseJson<{ files: { path: string; diffStatus: string; diff: string }[] }>(diffPageResponse);
+    expect(diffPage).toHaveProperty('files');
+    expect(diffPage)
+      .toMatchObject({ files: [{ path: 'feature.txt', diffStatus: 'TEXT', diff: expect.stringContaining('+button: enabled') }] });
+
+    expect((await call('GET', `${repoPath}/${number}/files?${pageQuery}`, undefined, '')).status).toBe(404);
+    expect((await call('GET', `${repoPath}/${number}/commits?${new URLSearchParams({ ...Object.fromEntries(new URLSearchParams(pageQuery)), storageGeneration: '1' })}`)).status).toBe(409);
+    expect((await call('GET', `${repoPath}/${number}/files?${new URLSearchParams({ ...Object.fromEntries(new URLSearchParams(pageQuery)), sourceSha: 'c'.repeat(40) })}`)).status).toBe(409);
+    expect((await call('GET', `${repoPath}/${number}/diff?${new URLSearchParams({ ...Object.fromEntries(new URLSearchParams(pageQuery)), pageSize: '101' })}`)).status).toBe(400);
+    expect((await call('GET', `${repoPath}/${number}/commits?targetSha=${targetSha}&storageGeneration=0`)).status).toBe(400);
+
     const unresolvedOperationId = randomUUID();
     const owner = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'pullowner' } });
     await db.pullRequestMergeOperation.create({ data: {

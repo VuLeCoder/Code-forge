@@ -15,11 +15,43 @@ const pullRequest = {
 
 const compare = {
   state: "READY", sourceSha: pullRequest.sourceSha, targetSha: pullRequest.targetSha,
-  mergeBase: "c".repeat(40), storageGeneration: 2, stale: false,
-  commits: [{ sha: pullRequest.sourceSha, subject: "Add greeting", author: { name: "Alice", email: "alice@example.test" }, authoredAt: "2026-10-24T00:00:00.000Z" }],
-  files: [{ status: "M", path: "README.md" }],
-  diff: "diff --git a/README.md b/README.md\n+Hello from Code Forge\n", diffTruncated: false,
+  mergeBase: "c".repeat(40), storageGeneration: 0, stale: false,
 };
+
+const commit = { sha: pullRequest.sourceSha, subject: "Add greeting", author: { name: "Alice", email: "alice@example.test" }, authoredAt: "2026-10-24T00:00:00.000Z" };
+const changedFile = { status: "M", path: "README.md" };
+const diffFile = { ...changedFile, diffStatus: "TEXT", diff: "diff --git a/README.md b/README.md\n+Hello from Code Forge\n" };
+
+function pageEnvelope<T>(items: T[], page = 1, totalItems = items.length) {
+  return { snapshot: { sourceSha: compare.sourceSha, targetSha: compare.targetSha, storageGeneration: compare.storageGeneration },
+    pagination: { page, pageSize: 20, totalItems, totalPages: Math.ceil(totalItems / 20), hasMore: page < Math.ceil(totalItems / 20) }, items };
+}
+
+async function routeComparePages(page: import("@playwright/test").Page, options: {
+  summary?: () => typeof compare;
+  commits?: (pageNumber: number) => ReturnType<typeof pageEnvelope<typeof commit>>;
+  files?: (pageNumber: number) => ReturnType<typeof pageEnvelope<typeof changedFile>>;
+  diff?: (pageNumber: number) => ReturnType<typeof pageEnvelope<typeof diffFile>>;
+} = {}) {
+  await page.route((url) => url.pathname.endsWith("/pulls/1/compare"), (route) => {
+    expect(new URL(route.request().url()).searchParams.get("summary")).toBe("true");
+    return route.fulfill({ json: options.summary?.() ?? compare });
+  });
+  for (const [suffix, getItems] of [["commits", options.commits ?? (() => pageEnvelope([commit]))],
+    ["files", options.files ?? (() => pageEnvelope([changedFile]))], ["diff", options.diff ?? (() => pageEnvelope([diffFile]))]] as const) {
+    await page.route((url) => url.pathname.endsWith(`/pulls/1/${suffix}`), (route) => {
+      const url = new URL(route.request().url());
+      expect(url.searchParams.get("sourceSha")).toBe(compare.sourceSha);
+      expect(url.searchParams.get("targetSha")).toBe(compare.targetSha);
+      expect(url.searchParams.get("storageGeneration")).toBe("0");
+      const pageNumber = Number(url.searchParams.get("page"));
+      expect(pageNumber).toBeGreaterThan(0);
+      expect(url.searchParams.get("pageSize")).toBe("20");
+      const response = getItems(pageNumber);
+      return route.fulfill({ json: { ...response, [suffix === "commits" ? "commits" : "files"]: response.items } });
+    });
+  }
+}
 
 test("owner creates a pull request from a slash branch and reviews the compare snapshot", async ({ page }) => {
   await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { user: owner } }));
@@ -37,7 +69,7 @@ test("owner creates a pull request from a slash branch and reviews the compare s
   await page.route("**/api/v1/repos/alice/project/pulls/1", (route) =>
     route.fulfill({ json: { pullRequest, permissions: { canCreate: true, canEdit: true, canMerge: true }, mergeOperation: null } }),
   );
-  await page.route("**/api/v1/repos/alice/project/pulls/1/compare", (route) => route.fulfill({ json: compare }));
+  await routeComparePages(page);
 
   await page.goto("/alice/project/pulls");
   await page.getByRole("button", { name: "Tạo pull request", exact: true }).first().click();
@@ -54,7 +86,7 @@ test("owner creates a pull request from a slash branch and reviews the compare s
   await expect(page.getByRole("heading", { name: /Add greeting/ })).toBeVisible();
   await expect(page.getByRole("heading", { name: /Commits/ })).toBeVisible();
   await expect(page.getByText("feature/greeting", { exact: true }).first()).toBeVisible();
-  await expect(page.getByLabel("Nội dung diff dạng văn bản")).toContainText("Hello from Code Forge");
+  await expect(page.getByLabel("Diff của README.md")).toContainText("Hello from Code Forge");
 });
 
 test("stale compare prevents owner merge and displays a refresh warning", async ({ page }) => {
@@ -62,13 +94,90 @@ test("stale compare prevents owner merge and displays a refresh warning", async 
   await page.route("**/api/v1/repos/alice/project/pulls/1", (route) =>
     route.fulfill({ json: { pullRequest, permissions: { canCreate: true, canEdit: true, canMerge: true }, mergeOperation: null } }),
   );
-  await page.route("**/api/v1/repos/alice/project/pulls/1/compare", (route) =>
-    route.fulfill({ json: { ...compare, stale: true } }),
-  );
+  await routeComparePages(page, { summary: () => ({ ...compare, stale: true }) });
 
   await page.goto("/alice/project/pulls/1");
   await expect(page.getByRole("status").filter({ hasText: "Branch đã thay đổi" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Merge pull request" })).toBeDisabled();
+});
+
+test("compare 409 reloads summary and all pages from one refreshed snapshot", async ({ page }) => {
+  await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { user: owner } }));
+  await page.route("**/api/v1/repos/alice/project/pulls/1", (route) =>
+    route.fulfill({ json: { pullRequest, permissions: { canCreate: true, canEdit: true, canMerge: true }, mergeOperation: null } }),
+  );
+  const fresh = { ...compare, sourceSha: "f".repeat(40), storageGeneration: 1 };
+  let summaryCalls = 0;
+  let oldSnapshotCommitCalls = 0;
+  const acceptedSnapshots: string[] = [];
+  await page.route((url) => url.pathname.endsWith("/pulls/1/compare"), (route) => {
+    summaryCalls += 1;
+    expect(new URL(route.request().url()).searchParams.get("summary")).toBe("true");
+    return route.fulfill({ json: summaryCalls === 1 ? compare : fresh });
+  });
+  for (const suffix of ["commits", "files", "diff"] as const) {
+    await page.route((url) => url.pathname.endsWith(`/pulls/1/${suffix}`), (route) => {
+      const url = new URL(route.request().url());
+      const sourceSha = url.searchParams.get("sourceSha");
+      const storageGeneration = url.searchParams.get("storageGeneration");
+      if (sourceSha === compare.sourceSha) {
+        if (suffix === "commits") oldSnapshotCommitCalls += 1;
+        return route.fulfill({ status: 409, json: { error: { code: "STALE_COMPARE", message: "Snapshot cũ." } } });
+      }
+      acceptedSnapshots.push(`${suffix}:${sourceSha}:${url.searchParams.get("targetSha")}:${storageGeneration}:${url.searchParams.get("page")}:${url.searchParams.get("pageSize")}`);
+      const response = suffix === "commits" ? pageEnvelope([{ ...commit, subject: "Fresh snapshot commit" }])
+        : suffix === "files" ? pageEnvelope([changedFile]) : pageEnvelope([diffFile]);
+      return route.fulfill({ json: { ...response, snapshot: { sourceSha: fresh.sourceSha, targetSha: fresh.targetSha, storageGeneration: fresh.storageGeneration }, [suffix === "commits" ? "commits" : "files"]: response.items } });
+    });
+  }
+
+  await page.goto("/alice/project/pulls/1");
+  await expect(page.getByText("Fresh snapshot commit")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Merge pull request" })).toBeEnabled();
+  expect(summaryCalls).toBe(2);
+  expect(oldSnapshotCommitCalls).toBe(1);
+  expect(acceptedSnapshots).toHaveLength(3);
+  expect(acceptedSnapshots.every((value) => value.includes(`${fresh.sourceSha}:${fresh.targetSha}:1:1:20`))).toBe(true);
+});
+
+test("compare page controls request only the selected page and announce pagination metadata", async ({ page }) => {
+  await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { user: owner } }));
+  await page.route("**/api/v1/repos/alice/project/pulls/1", (route) =>
+    route.fulfill({ json: { pullRequest, permissions: { canCreate: true, canEdit: true, canMerge: true }, mergeOperation: null } }),
+  );
+  const commitRequests: number[] = [];
+  const fileRequests: number[] = [];
+  await routeComparePages(page, {
+    commits: (pageNumber) => {
+      commitRequests.push(pageNumber);
+      return pageEnvelope(pageNumber === 1 ? [commit] : [{ ...commit, sha: "e".repeat(40), subject: "Commit on page two" }], pageNumber, 21);
+    },
+    files: (pageNumber) => {
+      fileRequests.push(pageNumber);
+      return pageEnvelope(pageNumber === 1 ? [changedFile] : [{ status: "A", path: "src/new-page.ts" }], pageNumber, 21);
+    },
+    diff: (pageNumber) => pageEnvelope(pageNumber === 1 ? [diffFile] : [{ status: "A", path: "src/new-page.ts", diffStatus: "TEXT", diff: "+new page" }], pageNumber, 21),
+  });
+
+  await page.goto("/alice/project/pulls/1");
+  const commitPagination = page.getByRole("navigation", { name: "Phân trang commits" });
+  await expect(commitPagination).toContainText("Trang 1/2 · 21 mục");
+  await expect(commitPagination.getByRole("button", { name: "Trang trước" })).toBeDisabled();
+  await expect(commitPagination.getByRole("button", { name: "Trang tiếp" })).toBeEnabled();
+  await commitPagination.getByRole("button", { name: "Trang tiếp" }).focus();
+  await commitPagination.getByRole("button", { name: "Trang tiếp" }).press("Enter");
+  await expect(page.getByText("Commit on page two")).toBeVisible();
+  await expect(commitPagination).toContainText("Trang 2/2 · 21 mục");
+  await expect(commitPagination.getByRole("button", { name: "Trang trước" })).toBeEnabled();
+  await expect(commitPagination.getByRole("button", { name: "Trang tiếp" })).toBeDisabled();
+
+  const filePagination = page.getByRole("navigation", { name: "Phân trang files changed và diff" });
+  await filePagination.getByRole("button", { name: "Trang tiếp" }).click();
+  await expect(page.getByText("src/new-page.ts", { exact: true }).first()).toBeVisible();
+  await expect(filePagination).toContainText("Trang 2/2 · 21 mục");
+  await expect(page.getByLabel("Diff của src/new-page.ts")).toContainText("+new page");
+  expect(commitRequests).toEqual([1, 2]);
+  expect(fileRequests).toEqual([1, 2]);
 });
 
 test("PR detail announces a backend failure and recovers through keyboard retry without a reload", async ({ page }) => {
@@ -81,10 +190,10 @@ test("PR detail announces a backend failure and recovers through keyboard retry 
       ? route.fulfill({ status: 503, json: { error: { code: "BACKEND_UNAVAILABLE", message: "Backend tạm thời không thể kết nối." } } })
       : route.fulfill({ json: { pullRequest, permissions: { canCreate: true, canEdit: true, canMerge: true }, mergeOperation: null } });
   });
-  await page.route("**/api/v1/repos/alice/project/pulls/1/compare", (route) => {
+  await routeComparePages(page, { summary: () => {
     compareCalls += 1;
-    return route.fulfill({ json: compare });
-  });
+    return compare;
+  } });
 
   await page.goto("/alice/project/pulls/1");
   const error = page.locator("p[role=alert]");
@@ -95,7 +204,7 @@ test("PR detail announces a backend failure and recovers through keyboard retry 
   await retry.press("Enter");
 
   await expect(page.getByRole("heading", { name: /Add greeting/ })).toBeVisible();
-  await expect(page.getByLabel("Nội dung diff dạng văn bản")).toContainText("Hello from Code Forge");
+  await expect(page.getByLabel("Diff của README.md")).toContainText("Hello from Code Forge");
   await expect(page.getByRole("button", { name: "Merge pull request" })).toBeEnabled();
   await expect(page.getByText("Không có commit mới trong snapshot này.", { exact: true })).toHaveCount(0);
   expect(detailCalls).toBe(2);
@@ -108,7 +217,7 @@ test("owner confirms merge with the displayed snapshot and sees a stale conflict
   await page.route("**/api/v1/repos/alice/project/pulls/1", (route) =>
     route.fulfill({ json: { pullRequest, permissions: { canCreate: true, canEdit: true, canMerge: true }, mergeOperation: null } }),
   );
-  await page.route("**/api/v1/repos/alice/project/pulls/1/compare", (route) => route.fulfill({ json: compare }));
+  await routeComparePages(page);
   let mergeRequest: Record<string, unknown> | undefined;
   await page.route("**/api/v1/repos/alice/project/pulls/1/merge", async (route) => {
     mergeRequest = route.request().postDataJSON() as Record<string, unknown>;
@@ -136,7 +245,7 @@ test("owner confirms merge with the displayed snapshot and sees a stale conflict
   await expect(page.locator("p[role=alert]")).toBeFocused();
   expect(mergeRequest).toMatchObject({
     expectedSourceSha: pullRequest.sourceSha, expectedTargetSha: pullRequest.targetSha,
-    storageGeneration: 2, version: 3,
+    storageGeneration: 0, version: 3,
   });
   expect(mergeRequest?.operationId).toEqual(expect.any(String));
 });
@@ -209,24 +318,21 @@ test("long PR labels and diff stay contained at 375px while review controls rema
   const longTarget = `release/${"stable-target-".repeat(8)}`;
   const longPath = `packages/${"nested-folder/".repeat(10)}exceptionally-long-source-file-name.ts`;
   const longPullRequest = { ...pullRequest, sourceBranch: longSource, targetBranch: longTarget };
-  const longCompare = {
-    ...compare,
-    commits: [{ ...compare.commits[0], subject: `Add a coordinated change from ${longSource}` }],
-    files: [{ status: "M", path: longPath }],
-    diff: `diff --git a/${longPath} b/${longPath}\n+${"unbroken-diff-segment".repeat(120)}\n`,
-  };
+  const longCommit = { ...commit, subject: `Add a coordinated change from ${longSource}` };
+  const longFile = { status: "M", path: longPath };
+  const longDiff = { ...longFile, diffStatus: "TEXT" as const, diff: `diff --git a/${longPath} b/${longPath}\n+${"unbroken-diff-segment".repeat(120)}\n` };
   await page.route("**/api/v1/repos/alice/project/pulls/1", (route) =>
     route.fulfill({ json: { pullRequest: longPullRequest, permissions: { canCreate: true, canEdit: true, canMerge: true }, mergeOperation: null } }),
   );
-  await page.route("**/api/v1/repos/alice/project/pulls/1/compare", (route) => route.fulfill({ json: longCompare }));
+  await routeComparePages(page, { commits: () => pageEnvelope([longCommit]), files: () => pageEnvelope([longFile]), diff: () => pageEnvelope([longDiff]) });
 
   await page.goto("/alice/project/pulls/1");
   await expect(page.getByRole("heading", { name: /Add greeting/ })).toBeVisible();
   await expect(page.getByText(longSource, { exact: true })).toBeVisible();
-  await expect(page.getByText(longPath, { exact: true })).toBeVisible();
+  await expect(page.getByText(longPath, { exact: true }).first()).toBeVisible();
   const widths = await page.evaluate(() => ({ viewport: window.innerWidth, document: document.documentElement.scrollWidth }));
   expect(widths.document).toBeLessThanOrEqual(widths.viewport);
-  const diff = page.getByLabel("Nội dung diff dạng văn bản");
+  const diff = page.getByLabel(`Diff của ${longPath}`);
   const diffWidths = await diff.evaluate((element) => ({ client: element.clientWidth, content: element.scrollWidth }));
   expect(diffWidths.content).toBeGreaterThan(diffWidths.client);
 
@@ -253,7 +359,7 @@ test("owner cannot submit another merge while the previous operation is reconcil
     route.fulfill({ json: { pullRequest, permissions: { canCreate: true, canEdit: true, canMerge: true },
       mergeOperation: { operationId: "merge-op", status: "NEEDS_RECONCILIATION", errorCode: null } } }),
   );
-  await page.route("**/api/v1/repos/alice/project/pulls/1/compare", (route) => route.fulfill({ json: compare }));
+  await routeComparePages(page);
 
   await page.goto("/alice/project/pulls/1");
 
@@ -277,7 +383,7 @@ test("background reconciliation announces the completed merge", async ({ page })
         : { operationId: "merge-op", status: "COMPLETED", errorCode: null },
     } });
   });
-  await page.route("**/api/v1/repos/alice/project/pulls/1/compare", (route) => route.fulfill({ json: compare }));
+  await routeComparePages(page);
 
   await page.goto("/alice/project/pulls/1");
   await expect(page.getByRole("status").filter({ hasText: "đang đối soát" })).toBeVisible();

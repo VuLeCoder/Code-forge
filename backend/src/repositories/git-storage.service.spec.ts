@@ -236,6 +236,25 @@ describe('GitStorageService with real Git', () => {
       expect.objectContaining({ status: 'A', path: 'feature.txt' }),
     ]));
     expect(result.diff).toContain('+added line');
+
+    const summary = await storage.compareSummary(key, 'feature/compare', 'main');
+    expect(summary).toEqual({ state: 'READY', sourceSha: source, targetSha: base, mergeBase: base });
+    const commitPage = await storage.comparePage(key, source, base, 'commits', 1, 1);
+    expect(commitPage).toMatchObject({ sourceSha: source, targetSha: base, page: 1, pageSize: 1, totalItems: 1, hasMore: false });
+    expect(commitPage.items).toEqual([expect.objectContaining({ sha: source })]);
+    const firstFilePage = await storage.comparePage(key, source, base, 'files', 1, 1);
+    const secondFilePage = await storage.comparePage(key, source, base, 'files', 2, 1);
+    expect(firstFilePage).toMatchObject({ totalItems: 2, page: 1, pageSize: 1, hasMore: true });
+    expect(secondFilePage).toMatchObject({ totalItems: 2, page: 2, pageSize: 1, hasMore: false });
+    const diffPage = await storage.comparePage(key, source, base, 'diff', 1, 1);
+    expect(diffPage.items[0]).toMatchObject({ diffStatus: 'TEXT' });
+    expect((diffPage.items[0] as { diff?: string }).diff).toContain('diff --git');
+    await expect(storage.comparePage(key, source, base, 'commits', 0, 20)).rejects.toMatchObject({
+      response: { error: { code: 'INVALID_COMPARE_PAGE' } },
+    });
+    await expect(storage.comparePage(key, source, base, 'commits', 1, 101)).rejects.toMatchObject({
+      response: { error: { code: 'INVALID_COMPARE_PAGE' } },
+    });
   });
 
   it('returns per-file compare states for text, binary, and diffs above the file limit', async () => {
@@ -265,6 +284,12 @@ describe('GitStorageService with real Git', () => {
     expect(result.diff).toContain('+small text');
     expect(result.diff).not.toContain('x'.repeat(140 * 1024));
     expect(result.diffTruncated).toBe(true);
+    const diffPage = await storage.comparePage(key, source, result.targetSha, 'diff', 1, 100);
+    expect(diffPage.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'text.txt', diffStatus: 'TEXT' }),
+      expect.objectContaining({ path: 'binary.dat', diffStatus: 'BINARY' }),
+      expect.objectContaining({ path: 'large.txt', diffStatus: 'TRUNCATED' }),
+    ]));
   });
 
   it('returns NO_MERGE_BASE for unrelated branch histories without changing refs', async () => {
@@ -284,6 +309,10 @@ describe('GitStorageService with real Git', () => {
 
     expect(result).toEqual({ state: 'NO_MERGE_BASE', sourceSha, targetSha, mergeBase: null,
       commits: [], files: [], diff: '', diffTruncated: false });
+    await expect(storage.compareSummary(key, 'feature/unrelated-root', 'main'))
+      .resolves.toEqual({ state: 'NO_MERGE_BASE', sourceSha, targetSha, mergeBase: null });
+    await expect(storage.comparePage(key, sourceSha, targetSha, 'files', 1, 20))
+      .resolves.toMatchObject({ state: 'NO_MERGE_BASE', items: [], totalItems: 0, hasMore: false });
     expect(await storage.snapshotRefs(key)).toEqual(beforeRefs);
   });
 

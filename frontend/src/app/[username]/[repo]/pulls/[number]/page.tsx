@@ -23,13 +23,21 @@ type ChangedFile = {
   diff?: string;
   diffTruncated?: boolean;
 };
-type CompareResult = { state: "READY" | "ALREADY_MERGED" | "NO_MERGE_BASE" | "STORAGE_RESET"; sourceSha: string; targetSha: string; mergeBase: string | null; commits: Commit[]; files: ChangedFile[]; diff: string; diffTruncated: boolean; storageGeneration: number; stale?: boolean };
+type CompareSummary = { state: "READY" | "ALREADY_MERGED" | "NO_MERGE_BASE" | "STORAGE_RESET"; sourceSha: string; targetSha: string; mergeBase: string | null; storageGeneration: number; stale?: boolean };
+type Pagination = { page: number; pageSize: number; totalItems: number; totalPages: number; hasMore: boolean };
+type Snapshot = Pick<CompareSummary, "sourceSha" | "targetSha" | "storageGeneration">;
+type CommitPage = { snapshot: Snapshot; pagination: Pagination; commits: Commit[] };
+type FilePage = { snapshot: Snapshot; pagination: Pagination; files: ChangedFile[] };
+
+class ApiRequestError extends Error {
+  constructor(message: string, readonly status: number, readonly code?: string) { super(message); }
+}
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await sessionFetch(url, { ...init, cache: "no-store", headers: init?.body ? { "content-type": "application/json", ...init.headers } : init?.headers });
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { error?: { code?: string; message?: string }; message?: string } | null;
-    throw new Error(body?.error?.message ?? body?.message ?? `Yêu cầu thất bại (${response.status}).`);
+    throw new ApiRequestError(body?.error?.message ?? body?.message ?? `Yêu cầu thất bại (${response.status}).`, response.status, body?.error?.code);
   }
   return response.json() as Promise<T>;
 }
@@ -43,7 +51,12 @@ export default function PullRequestDetailPage() {
   const number = Number(params.number);
   const base = useMemo(() => `/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${encodeURIComponent(params.number)}`, [owner, repo, params.number]);
   const [result, setResult] = useState<DetailResult | null>(null);
-  const [compare, setCompare] = useState<CompareResult | null>(null);
+  const [compare, setCompare] = useState<CompareSummary | null>(null);
+  const [commitsPage, setCommitsPage] = useState<CommitPage | null>(null);
+  const [filesPage, setFilesPage] = useState<FilePage | null>(null);
+  const [diffPage, setDiffPage] = useState<FilePage | null>(null);
+  const [sectionBusy, setSectionBusy] = useState({ commits: false, files: false });
+  const [sectionErrors, setSectionErrors] = useState({ commits: "", files: "" });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [actionError, setActionError] = useState("");
@@ -80,32 +93,57 @@ export default function PullRequestDetailPage() {
   }, [editing]);
 
   const fetchCurrent = useCallback(() => Promise.all([
-    requestJson<DetailResult>(base), requestJson<CompareResult>(`${base}/compare`),
+    requestJson<DetailResult>(base), requestJson<CompareSummary>(`${base}/compare?summary=true`),
   ]), [base]);
+
+  const fetchPageSet = useCallback((snapshot: Snapshot, page = 1) => {
+    const query = new URLSearchParams({ sourceSha: snapshot.sourceSha, targetSha: snapshot.targetSha,
+      storageGeneration: String(snapshot.storageGeneration), page: String(page), pageSize: "20" });
+    return Promise.all([
+      requestJson<CommitPage>(`${base}/commits?${query}`),
+      requestJson<FilePage>(`${base}/files?${query}`),
+      requestJson<FilePage>(`${base}/diff?${query}`),
+    ]);
+  }, [base]);
+
+  const isStaleSnapshot = (cause: unknown) => cause instanceof ApiRequestError && cause.status === 409 && cause.code === "STALE_COMPARE";
+  const matchesSnapshot = (value: Snapshot, snapshot: Snapshot) => value.sourceSha === snapshot.sourceSha
+    && value.targetSha === snapshot.targetSha && value.storageGeneration === snapshot.storageGeneration;
 
   const load = useCallback(async () => {
     setLoading(true); setActionError("");
+    setSectionErrors({ commits: "", files: "" });
     try {
-      const [detail, snapshot] = await fetchCurrent();
-      setError(""); setResult(detail); setCompare(snapshot);
-      setReconciling(detail.mergeOperation?.status === "PENDING" || detail.mergeOperation?.status === "NEEDS_RECONCILIATION");
-      setTitle(detail.pullRequest.title); setDescription(detail.pullRequest.description ?? "");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Không thể tải pull request."); }
-    finally { setLoading(false); }
-  }, [fetchCurrent]);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const [detail, snapshot] = await fetchCurrent();
+          let pages: [CommitPage, FilePage, FilePage] | null = null;
+          if (snapshot.state === "READY") {
+            try { pages = await fetchPageSet(snapshot); }
+            catch (cause) { if (isStaleSnapshot(cause) && attempt === 0) continue; throw cause; }
+            if (!pages.every((page) => matchesSnapshot(page.snapshot, snapshot))) {
+              if (attempt === 0) continue;
+              throw new ApiRequestError("Snapshot compare đã thay đổi. Hãy tải lại.", 409, "STALE_COMPARE");
+            }
+          }
+          setError(""); setResult(detail); setCompare(snapshot);
+          setCommitsPage(pages?.[0] ?? null); setFilesPage(pages?.[1] ?? null); setDiffPage(pages?.[2] ?? null);
+          setReconciling(detail.mergeOperation?.status === "PENDING" || detail.mergeOperation?.status === "NEEDS_RECONCILIATION");
+          setTitle(detail.pullRequest.title); setDescription(detail.pullRequest.description ?? "");
+          return;
+        } catch (cause) {
+          if (isStaleSnapshot(cause) && attempt === 0) continue;
+          setError(cause instanceof Error ? cause.message : "Không thể tải pull request.");
+          return;
+        }
+      }
+      setError("Snapshot compare thay đổi liên tục. Hãy thử tải lại.");
+    } finally { setLoading(false); }
+  }, [fetchCurrent, fetchPageSet]);
 
   useEffect(() => {
-    let active = true;
-    void fetchCurrent().then(([detail, snapshot]) => {
-      if (!active) return;
-      setError(""); setResult(detail); setCompare(snapshot);
-      setReconciling(detail.mergeOperation?.status === "PENDING" || detail.mergeOperation?.status === "NEEDS_RECONCILIATION");
-      setTitle(detail.pullRequest.title); setDescription(detail.pullRequest.description ?? "");
-    }).catch((cause: unknown) => {
-      if (active) setError(cause instanceof Error ? cause.message : "Không thể tải pull request.");
-    }).finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [fetchCurrent]);
+    void load();
+  }, [load]);
 
   useEffect(() => {
     if (!reconciling) return;
@@ -113,6 +151,11 @@ export default function PullRequestDetailPage() {
     const timer = setInterval(() => {
       void fetchCurrent().then(([detail, snapshot]) => {
         if (!active) return;
+        if (!compare || snapshot.sourceSha !== compare.sourceSha || snapshot.targetSha !== compare.targetSha
+          || snapshot.storageGeneration !== compare.storageGeneration || snapshot.state !== compare.state) {
+          void load();
+          return;
+        }
         setResult(detail); setCompare(snapshot);
         setReconciling(detail.mergeOperation?.status === "PENDING" || detail.mergeOperation?.status === "NEEDS_RECONCILIATION");
         if (detail.mergeOperation?.status === "FAILED") {
@@ -121,7 +164,41 @@ export default function PullRequestDetailPage() {
       }).catch(() => { /* Keep the pending state visible and retry on the next poll. */ });
     }, 3000);
     return () => { active = false; clearInterval(timer); };
-  }, [fetchCurrent, reconciling]);
+  }, [compare, fetchCurrent, load, reconciling]);
+
+  const changeCommitPage = useCallback(async (page: number) => {
+    if (!compare || page < 1 || page > (commitsPage?.pagination.totalPages ?? 1)) return;
+    setSectionBusy((state) => ({ ...state, commits: true })); setSectionErrors((state) => ({ ...state, commits: "" }));
+    try {
+      const query = new URLSearchParams({ sourceSha: compare.sourceSha, targetSha: compare.targetSha,
+        storageGeneration: String(compare.storageGeneration), page: String(page), pageSize: "20" });
+      const response = await requestJson<CommitPage>(`${base}/commits?${query}`);
+      if (!matchesSnapshot(response.snapshot, compare)) throw new ApiRequestError("Snapshot compare đã thay đổi.", 409, "STALE_COMPARE");
+      setCommitsPage(response);
+    } catch (cause) {
+      if (isStaleSnapshot(cause)) void load();
+      else setSectionErrors((state) => ({ ...state, commits: cause instanceof Error ? cause.message : "Không thể tải commits." }));
+    } finally { setSectionBusy((state) => ({ ...state, commits: false })); }
+  }, [base, compare, commitsPage?.pagination.totalPages, load]);
+
+  const changeFilePage = useCallback(async (page: number) => {
+    if (!compare || page < 1 || page > (filesPage?.pagination.totalPages ?? 1)) return;
+    setSectionBusy((state) => ({ ...state, files: true })); setSectionErrors((state) => ({ ...state, files: "" }));
+    try {
+      const query = new URLSearchParams({ sourceSha: compare.sourceSha, targetSha: compare.targetSha,
+        storageGeneration: String(compare.storageGeneration), page: String(page), pageSize: "20" });
+      const [files, diff] = await Promise.all([
+        requestJson<FilePage>(`${base}/files?${query}`), requestJson<FilePage>(`${base}/diff?${query}`),
+      ]);
+      if (!matchesSnapshot(files.snapshot, compare) || !matchesSnapshot(diff.snapshot, compare)) {
+        throw new ApiRequestError("Snapshot compare đã thay đổi.", 409, "STALE_COMPARE");
+      }
+      setFilesPage(files); setDiffPage(diff);
+    } catch (cause) {
+      if (isStaleSnapshot(cause)) void load();
+      else setSectionErrors((state) => ({ ...state, files: cause instanceof Error ? cause.message : "Không thể tải files và diff." }));
+    } finally { setSectionBusy((state) => ({ ...state, files: false })); }
+  }, [base, compare, filesPage?.pagination.totalPages, load]);
 
   async function update(fields: { title?: string; description?: string | null; state?: "OPEN" | "CLOSED" }) {
     setBusy(true); setActionError("");
@@ -159,8 +236,19 @@ export default function PullRequestDetailPage() {
   const pull = result.pullRequest;
   const canEdit = result.permissions.canEdit && pull.status !== "MERGED";
   const canMerge = result.permissions.canMerge && pull.status === "OPEN" && compare.state === "READY" && !compare.stale && !reconciling;
-  const hasPerFileDiff = compare.files.some((file) => file.diffStatus !== undefined || typeof file.diff === "string");
-  return <main className={`container ${styles.page}`} aria-busy={loading || busy}>
+  const renderPagination = (label: string, pagination: Pagination | undefined, busy: boolean, onPage: (page: number) => void) => {
+    if (!pagination || pagination.totalPages <= 1) return null;
+    return <nav className={styles.pagination} aria-label={`Phân trang ${label}`}>
+      <button className="button buttonSecondary" disabled={busy || pagination.page <= 1} onClick={() => onPage(pagination.page - 1)}>Trang trước</button>
+      <span aria-live="polite">Trang {pagination.page}/{pagination.totalPages} · {pagination.totalItems} mục</span>
+      <button className="button buttonSecondary" disabled={busy || !pagination.hasMore} onClick={() => onPage(pagination.page + 1)}>Trang tiếp</button>
+    </nav>;
+  };
+  const pageStatus = compare.state === "STORAGE_RESET" ? "Source không còn khả dụng sau khi storage được khởi tạo lại."
+    : compare.state === "NO_MERGE_BASE" ? "Không thể liệt kê thay đổi vì hai branch không còn merge-base chung."
+      : "Không có mục nào trong snapshot này.";
+  const pageBusy = loading || busy || sectionBusy.commits || sectionBusy.files;
+  return <main className={`container ${styles.page}`} aria-busy={pageBusy}>
     <nav className={styles.breadcrumb} aria-label="Điều hướng"><Link href={`/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`}>{owner}/{repo}</Link><span aria-hidden="true">/</span><Link href={`/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`}>Pull requests</Link><span aria-hidden="true">/</span><strong>#{number}</strong></nav>
     <header className={styles.header}>
       <div><span className="eyebrow">Pull request #{pull.number}</span><h1>{pull.title} <span className={styles.muted}>#{pull.number}</span></h1><p><span className={`${styles.state} ${styles[`state${pull.status}`]}`}>{stateText(pull.status)}</span> {pull.author.username} đề nghị merge <code>{pull.sourceBranch}</code> vào <code>{pull.targetBranch}</code></p></div>
@@ -187,13 +275,25 @@ export default function PullRequestDetailPage() {
     {compare.state === "NO_MERGE_BASE" && <p className={styles.warning} role="status">Hai branch không còn merge-base chung. Hãy đóng PR và tạo PR mới từ lịch sử phù hợp.</p>}
     {compare.state === "ALREADY_MERGED" && <p className={styles.success} role="status">Các commit nguồn đã có trong branch đích.</p>}
     {compare.stale && <p className={styles.warning} role="status">Branch đã thay đổi kể từ lúc tạo PR. Hãy kiểm tra snapshot mới bên dưới trước khi merge.</p>}
-    {!hasPerFileDiff && compare.diffTruncated && <p className={styles.warning} role="status">Diff đã được rút gọn theo giới hạn hiển thị. Tải clone để xem toàn bộ nội dung.</p>}
-
     <section className={styles.panel} aria-labelledby="description-title"><h2 id="description-title">Mô tả</h2>{pull.description ? <p className={styles.description}>{pull.description}</p> : <p className={styles.muted}>Chưa có mô tả.</p>}</section>
-    <section className={styles.panel} aria-labelledby="commits-title"><h2 id="commits-title">Commits <span className={styles.count}>{compare.commits.length}</span></h2>{compare.commits.length ? <ol className={styles.commitList}>{compare.commits.map((commit) => <li key={commit.sha}><code>{commit.sha.slice(0, 12)}</code><span>{commit.subject || "(không có tiêu đề)"}</span><small>{commit.author.name} · {new Date(commit.authoredAt).toLocaleString("vi-VN")}</small></li>)}</ol> : <p className={styles.muted}>Không có commit mới trong snapshot này.</p>}</section>
-    <section className={styles.panel} aria-labelledby="files-title"><h2 id="files-title">Files changed <span className={styles.count}>{compare.files.length}</span></h2>{compare.files.length ? <ul className={styles.fileList}>{compare.files.map((file, index) => <li key={`${file.path}-${index}`}><span className={styles.fileStatus} aria-label={`Trạng thái ${file.status}`}>{file.status}</span><code>{file.previousPath ? `${file.previousPath} → ` : ""}{file.path}</code></li>)}</ul> : <p className={styles.muted}>Không có file thay đổi.</p>}</section>
-    <section className={styles.panel} aria-labelledby="diff-title"><h2 id="diff-title">Diff</h2>{hasPerFileDiff ? <div className={styles.fileDiffList}>
-      {compare.files.map((file, index) => {
+    <section className={styles.panel} aria-labelledby="commits-title" aria-busy={sectionBusy.commits}>
+      <h2 id="commits-title">Commits <span className={styles.count}>{commitsPage?.pagination.totalItems ?? 0}</span></h2>
+      {sectionErrors.commits && <p className={styles.error} role="alert">{sectionErrors.commits} <button className={styles.refresh} onClick={() => void changeCommitPage(commitsPage?.pagination.page ?? 1)}>Thử lại</button></p>}
+      {sectionBusy.commits && <p className={styles.status} role="status">Đang tải commits…</p>}
+      {commitsPage?.commits.length ? <ol className={styles.commitList}>{commitsPage.commits.map((commit) => <li key={commit.sha}><code>{commit.sha.slice(0, 12)}</code><span>{commit.subject || "(không có tiêu đề)"}</span><small>{commit.author.name} · {new Date(commit.authoredAt).toLocaleString("vi-VN")}</small></li>)}</ol> : <p className={styles.muted}>{pageStatus}</p>}
+      {renderPagination("commits", commitsPage?.pagination, sectionBusy.commits, (page) => void changeCommitPage(page))}
+    </section>
+    <section className={styles.panel} aria-labelledby="files-title" aria-busy={sectionBusy.files}>
+      <h2 id="files-title">Files changed <span className={styles.count}>{filesPage?.pagination.totalItems ?? 0}</span></h2>
+      {sectionErrors.files && <p className={styles.error} role="alert">{sectionErrors.files} <button className={styles.refresh} onClick={() => void changeFilePage(filesPage?.pagination.page ?? 1)}>Thử lại</button></p>}
+      {sectionBusy.files && <p className={styles.status} role="status">Đang tải files và diff…</p>}
+      {filesPage?.files.length ? <ul className={styles.fileList}>{filesPage.files.map((file, index) => <li key={`${file.path}-${index}`}><span className={styles.fileStatus} aria-label={`Trạng thái ${file.status}`}>{file.status}</span><code>{file.previousPath ? `${file.previousPath} → ` : ""}{file.path}</code></li>)}</ul> : <p className={styles.muted}>{pageStatus}</p>}
+      {renderPagination("files changed và diff", filesPage?.pagination, sectionBusy.files, (page) => void changeFilePage(page))}
+    </section>
+    <section className={styles.panel} aria-labelledby="diff-title" aria-busy={sectionBusy.files}>
+      <h2 id="diff-title">Diff {diffPage && diffPage.pagination.totalItems > 0 && <span className={styles.count}>Trang {diffPage.pagination.page}/{diffPage.pagination.totalPages}</span>}</h2>
+      {diffPage?.files.length ? <div className={styles.fileDiffList}>
+      {diffPage.files.map((file, index) => {
         const diffStatus = file.diffStatus ?? (typeof file.diff === "string" ? "TEXT" : "UNAVAILABLE");
         const label = diffStatus === "TEXT" ? "Văn bản" : diffStatus === "BINARY" ? "File nhị phân" : diffStatus === "TRUNCATED" ? "Đã rút gọn" : "Không khả dụng";
         return <article className={styles.fileDiff} key={`${file.path}-${index}`}>
@@ -209,7 +309,7 @@ export default function PullRequestDetailPage() {
                   : <p className={styles.muted}>Diff của file này hiện không khả dụng.</p>}
         </article>;
       })}
-    </div> : compare.diff ? <pre className={styles.diff} tabIndex={0} aria-label="Nội dung diff dạng văn bản">{compare.diff}</pre> : <p className={styles.muted}>Diff trống.</p>}</section>
-    <div className={styles.bottom}><Link href={`/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`}>Quay lại danh sách</Link><button className={styles.refresh} disabled={busy} onClick={() => { setLoading(true); void load(); }}>Tải lại dữ liệu</button></div>
+    </div> : <p className={styles.muted}>{sectionErrors.files ? "Diff chưa tải được; dùng nút Thử lại ở phần files changed." : pageStatus}</p>}</section>
+    <div className={styles.bottom}><Link href={`/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`}>Quay lại danh sách</Link><button className={styles.refresh} disabled={pageBusy} onClick={() => void load()}>Tải lại dữ liệu</button></div>
   </main>;
 }

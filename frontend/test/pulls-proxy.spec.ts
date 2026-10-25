@@ -97,6 +97,26 @@ test("PR proxy rejects invalid routes and origins before the upstream, and strip
   expect(headers["x-request-id"]).toBeUndefined();
 });
 
+test("PR proxy allows only paginated compare GET routes and forwards the fixed snapshot query", async ({ request }) => {
+  const reset = await request.post(`${backendOrigin}/__test/pull-proxy/reset`, { data: {} });
+  expect(reset.status()).toBe(204);
+  const snapshot = new URLSearchParams({ sourceSha: "a".repeat(40), targetSha: "b".repeat(40), storageGeneration: "0", page: "1", pageSize: "20" });
+
+  for (const suffix of ["commits", "files", "diff"]) {
+    const response = await request.get(`${appOrigin}/api/v1/repos/alice/project/pulls/1/${suffix}?${snapshot}`);
+    expect(response.status()).toBe(200);
+  }
+  const invalidMethod = await request.post(`${appOrigin}/api/v1/repos/alice/project/pulls/1/files`, { data: {} });
+  expect(invalidMethod.status()).toBe(404);
+  const invalidRoute = await request.get(`${appOrigin}/api/v1/repos/alice/project/pulls/1/admin`);
+  expect(invalidRoute.status()).toBe(404);
+
+  const captured = await (await request.get(`${backendOrigin}/__test/pull-proxy/requests`)).json() as Array<{ method: string; path: string }>;
+  expect(captured.map(({ method, path }) => ({ method, path }))).toEqual(["commits", "files", "diff"].map((suffix) => ({
+    method: "GET", path: `/api/v1/repos/alice/project/pulls/1/${suffix}?${snapshot}`,
+  })));
+});
+
 test("PR proxy rejects an oversized mutation without forwarding it", async ({ request }) => {
   const reset = await request.post(`${backendOrigin}/__test/pull-proxy/reset`, { data: {} });
   expect(reset.status()).toBe(204);

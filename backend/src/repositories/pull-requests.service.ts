@@ -7,6 +7,9 @@ import { CreatePullRequestDto, MergePullRequestDto, UpdatePullRequestDto } from 
 import { RepositoryLockService } from './repository-lock.service';
 import { GitPushJournalService } from './git-push-journal.service';
 
+type ComparePageSection = 'commits' | 'files' | 'diff';
+type ComparePageQuery = { sourceSha?: string; targetSha?: string; storageGeneration?: string; page?: string; pageSize?: string };
+
 @Injectable()
 export class PullRequestsService {
   private activeCompareCount = 0;
@@ -49,6 +52,23 @@ export class PullRequestsService {
       throw new BadRequestException({ error: { code: 'INVALID_PAGE', message: 'Trang phải từ 1 đến 1000.' } });
     }
     return page === undefined ? 1 : Number(page);
+  }
+
+  private comparePageQuery(query: ComparePageQuery) {
+    if (!query.sourceSha || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(query.sourceSha) ||
+      !query.targetSha || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(query.targetSha)) {
+      throw new BadRequestException({ error: { code: 'INVALID_COMPARE_SHA', message: 'Cần sourceSha và targetSha đầy đủ, dạng hex chữ thường.' } });
+    }
+    if (query.storageGeneration === undefined || !/^(?:0|[1-9][0-9]{0,9})$/.test(query.storageGeneration) ||
+      !Number.isSafeInteger(Number(query.storageGeneration))) {
+      throw new BadRequestException({ error: { code: 'INVALID_STORAGE_GENERATION', message: 'storageGeneration phải là số nguyên không âm.' } });
+    }
+    const page = this.nextPage(query.page);
+    const pageSize = query.pageSize === undefined ? 20 : Number(query.pageSize);
+    if (query.pageSize !== undefined && (!/^[1-9][0-9]{0,2}$/.test(query.pageSize) || pageSize > 100)) {
+      throw new BadRequestException({ error: { code: 'INVALID_PAGE_SIZE', message: 'pageSize phải từ 1 đến 100.' } });
+    }
+    return { sourceSha: query.sourceSha, targetSha: query.targetSha, storageGeneration: Number(query.storageGeneration), page, pageSize };
   }
 
   async list(owner: string, name: string, userId?: string, pageRaw?: string, status?: PullRequestStatus) {
@@ -111,7 +131,7 @@ export class PullRequestsService {
     return { pullRequest, permissions: this.permission(repo, userId, pullRequest.authorId), mergeOperation };
   }
 
-  async compare(owner: string, name: string, userId: string | undefined, number: number) {
+  async compare(owner: string, name: string, userId: string | undefined, number: number, summary = false) {
     const releaseCapacity = this.acquireCompareCapacity();
     try {
       const repoBefore = await this.repository(owner, name, userId);
@@ -120,12 +140,48 @@ export class PullRequestsService {
         const { pullRequest } = await this.detail(owner, name, userId, number);
         const repo = await this.repository(owner, name, userId);
         if (pullRequest.storageGeneration !== repo.storageGeneration) {
-          return { state: 'STORAGE_RESET' as const, sourceSha: pullRequest.sourceSha, targetSha: pullRequest.targetSha,
-            storageGeneration: repo.storageGeneration, commits: [], files: [], diff: '', diffTruncated: false };
+          const reset = { state: 'STORAGE_RESET' as const, sourceSha: pullRequest.sourceSha, targetSha: pullRequest.targetSha,
+            storageGeneration: repo.storageGeneration };
+          return summary ? reset : { ...reset, commits: [], files: [], diff: '', diffTruncated: false };
         }
-        const current = await this.storage.compare(repo.storageKey, pullRequest.sourceBranch, pullRequest.targetBranch, lock.signal);
+        const current = summary
+          ? await this.storage.compareSummary(repo.storageKey, pullRequest.sourceBranch, pullRequest.targetBranch, lock.signal)
+          : await this.storage.compare(repo.storageKey, pullRequest.sourceBranch, pullRequest.targetBranch, lock.signal);
         return { ...current, storageGeneration: repo.storageGeneration,
           stale: current.sourceSha !== pullRequest.sourceSha || current.targetSha !== pullRequest.targetSha };
+      } finally { await lock.release(); }
+    } finally { releaseCapacity(); }
+  }
+
+  async comparePage(owner: string, name: string, userId: string | undefined, number: number,
+    section: ComparePageSection, query: ComparePageQuery) {
+    const snapshot = this.comparePageQuery(query);
+    const releaseCapacity = this.acquireCompareCapacity();
+    try {
+      const initial = await this.repository(owner, name, userId);
+      const lock = await this.locks.acquire(initial.id);
+      try {
+        const { pullRequest } = await this.detail(owner, name, userId, number);
+        const repo = await this.repository(owner, name, userId);
+        if (pullRequest.storageGeneration !== repo.storageGeneration || snapshot.storageGeneration !== repo.storageGeneration) {
+          throw new ConflictException({ error: { code: 'STALE_COMPARE', message: 'Storage đã thay đổi kể từ snapshot. Hãy tải lại compare.' } });
+        }
+        const [currentSourceSha, currentTargetSha] = await Promise.all([
+          this.storage.branchSha(repo.storageKey, pullRequest.sourceBranch, lock.signal),
+          this.storage.branchSha(repo.storageKey, pullRequest.targetBranch, lock.signal),
+        ]);
+        if (currentSourceSha !== snapshot.sourceSha || currentTargetSha !== snapshot.targetSha) {
+          throw new ConflictException({ error: { code: 'STALE_COMPARE', message: 'Branch đã thay đổi kể từ snapshot. Hãy tải lại compare.' } });
+        }
+        const result = await this.storage.comparePage(repo.storageKey, snapshot.sourceSha, snapshot.targetSha,
+          section, snapshot.page, snapshot.pageSize, lock.signal);
+        const items = result.items;
+        return {
+          snapshot: { sourceSha: snapshot.sourceSha, targetSha: snapshot.targetSha, storageGeneration: repo.storageGeneration },
+          pagination: { page: result.page, pageSize: result.pageSize, totalItems: result.totalItems,
+            totalPages: Math.ceil(result.totalItems / result.pageSize), hasMore: result.hasMore },
+          ...(section === 'commits' ? { commits: items } : { files: items }),
+        };
       } finally { await lock.release(); }
     } finally { releaseCapacity(); }
   }

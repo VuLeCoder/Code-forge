@@ -19,7 +19,7 @@ function allowedRoute(method: string, path: string[]) {
   const number = /^\d{1,9}$/.test(path[0] ?? "") && Number(path[0]) > 0;
   if (path.length === 0) return method === "GET" || method === "POST";
   if (path.length === 1 && number) return method === "GET" || method === "PATCH";
-  if (path.length === 2 && number && path[1] === "compare") return method === "GET";
+  if (path.length === 2 && number && ["compare", "commits", "files", "diff"].includes(path[1] ?? "")) return method === "GET";
   if (path.length === 2 && number && path[1] === "merge") return method === "POST";
   return false;
 }
