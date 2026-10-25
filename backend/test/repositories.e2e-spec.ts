@@ -1481,6 +1481,102 @@ process.exit(result.status ?? 1);
     expect(acceptRevoked.status).toBe(409);
     expect((await acceptRevoked.json()).error.code).toBe('INVITATION_NOT_PENDING');
 
+    // Accept and revoke must serialize on the repository lock. Hold that lock
+    // until PostgreSQL confirms both HTTP requests are queued behind it.
+    const raceInviteResponse = await call('POST', `${repoPath}/invitations`, ownerCookie, { username: 'BobUser', role: 'WRITE' });
+    expect(raceInviteResponse.status).toBe(201);
+    const { invitation: raceInvite } = await raceInviteResponse.json();
+    const m5Repository = await db.repository.findFirstOrThrow({ where: { ownerId, normalizedName: 'm5repo' } });
+    const barrier = new Client({ connectionString: originalUrl });
+    let barrierHeld = false;
+    let raceRequests: [Promise<Response>, Promise<Response>] | undefined;
+    const unlockBarrier = async () => {
+      if (!barrierHeld) return;
+      const result = await barrier.query<{ pg_advisory_unlock: boolean }>(
+        'SELECT pg_advisory_unlock(hashtextextended($1, 0))', [m5Repository.id]);
+      if (!result.rows[0]?.pg_advisory_unlock) throw new Error('The invitation-race barrier lock was not held.');
+      barrierHeld = false;
+    };
+    const waitForBothInvitationTransitions = async () => {
+      const deadline = Date.now() + 5_000;
+      do {
+        const waiters = await admin.$queryRawUnsafe<{ waiting: number }[]>(`
+          WITH lock_key AS (SELECT hashtextextended($2, 0) AS value)
+          SELECT COUNT(DISTINCT activity.pid)::int AS waiting
+          FROM pg_stat_activity AS activity
+          JOIN pg_locks AS pg_lock ON pg_lock.pid = activity.pid
+          CROSS JOIN lock_key
+          WHERE activity.application_name = $1
+            AND activity.wait_event_type = 'Lock'
+            AND activity.wait_event = 'advisory'
+            AND pg_lock.locktype = 'advisory'
+            AND pg_lock.granted = false
+            AND pg_lock.classid = ((lock_key.value >> 32) & 4294967295)::oid
+            AND pg_lock.objid = (lock_key.value & 4294967295)::oid
+            AND pg_lock.objsubid = 1`, lockApplicationName, m5Repository.id);
+        if ((waiters[0]?.waiting ?? 0) === 2) return;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      } while (Date.now() < deadline);
+      throw new Error('Timed out waiting for accept and revoke to queue on the repository advisory lock.');
+    };
+
+    try {
+      await barrier.connect();
+      await barrier.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [m5Repository.id]);
+      barrierHeld = true;
+      raceRequests = [
+        call('DELETE', `${repoPath}/invitations/${raceInvite.id}`, ownerCookie),
+        call('POST', `invitations/${raceInvite.id}/accept`, bobCookie),
+      ];
+      await waitForBothInvitationTransitions();
+      await unlockBarrier();
+
+      const activeRaceRequests = raceRequests;
+      if (!activeRaceRequests) throw new Error('Invitation-race requests were not started.');
+      const [revokeRaceResponse, acceptRaceResponse] = await Promise.all(activeRaceRequests);
+      const raceResults = [
+        { kind: 'REVOKED', response: revokeRaceResponse },
+        { kind: 'ACCEPTED', response: acceptRaceResponse },
+      ];
+      const winners = raceResults.filter(({ response }) => response.status === 204 || response.status === 201);
+      const losers = raceResults.filter(({ response }) => response.status === 409);
+      expect(winners).toHaveLength(1);
+      expect(losers).toHaveLength(1);
+      expect((await losers[0]!.response.json()).error.code).toBe('INVITATION_NOT_PENDING');
+
+      const resultingInvitation = await db.invitation.findUniqueOrThrow({ where: { id: raceInvite.id } });
+      const resultingMembership = await db.repositoryMember.findUnique({
+        where: { repositoryId_userId: { repositoryId: m5Repository.id, userId: bobId } },
+      });
+      const repositoryMembershipCount = await db.repositoryMember.count({ where: { repositoryId: m5Repository.id } });
+      const transitionAudits = await db.auditLog.findMany({
+        where: { targetId: raceInvite.id, action: { in: ['INVITATION_ACCEPTED', 'INVITATION_REVOKED'] } },
+      });
+      expect(transitionAudits).toHaveLength(1);
+      if (winners[0]!.kind === 'ACCEPTED') {
+        expect(acceptRaceResponse.status).toBe(201);
+        expect(revokeRaceResponse.status).toBe(409);
+        expect(resultingInvitation.status).toBe('ACCEPTED');
+        expect(resultingMembership).toMatchObject({ repositoryId: m5Repository.id, userId: bobId, role: 'WRITE' });
+        expect(repositoryMembershipCount).toBe(1);
+        expect(transitionAudits[0]!.action).toBe('INVITATION_ACCEPTED');
+      } else {
+        expect(revokeRaceResponse.status).toBe(204);
+        expect(acceptRaceResponse.status).toBe(409);
+        expect(resultingInvitation.status).toBe('REVOKED');
+        expect(resultingMembership).toBeNull();
+        expect(repositoryMembershipCount).toBe(0);
+        expect(transitionAudits[0]!.action).toBe('INVITATION_REVOKED');
+      }
+    } finally {
+      await unlockBarrier();
+      if (raceRequests) await Promise.allSettled(raceRequests);
+      await db.repositoryMember.deleteMany({ where: { repositoryId: m5Repository.id, userId: bobId } });
+      await db.auditLog.deleteMany({ where: { targetId: raceInvite.id, action: { in: ['INVITATION_ACCEPTED', 'INVITATION_REVOKED'] } } });
+      await db.invitation.deleteMany({ where: { id: raceInvite.id } });
+      await barrier.end();
+    }
+
     // 5. Re-invite and Decline
     const invite2 = await (await call('POST', `${repoPath}/invitations`, ownerCookie, { username: 'BobUser', role: 'READ' })).json();
     const declineRes = await call('POST', `invitations/${invite2.invitation.id}/decline`, bobCookie);
