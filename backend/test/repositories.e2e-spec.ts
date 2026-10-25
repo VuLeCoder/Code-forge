@@ -9,6 +9,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
+import { Client } from 'pg';
 import cookieParser = require('cookie-parser');
 import { RepositoryPurgeService } from '../src/repositories/repository-purge.service';
 import { GitStorageService } from '../src/repositories/git-storage.service';
@@ -31,6 +32,7 @@ describe('Repository HTTP + PostgreSQL', () => {
   let originalMaxRepositoryBytes: string | undefined;
   let originalMaxFileBytes: string | undefined;
   let originalMaxPushBytes: string | undefined;
+  let lockApplicationName: string;
   let storageRoot: string;
   const cookie = (res: Response) => res.headers.getSetCookie().map((value) => value.split(';')[0]).join('; ');
   const call = (method: string, path: string, cookies = '', body?: unknown, requestOrigin = origin) =>
@@ -58,7 +60,10 @@ describe('Repository HTTP + PostgreSQL', () => {
     const url = new URL(originalUrl);
     url.searchParams.set('schema', schema);
     process.env.DATABASE_URL = url.toString();
-    process.env.DATABASE_URL_UNPOOLED = url.toString();
+    lockApplicationName = `repo-e2e-${schema.slice(-12)}`;
+    const lockUrl = new URL(url.toString());
+    lockUrl.searchParams.set('application_name', lockApplicationName);
+    process.env.DATABASE_URL_UNPOOLED = lockUrl.toString();
     process.env.MAX_REPOSITORIES_PER_USER = '3';
     process.env.SOFT_DELETE_RETENTION_DAYS = '7';
     process.env.MAX_REPOSITORY_BYTES = String(32 * 1024);
@@ -528,9 +533,57 @@ describe('Repository HTTP + PostgreSQL', () => {
     const auditBeforeSameRefRace = new Set((await db.auditLog.findMany({
       where: { targetId: repo.id, action: 'GIT_PUSH_COMPLETED' }, select: { id: true },
     })).map(({ id }) => id));
-    const sameRefResults = await Promise.allSettled(sameRefPushes.map((candidate) =>
-      git(['-C', candidate.directory, 'push', 'origin', `HEAD:refs/heads/${sameRefBranch}`]),
-    ));
+    const barrier = new Client({ connectionString: originalUrl });
+    let barrierHeld = false;
+    let sameRefPushesPromise: Promise<PromiseSettledResult<unknown>[]> | undefined;
+    let sameRefResults: PromiseSettledResult<unknown>[] = [];
+    const unlockBarrier = async () => {
+      if (!barrierHeld) return;
+      const result = await barrier.query<{ pg_advisory_unlock: boolean }>(
+        'SELECT pg_advisory_unlock(hashtextextended($1, 0))', [repo.id]);
+      if (!result.rows[0]?.pg_advisory_unlock) throw new Error('The same-ref race barrier lock was not held.');
+      barrierHeld = false;
+    };
+    try {
+      await barrier.connect();
+      await barrier.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [repo.id]);
+      barrierHeld = true;
+      sameRefPushesPromise = Promise.allSettled(sameRefPushes.map((candidate) =>
+        git(['-C', candidate.directory, 'push', 'origin', `HEAD:refs/heads/${sameRefBranch}`]),
+      ));
+
+      const deadline = Date.now() + 5_000;
+      let waitingForSameRepoLock = 0;
+      do {
+        const waiters = await admin.$queryRawUnsafe<{ waiting: number }[]>(`
+          WITH lock_key AS (SELECT hashtextextended($2, 0) AS value)
+          SELECT COUNT(DISTINCT activity.pid)::int AS waiting
+          FROM pg_stat_activity AS activity
+          JOIN pg_locks AS pg_lock ON pg_lock.pid = activity.pid
+          CROSS JOIN lock_key
+          WHERE activity.application_name = $1
+            AND activity.wait_event_type = 'Lock'
+            AND activity.wait_event = 'advisory'
+            AND pg_lock.locktype = 'advisory'
+            AND pg_lock.granted = false
+            AND pg_lock.classid = ((lock_key.value >> 32) & 4294967295)::oid
+            AND pg_lock.objid = (lock_key.value & 4294967295)::oid
+            AND pg_lock.objsubid = 1`, lockApplicationName, repo.id);
+        waitingForSameRepoLock = waiters[0]?.waiting ?? 0;
+        if (waitingForSameRepoLock === 2) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      } while (Date.now() < deadline);
+      expect(waitingForSameRepoLock).toBe(2);
+      await unlockBarrier();
+      sameRefResults = await sameRefPushesPromise;
+    } finally {
+      try {
+        await unlockBarrier();
+      } finally {
+        if (sameRefPushesPromise) sameRefResults = await sameRefPushesPromise;
+        await barrier.end();
+      }
+    }
     expect(sameRefResults.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
     expect(sameRefResults.filter(({ status }) => status === 'rejected')).toHaveLength(1);
 
