@@ -37,6 +37,7 @@ describe('Repository HTTP + PostgreSQL', () => {
   const schema = `repo_test_${randomBytes(8).toString('hex')}`;
   let db: PrismaClient;
   let admin: PrismaClient;
+  let schemaCreated = false;
   let app: INestApplication;
   let base: string;
   let origin: string;
@@ -78,6 +79,7 @@ describe('Repository HTTP + PostgreSQL', () => {
     process.env.GIT_STORAGE_PATH = storageRoot;
     admin = new PrismaClient({ datasourceUrl: originalUrl });
     await admin.$executeRawUnsafe(`CREATE SCHEMA "${schema}"`);
+    schemaCreated = true;
     const url = new URL(originalUrl);
     url.searchParams.set('schema', schema);
     process.env.DATABASE_URL = url.toString();
@@ -124,9 +126,12 @@ describe('Repository HTTP + PostgreSQL', () => {
     await app?.close();
     await db?.$disconnect();
     if (storageRoot) await rm(storageRoot, { recursive: true, force: true });
-    if (admin && app) {
-      await admin.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-      await admin.$disconnect();
+    if (admin) {
+      try {
+        if (schemaCreated) await admin.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`);
+      } finally {
+        await admin.$disconnect();
+      }
     }
     for (const [key, value] of Object.entries({
       DATABASE_URL: originalUrl, MAX_REPOSITORIES_PER_USER: originalQuota,
@@ -1016,7 +1021,7 @@ process.exit(result.status ?? 1);
       expect(pushAudits[0]).toMatchObject({ actorId: ownerId, details: {
         operationId: operations[0]!.operationId, repositoryId: stored.id, storageGeneration: stored.storageGeneration, changedRefCount: 1,
       } });
-      expect(JSON.stringify(pushAudits[0]?.details)).not.toContain(secret);
+      expect(JSON.stringify(pushAudits[0]?.details).includes(secret)).toBe(false);
 
       const refsAfterFirstPush = execFileSync('git', ['--git-dir', bare, 'for-each-ref', '--format=%(refname)%09%(objectname)', 'refs/'], { encoding: 'utf8' });
       const rejectedAdvertisement = await fetch(`${base}/git/Owner/PushUserLockRace.git/info/refs?service=git-receive-pack`, {
