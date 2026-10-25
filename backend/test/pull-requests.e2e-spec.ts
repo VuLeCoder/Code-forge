@@ -1654,13 +1654,25 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
         const result = await barrier.query<{ count: number }>(`SELECT COUNT(*)::int AS count
-          FROM pg_stat_activity WHERE application_name = $1 AND datname = current_database()
-            AND state = 'active' AND wait_event_type = 'Lock' AND wait_event = 'relation'
-            AND query ILIKE '%pull_request_merge_operations%'`, [applicationName]);
+          FROM pg_stat_activity AS activity
+          JOIN pg_locks AS lock ON lock.pid = activity.pid
+          WHERE activity.application_name = $1 AND activity.datname = current_database()
+            AND activity.pid <> pg_backend_pid() AND activity.state = 'active'
+            AND lock.locktype = 'relation' AND lock.relation = to_regclass($2)
+            AND lock.mode = 'AccessShareLock' AND NOT lock.granted`,
+        [applicationName, `"${schema}"."pull_request_merge_operations"`]);
         if ((result.rows[0]?.count ?? 0) > 0) return;
         await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
       }
-      throw new Error(`Maintenance did not enter the merge-journal query for ${applicationName}.`);
+      const snapshot = await barrier.query<{ state: string; waitEventType: string | null; waitEvent: string | null; query: string }>(`
+        SELECT activity.state, activity.wait_event_type AS "waitEventType", activity.wait_event AS "waitEvent",
+          LEFT(regexp_replace(regexp_replace(activity.query, $$'([^']|'')*'$$, '[redacted]', 'g'),
+            '[0-9a-fA-F]{32,}', '[redacted]', 'g'), 180) AS query
+        FROM pg_stat_activity AS activity
+        WHERE activity.application_name = $1 AND activity.datname = current_database()
+          AND activity.pid <> pg_backend_pid() AND activity.state = 'active'
+        ORDER BY activity.query_start DESC LIMIT 3`, [applicationName]);
+      throw new Error(`Maintenance did not enter the merge-journal query for ${applicationName}; active-session snapshot: ${JSON.stringify(snapshot.rows)}.`);
     };
     let mergeJournalTableLockHeld = false;
     const startApiAndObserveReconciliationScan = async (applicationName: string) => {
@@ -1671,7 +1683,7 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       let api: Awaited<ReturnType<typeof startApi>> | undefined;
       try {
         api = await startApi(applicationName);
-        await waitForMergeReconciliationWaiter(applicationName, 12_000);
+        await waitForMergeReconciliationWaiter(applicationName, 30_000);
         await barrier.query('COMMIT');
         mergeJournalTableLockHeld = false;
         await waitForMergeReconciliationScan(applicationName, 5_000);

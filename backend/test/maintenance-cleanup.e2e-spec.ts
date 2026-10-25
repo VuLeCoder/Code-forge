@@ -202,21 +202,32 @@ describe('MaintenanceJobsService PostgreSQL cleanup and purge', () => {
     const repository = await db.repository.create({ data: {
       ownerId: owner.id, name: 'MergeGrace', normalizedName: 'mergegrace', storageKey: `${randomUUID()}.git`,
     } });
+    const bare = join(storageRoot!, repository.storageKey);
+    execFileSync('git', ['init', '--bare', '--quiet', bare], { stdio: 'pipe' });
+    const emptyTree = execFileSync('git', ['--git-dir', bare, 'mktree'], { encoding: 'utf8', input: '', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    const targetSha = execFileSync('git', ['--git-dir', bare, '-c', 'user.name=Maintenance test', '-c',
+      'user.email=maintenance@example.test', 'commit-tree', emptyTree, '-m', 'Merge grace target'],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    const sourceSha = execFileSync('git', ['--git-dir', bare, '-c', 'user.name=Maintenance test', '-c',
+      'user.email=maintenance@example.test', 'commit-tree', emptyTree, '-p', targetSha, '-m', 'Merge grace source'],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    execFileSync('git', ['--git-dir', bare, 'update-ref', 'refs/heads/main', targetSha], { stdio: 'pipe' });
+    execFileSync('git', ['--git-dir', bare, 'update-ref', 'refs/heads/feature/recovery', sourceSha], { stdio: 'pipe' });
     const pullRequest = await db.pullRequest.create({ data: {
       repositoryId: repository.id, number: 1, authorId: owner.id, title: 'Recovery grace',
       sourceBranch: 'feature/recovery', targetBranch: 'main', storageGeneration: repository.storageGeneration,
-      sourceSha: 'a'.repeat(40), targetSha: 'b'.repeat(40),
+      sourceSha, targetSha,
     } });
     const operation = await db.pullRequestMergeOperation.create({ data: {
       operationId: randomUUID(), repositoryId: repository.id, pullRequestId: pullRequest.id, actorId: owner.id,
-      storageGeneration: repository.storageGeneration, expectedSourceSha: pullRequest.sourceSha,
-      expectedTargetSha: pullRequest.targetSha, oldTargetSha: pullRequest.targetSha,
+      storageGeneration: repository.storageGeneration, expectedSourceSha: sourceSha,
+      expectedTargetSha: targetSha, oldTargetSha: targetSha,
       createdAt: new Date(Date.now() - 30_000),
     } });
     const immediateOperation = await db.pullRequestMergeOperation.create({ data: {
       operationId: randomUUID(), repositoryId: repository.id, pullRequestId: pullRequest.id, actorId: owner.id,
-      storageGeneration: repository.storageGeneration, expectedSourceSha: pullRequest.sourceSha,
-      expectedTargetSha: pullRequest.targetSha, oldTargetSha: pullRequest.targetSha,
+      storageGeneration: repository.storageGeneration, expectedSourceSha: sourceSha,
+      expectedTargetSha: targetSha, oldTargetSha: targetSha,
       status: 'NEEDS_RECONCILIATION', errorCode: 'RECONCILIATION_UNAVAILABLE', createdAt: new Date(),
     } });
     expect(Date.now() - operation.createdAt.getTime()).toBeGreaterThanOrEqual(0);
@@ -228,13 +239,13 @@ describe('MaintenanceJobsService PostgreSQL cleanup and purge', () => {
     expect((await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId: operation.operationId } }))
       .status).toBe('PENDING');
     expect(await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId: immediateOperation.operationId } }))
-      .toMatchObject({ status: 'NEEDS_RECONCILIATION', errorCode: 'REF_OUTCOME_UNKNOWN' });
+      .toMatchObject({ status: 'FAILED', errorCode: 'REF_NOT_UPDATED' });
 
     await db.pullRequestMergeOperation.update({ where: { operationId: operation.operationId },
       data: { createdAt: new Date(Date.now() - 121_000) } });
     await maintenance.runOnce();
     expect(await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId: operation.operationId } }))
-      .toMatchObject({ status: 'NEEDS_RECONCILIATION', errorCode: 'REF_OUTCOME_UNKNOWN' });
+      .toMatchObject({ status: 'FAILED', errorCode: 'REF_NOT_UPDATED' });
   });
 
   it('keeps a cross-type ambiguous merge fail-closed across repeated maintenance runs', async () => {
