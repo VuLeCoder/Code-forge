@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withBackendClientIp } from "@/lib/backend-client-ip";
 
 export async function GET(request: NextRequest, context: { params: Promise<{ username: string }> }) {
   const { username } = await context.params;
@@ -10,7 +11,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ use
     const cookie = request.headers.get("cookie");
     if (cookie) headers.set("cookie", cookie);
     const upstream = await fetch(`${(process.env.BACKEND_URL ?? "http://localhost:4000").replace(/\/$/, "")}/api/v1/repositories/owner/${encodeURIComponent(username)}`, {
-      headers, cache: "no-store", signal: AbortSignal.timeout(10_000),
+      headers: withBackendClientIp(request, headers), cache: "no-store", signal: AbortSignal.timeout(10_000),
     });
     return new NextResponse(upstream.body, { status: upstream.status, headers: { "content-type": upstream.headers.get("content-type") ?? "application/json", "cache-control": "private, no-store" } });
   } catch {

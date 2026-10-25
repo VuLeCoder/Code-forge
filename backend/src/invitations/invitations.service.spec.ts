@@ -1,6 +1,7 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import type { PrismaService } from '../database/prisma.service';
 import { InvitationsService } from './invitations.service';
+import { RepositoryLockService } from '../repositories/repository-lock.service';
 
 describe('InvitationsService', () => {
   let service: InvitationsService;
@@ -18,7 +19,9 @@ describe('InvitationsService', () => {
       create: jest.Mock;
     };
     $transaction: jest.Mock;
+    $queryRaw: jest.Mock;
   };
+  const locks = { acquire: jest.fn(() => Promise.resolve({ signal: new AbortController().signal, release: jest.fn() })) };
 
   const userId = '11111111-1111-1111-1111-111111111111';
   const invitationId = '22222222-2222-2222-2222-222222222222';
@@ -39,8 +42,11 @@ describe('InvitationsService', () => {
         create: jest.fn(),
       },
       $transaction: jest.fn((cb: (tx: unknown) => unknown) => cb(db)),
+      $queryRaw: jest.fn().mockResolvedValue([{ status: 'ACTIVE' }]),
     };
-    service = new InvitationsService(db as unknown as PrismaService);
+    locks.acquire.mockClear();
+    service = new InvitationsService(db as unknown as PrismaService, locks as unknown as RepositoryLockService,
+      { assertNoUnresolved: jest.fn().mockResolvedValue(undefined) } as never);
   });
 
   describe('list', () => {

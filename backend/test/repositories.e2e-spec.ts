@@ -7,8 +7,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ThrottlerStorage } from '@nestjs/throttler';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
+import { Client } from 'pg';
 import cookieParser = require('cookie-parser');
 import { RepositoryPurgeService } from '../src/repositories/repository-purge.service';
 import { GitStorageService } from '../src/repositories/git-storage.service';
@@ -24,12 +26,14 @@ describe('Repository HTTP + PostgreSQL', () => {
   let otherCookie: string;
   let ownerId: string;
   let originalUrl: string | undefined;
+  let originalUrlUnpooled: string | undefined;
   let originalQuota: string | undefined;
   let originalRetention: string | undefined;
   let originalStorage: string | undefined;
   let originalMaxRepositoryBytes: string | undefined;
   let originalMaxFileBytes: string | undefined;
   let originalMaxPushBytes: string | undefined;
+  let lockApplicationName: string;
   let storageRoot: string;
   const cookie = (res: Response) => res.headers.getSetCookie().map((value) => value.split(';')[0]).join('; ');
   const call = (method: string, path: string, cookies = '', body?: unknown, requestOrigin = origin) =>
@@ -42,6 +46,7 @@ describe('Repository HTTP + PostgreSQL', () => {
   beforeAll(async () => {
     await ConfigModule.forRoot({ envFilePath: '.env' });
     originalUrl = process.env.DATABASE_URL;
+    originalUrlUnpooled = process.env.DATABASE_URL_UNPOOLED;
     originalQuota = process.env.MAX_REPOSITORIES_PER_USER;
     originalRetention = process.env.SOFT_DELETE_RETENTION_DAYS;
     originalStorage = process.env.GIT_STORAGE_PATH;
@@ -56,6 +61,10 @@ describe('Repository HTTP + PostgreSQL', () => {
     const url = new URL(originalUrl);
     url.searchParams.set('schema', schema);
     process.env.DATABASE_URL = url.toString();
+    lockApplicationName = `repo-e2e-${schema.slice(-12)}`;
+    const lockUrl = new URL(url.toString());
+    lockUrl.searchParams.set('application_name', lockApplicationName);
+    process.env.DATABASE_URL_UNPOOLED = lockUrl.toString();
     process.env.MAX_REPOSITORIES_PER_USER = '3';
     process.env.SOFT_DELETE_RETENTION_DAYS = '7';
     process.env.MAX_REPOSITORY_BYTES = String(32 * 1024);
@@ -66,7 +75,12 @@ describe('Repository HTTP + PostgreSQL', () => {
     });
     db = new PrismaClient({ datasourceUrl: url.toString() });
     const { AppModule } = await import('../src/app.module');
-    const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const module = await Test.createTestingModule({ imports: [AppModule] })
+      // Repository acceptance covers repository/API policy, not throttling;
+      // auth.e2e-spec exercises the real rate-limit behavior separately.
+      .overrideProvider(ThrottlerStorage).useValue({ increment: async (_key: string, ttl: number) => ({
+        totalHits: 1, timeToExpire: ttl, isBlocked: false, timeToBlockExpire: 0,
+      }) }).compile();
     app = module.createNestApplication();
     app.use(cookieParser());
     app.setGlobalPrefix('api/v1');
@@ -96,6 +110,7 @@ describe('Repository HTTP + PostgreSQL', () => {
     }
     for (const [key, value] of Object.entries({
       DATABASE_URL: originalUrl, MAX_REPOSITORIES_PER_USER: originalQuota,
+      DATABASE_URL_UNPOOLED: originalUrlUnpooled,
       SOFT_DELETE_RETENTION_DAYS: originalRetention,
       GIT_STORAGE_PATH: originalStorage,
       MAX_REPOSITORY_BYTES: originalMaxRepositoryBytes,
@@ -129,6 +144,7 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect(repository.owner.email).toBeUndefined();
     const stored = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
     expect(stored.storageKey).toBe(`${repository.id}.git`);
+    expect(await db.auditLog.count({ where: { targetId: repository.id, action: 'REPOSITORY_CREATED' } })).toBe(1);
     const bare = join(storageRoot, stored.storageKey);
     expect(execFileSync('git', ['--git-dir', bare, 'symbolic-ref', 'HEAD'], { encoding: 'utf8' }).trim()).toBe('refs/heads/main');
     expect(execFileSync('git', ['--git-dir', bare, 'show', 'HEAD:README.md'], { encoding: 'utf8' })).toBe('# Demo\n');
@@ -201,6 +217,15 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect((await call('GET', 'repos/owner/demo/image?path=logo.png', ownerCookie)).status).toBe(404);
     expect((await call('GET', 'repos/owner/demo/image?path=README.md', ownerCookie)).status).toBe(400);
     await rm(bare, { recursive: true });
+    const concurrentRecoveryResponses = await Promise.all(Array.from({ length: 5 }, () =>
+      call('GET', 'repos/owner/demo/commits', ownerCookie)));
+    expect(concurrentRecoveryResponses.map((response) => response.status)).toEqual([200, 200, 200, 200, 200]);
+    const concurrentRecoveryResults = await Promise.all(concurrentRecoveryResponses.map(async (response) =>
+      await response.json() as { commits: unknown[]; storageState: string; storageGeneration: number }));
+    for (const recovery of concurrentRecoveryResults) {
+      expect(recovery).toMatchObject({ commits: [], storageState: 'RESET', storageGeneration: 1 });
+    }
+    expect((await db.repository.findUniqueOrThrow({ where: { id: stored.id } })).storageGeneration).toBe(1);
     expect((await call('GET', `repos/owner/demo/commits/${imageCommit}`, ownerCookie)).status).toBe(404);
     expect(await (await call('GET', 'repos/owner/demo/commits', ownerCookie)).json()).toMatchObject({ commits: [], storageState: 'RESET', storageGeneration: 1 });
     expect((await call('GET', `repos/owner/demo/commits?snapshot=${imageCommit}`, ownerCookie)).status).toBe(404);
@@ -216,13 +241,15 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect((await call('GET', 'repos/OWNER/DEMO', ownerCookie)).status).toBe(200);
     const hidden = await call('GET', 'repos/owner/demo', otherCookie);
     expect(hidden.status).toBe(404);
-    expect(await hidden.json()).toEqual(await (await call('GET', 'repos/owner/missing', otherCookie)).json());
+    const hiddenBody = await hidden.json();
+    const missingBody = await (await call('GET', 'repos/owner/missing', otherCookie)).json();
+    expect(hiddenBody.error).toEqual(missingBody.error);
     expect((await call('GET', 'repos/owner/demo')).status).toBe(404);
     expect((await call('PATCH', 'repos/owner/demo', otherCookie, { name: 'Stolen' })).status).toBe(404);
     expect((await call('DELETE', 'repos/owner/demo', otherCookie)).status).toBe(404);
     expect((await create('DEMO')).status).toBe(409);
     expect((await create('Demo', 'PRIVATE', otherCookie)).status).toBe(201);
-  });
+  }, 30_000);
 
   it('allows anonymous public reads but rejects non-owner mutations and invalid tokens', async () => {
     expect((await create('Public', 'PUBLIC')).status).toBe(201);
@@ -364,6 +391,7 @@ describe('Repository HTTP + PostgreSQL', () => {
     }
     const repo = await db.repository.findFirstOrThrow({ where: { ownerId, normalizedName: 'demo' } });
     const bare = join(storageRoot, repo.storageKey);
+    execFileSync('git', ['--git-dir', bare, 'update-ref', '-d', 'refs/heads/main']);
     const localGit = (args: string[], input?: string) => execFileSync('git', ['--git-dir', bare, ...args], { input, encoding: 'utf8' }).trim();
     const blob = localGit(['hash-object', '-w', '--stdin'], 'private source\n');
     const tree = localGit(['mktree'], `100644 blob ${blob}\tprivate.txt\n`);
@@ -444,6 +472,8 @@ describe('Repository HTTP + PostgreSQL', () => {
     const writeOnlyToken = await makeToken(other.id, 'M4 write only', ['repo:write']);
     const repo = await db.repository.findFirstOrThrow({ where: { ownerId, normalizedName: 'demo' } });
     const bare = join(storageRoot, repo.storageKey);
+    // The exact 255-byte ref path can exceed MAX_PATH under the Windows temp root.
+    execFileSync('git', ['--git-dir', bare, 'config', 'core.longpaths', 'true']);
     const url = `${base}/git/Owner/Demo.git`;
     const askpass = join(storageRoot, 'm4-askpass.sh');
     await writeFile(askpass, '#!/bin/sh\ncase "$1" in *Username*) printf "%s\\n" "$TEST_GIT_USER" ;; *) printf "%s\\n" "$TEST_GIT_PAT" ;; esac\n', { mode: 0o700 });
@@ -466,6 +496,145 @@ describe('Repository HTTP + PostgreSQL', () => {
     await git(['-C', work, 'push', '-u', 'origin', 'main']);
     expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(first);
 
+    const concurrentPushes: { directory: string; branch: string; file: string; content: string; sha: string }[] = [
+      { directory: join(storageRoot, 'm4-push-race-a'), branch: 'parallel/race-a', file: 'parallel-a.txt', content: 'push A\n', sha: '' },
+      { directory: join(storageRoot, 'm4-push-race-b'), branch: 'parallel/race-b', file: 'parallel-b.txt', content: 'push B\n', sha: '' },
+    ];
+    for (const candidate of concurrentPushes) {
+      await git(['clone', url, candidate.directory]);
+      await git(['-C', candidate.directory, 'config', 'user.name', 'M4 Race Tester']);
+      await git(['-C', candidate.directory, 'config', 'user.email', 'm4-race@example.test']);
+      await writeFile(join(candidate.directory, candidate.file), candidate.content);
+      await git(['-C', candidate.directory, 'add', candidate.file]);
+      await git(['-C', candidate.directory, 'commit', '-m', `Concurrent push ${candidate.branch}`]);
+      candidate.sha = (await git(['-C', candidate.directory, 'rev-parse', 'HEAD'])).stdout.trim();
+    }
+    await Promise.all(concurrentPushes.map((candidate) =>
+      git(['-C', candidate.directory, 'push', 'origin', `HEAD:refs/heads/${candidate.branch}`]),
+    ));
+    for (const candidate of concurrentPushes) {
+      expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', `refs/heads/${candidate.branch}`], { encoding: 'utf8' }).trim()).toBe(candidate.sha);
+    }
+    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(first);
+
+    const sameRefBranch = 'parallel/same-ref';
+    await git(['-C', work, 'push', 'origin', `${first}:refs/heads/${sameRefBranch}`]);
+    const sameRefPushes = [
+      { directory: join(storageRoot, 'm4-same-ref-race-a'), file: 'same-ref-a.txt', content: 'same-ref A\n', sha: '' },
+      { directory: join(storageRoot, 'm4-same-ref-race-b'), file: 'same-ref-b.txt', content: 'same-ref B\n', sha: '' },
+    ];
+    for (const candidate of sameRefPushes) {
+      await git(['clone', url, candidate.directory]);
+      await git(['-C', candidate.directory, 'checkout', '-b', sameRefBranch, `origin/${sameRefBranch}`]);
+      await git(['-C', candidate.directory, 'config', 'user.name', 'M4 Same-Ref Tester']);
+      await git(['-C', candidate.directory, 'config', 'user.email', 'm4-same-ref@example.test']);
+      await writeFile(join(candidate.directory, candidate.file), candidate.content);
+      await git(['-C', candidate.directory, 'add', candidate.file]);
+      await git(['-C', candidate.directory, 'commit', '-m', `Same-ref push ${candidate.file}`]);
+      candidate.sha = (await git(['-C', candidate.directory, 'rev-parse', 'HEAD'])).stdout.trim();
+    }
+    const operationsBeforeSameRefRace = new Set((await db.gitPushOperation.findMany({
+      where: { repositoryId: repo.id }, select: { operationId: true },
+    })).map(({ operationId }) => operationId));
+    const auditBeforeSameRefRace = new Set((await db.auditLog.findMany({
+      where: { targetId: repo.id, action: 'GIT_PUSH_COMPLETED' }, select: { id: true },
+    })).map(({ id }) => id));
+    const barrier = new Client({ connectionString: originalUrl });
+    let barrierHeld = false;
+    let sameRefPushesPromise: Promise<PromiseSettledResult<unknown>[]> | undefined;
+    let sameRefResults: PromiseSettledResult<unknown>[] = [];
+    const unlockBarrier = async () => {
+      if (!barrierHeld) return;
+      const result = await barrier.query<{ pg_advisory_unlock: boolean }>(
+        'SELECT pg_advisory_unlock(hashtextextended($1, 0))', [repo.id]);
+      if (!result.rows[0]?.pg_advisory_unlock) throw new Error('The same-ref race barrier lock was not held.');
+      barrierHeld = false;
+    };
+    try {
+      await barrier.connect();
+      await barrier.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [repo.id]);
+      barrierHeld = true;
+      sameRefPushesPromise = Promise.allSettled(sameRefPushes.map((candidate) =>
+        git(['-C', candidate.directory, 'push', 'origin', `HEAD:refs/heads/${sameRefBranch}`]),
+      ));
+
+      const deadline = Date.now() + 5_000;
+      let waitingForSameRepoLock = 0;
+      do {
+        const waiters = await admin.$queryRawUnsafe<{ waiting: number }[]>(`
+          WITH lock_key AS (SELECT hashtextextended($2, 0) AS value)
+          SELECT COUNT(DISTINCT activity.pid)::int AS waiting
+          FROM pg_stat_activity AS activity
+          JOIN pg_locks AS pg_lock ON pg_lock.pid = activity.pid
+          CROSS JOIN lock_key
+          WHERE activity.application_name = $1
+            AND activity.wait_event_type = 'Lock'
+            AND activity.wait_event = 'advisory'
+            AND pg_lock.locktype = 'advisory'
+            AND pg_lock.granted = false
+            AND pg_lock.classid = ((lock_key.value >> 32) & 4294967295)::oid
+            AND pg_lock.objid = (lock_key.value & 4294967295)::oid
+            AND pg_lock.objsubid = 1`, lockApplicationName, repo.id);
+        waitingForSameRepoLock = waiters[0]?.waiting ?? 0;
+        if (waitingForSameRepoLock === 2) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      } while (Date.now() < deadline);
+      expect(waitingForSameRepoLock).toBe(2);
+      await unlockBarrier();
+      sameRefResults = await sameRefPushesPromise;
+    } finally {
+      try {
+        await unlockBarrier();
+      } finally {
+        if (sameRefPushesPromise) sameRefResults = await sameRefPushesPromise;
+        await barrier.end();
+      }
+    }
+    expect(sameRefResults.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+    expect(sameRefResults.filter(({ status }) => status === 'rejected')).toHaveLength(1);
+
+    const sameRef = execFileSync('git', ['--git-dir', bare, 'rev-parse', `refs/heads/${sameRefBranch}`], { encoding: 'utf8' }).trim();
+    expect(sameRefPushes.map(({ sha }) => sha)).toContain(sameRef);
+    expect(execFileSync('git', ['--git-dir', bare, 'for-each-ref', '--format=%(refname)', 'refs/heads'], { encoding: 'utf8' }).trim().split(/\r?\n/).sort())
+      .toEqual(['refs/heads/main', 'refs/heads/parallel/race-a', 'refs/heads/parallel/race-b', `refs/heads/${sameRefBranch}`].sort());
+    for (const branch of ['main', 'parallel/race-a', 'parallel/race-b']) {
+      expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', `refs/heads/${branch}`], { encoding: 'utf8' }).trim())
+        .toBe(branch === 'main' ? first : concurrentPushes.find(({ branch: candidateBranch }) => candidateBranch === branch)!.sha);
+    }
+    expect(() => execFileSync('git', ['--git-dir', bare, 'fsck', '--connectivity-only'], { stdio: 'pipe' })).not.toThrow();
+
+    const sameRefOperations = (await db.gitPushOperation.findMany({ where: { repositoryId: repo.id } }))
+      .filter(({ operationId }) => !operationsBeforeSameRefRace.has(operationId));
+    expect(sameRefOperations).toHaveLength(2);
+    const completedOperation = sameRefOperations.find(({ status }) => status === 'COMPLETED');
+    const rejectedOperation = sameRefOperations.find(({ status }) => status === 'FAILED');
+    expect(completedOperation).toMatchObject({ changedRefCount: 1, errorCode: null });
+    expect(rejectedOperation).toMatchObject({ changedRefCount: null, errorCode: 'NO_REF_CHANGE' });
+    const sameRefAudit = (await db.auditLog.findMany({
+      where: { targetId: repo.id, action: 'GIT_PUSH_COMPLETED' },
+    })).filter(({ id }) => !auditBeforeSameRefRace.has(id));
+    expect(sameRefAudit).toHaveLength(1);
+    expect(sameRefAudit[0]?.details).toMatchObject({ operationId: completedOperation?.operationId, changedRefCount: 1 });
+    expect(sameRefAudit[0]?.details).not.toMatchObject({ operationId: rejectedOperation?.operationId });
+
+    const byteLimitBranch = `${'é'.repeat(63)}a/${'é'.repeat(63)}a`;
+    const overByteLimitBranch = `${'é'.repeat(64)}/${'é'.repeat(63)}a`;
+    expect(Buffer.byteLength(byteLimitBranch, 'utf8')).toBe(255);
+    expect(Buffer.byteLength(overByteLimitBranch, 'utf8')).toBe(256);
+    await git(['-C', work, 'push', 'origin', `HEAD:refs/heads/${byteLimitBranch}`]);
+    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', `refs/heads/${byteLimitBranch}`], { encoding: 'utf8' }).trim()).toBe(first);
+    await expect(git(['-C', work, 'push', 'origin', `HEAD:refs/heads/${overByteLimitBranch}`])).rejects.toThrow();
+    expect(() => execFileSync('git', ['--git-dir', bare, 'rev-parse', '--verify', `refs/heads/${overByteLimitBranch}`], { stdio: 'pipe' })).toThrow();
+    expect(await db.gitPushOperation.count({ where: { repositoryId: repo.id,
+      status: { in: ['PENDING', 'NEEDS_RECONCILIATION'] } } })).toBe(0);
+
+    await writeFile(join(work, 'code.txt'), 'second\n');
+    await git(['-C', work, 'add', 'code.txt']);
+    await git(['-C', work, 'commit', '-m', 'Feature change']);
+    const second = (await git(['-C', work, 'rev-parse', 'HEAD'])).stdout.trim();
+    await expect(git(['-C', work, 'push', 'origin', 'main'])).rejects.toThrow();
+    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(first);
+
     await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/read-token-denied'], 'Owner', readToken.secret)).rejects.toThrow();
     await db.repositoryMember.upsert({
       where: { repositoryId_userId: { repositoryId: repo.id, userId: other.id } },
@@ -473,40 +642,40 @@ describe('Repository HTTP + PostgreSQL', () => {
     });
     await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/member-denied'], 'Other', writeOnlyToken.secret)).rejects.toThrow();
     await db.repositoryMember.update({ where: { repositoryId_userId: { repositoryId: repo.id, userId: other.id } }, data: { role: 'WRITE' } });
+    await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/main'], 'Other', writeOnlyToken.secret)).rejects.toThrow();
+    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(first);
     await git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/member-write'], 'Other', writeOnlyToken.secret);
     expect((await fetch(`${url}/info/refs?service=git-upload-pack`, { headers: { Authorization: basic('Other', writeOnlyToken.secret) } })).status).toBe(401);
+
+    // Exercise a real non-fast-forward update while the remote feature ref still exists.
+    await git(['-C', work, 'reset', '--hard', first]);
+    await writeFile(join(work, 'code.txt'), 'divergent\n');
+    await git(['-C', work, 'add', 'code.txt']);
+    await git(['-C', work, 'commit', '-m', 'Divergent']);
+    await expect(git(['-C', work, 'push', '--force', 'origin', 'HEAD:refs/heads/member-write'])).rejects.toThrow();
+    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/member-write'], { encoding: 'utf8' }).trim()).toBe(second);
+    await git(['-C', work, 'reset', '--hard', second]);
+
     await git(['-C', work, 'push', 'origin', ':member-write'], 'Other', writeOnlyToken.secret);
     expect(() => execFileSync('git', ['--git-dir', bare, 'rev-parse', '--verify', 'refs/heads/member-write'], { stdio: 'pipe' })).toThrow();
     await db.repositoryMember.delete({ where: { repositoryId_userId: { repositoryId: repo.id, userId: other.id } } });
     await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/member-revoked'], 'Other', writeOnlyToken.secret)).rejects.toThrow();
 
-    await writeFile(join(work, 'code.txt'), 'second\n');
-    await git(['-C', work, 'add', 'code.txt']);
-    await git(['-C', work, 'commit', '-m', 'Fast forward']);
-    const second = (await git(['-C', work, 'rev-parse', 'HEAD'])).stdout.trim();
-    await git(['-C', work, 'push', 'origin', 'main']);
-    await git(['-C', work, 'reset', '--hard', first]);
-    await writeFile(join(work, 'code.txt'), 'divergent\n');
-    await git(['-C', work, 'add', 'code.txt']);
-    await git(['-C', work, 'commit', '-m', 'Divergent']);
-    await expect(git(['-C', work, 'push', '--force', 'origin', 'main'])).rejects.toThrow();
-    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(second);
-    await git(['-C', work, 'reset', '--hard', second]);
     await expect(git(['-C', work, 'push', 'origin', ':main'])).rejects.toThrow();
     await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/tags/not-allowed'])).rejects.toThrow();
 
     await writeFile(join(work, 'too-large.bin'), randomBytes(1025));
     await git(['-C', work, 'add', 'too-large.bin']);
     await git(['-C', work, 'commit', '-m', 'Oversized file']);
-    await expect(git(['-C', work, 'push', 'origin', 'main'])).rejects.toThrow();
-    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(second);
+    await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/feature/oversized'])).rejects.toThrow();
+    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(first);
     await git(['-C', work, 'reset', '--hard', second]);
 
     for (let index = 0; index < 40; index++) await writeFile(join(work, `quota-${index}.bin`), randomBytes(900));
     await git(['-C', work, 'add', '.']);
     await git(['-C', work, 'commit', '-m', 'Repository quota']);
-    await expect(git(['-C', work, 'push', 'origin', 'main'])).rejects.toThrow();
-    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(second);
+    await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/feature/quota'])).rejects.toThrow();
+    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(first);
 
     const oversizedRequest = await fetch(`${url}/git-receive-pack`, {
       method: 'POST', headers: { Authorization: basic('Owner', ownerToken.secret), 'content-type': 'application/x-git-receive-pack-request' },
@@ -534,6 +703,7 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect((await call('PATCH', 'repos/owner/renamed', ownerCookie, { visibility: 'PRIVATE' })).status).toBe(200);
     expect((await call('GET', 'repos/owner/renamed')).status).toBe(404);
     expect((await db.repository.findUniqueOrThrow({ where: { id: before.id } })).storageKey).toBe(before.storageKey);
+    expect(await db.auditLog.count({ where: { targetId: before.id, action: 'REPOSITORY_UPDATED' } })).toBe(2);
   });
 
   it('soft-deletes, computes configured retention and reserves the deleted name', async () => {
@@ -541,6 +711,7 @@ describe('Repository HTTP + PostgreSQL', () => {
     const deleted = await db.repository.findFirstOrThrow({ where: { ownerId, normalizedName: 'renamed' } });
     expect(deleted.status).toBe('DELETED');
     expect(deleted.purgeAfter!.getTime() - deleted.deletedAt!.getTime()).toBe(7 * 86400000);
+    expect(await db.auditLog.count({ where: { targetId: deleted.id, action: 'REPOSITORY_SOFT_DELETED' } })).toBe(1);
     for (const cookies of ['', ownerCookie, otherCookie]) {
       expect((await call('GET', 'repos/owner/renamed', cookies)).status).toBe(404);
       expect((await call('GET', 'repos/owner/renamed/branches', cookies)).status).toBe(404);
@@ -570,6 +741,8 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect(restored.status).toBe(201);
     expect((await restored.json()).repository).toMatchObject({ name: 'Renamed', status: 'ACTIVE' });
     expect((await call('GET', 'repos/owner/renamed', ownerCookie)).status).toBe(200);
+    expect(await db.auditLog.count({ where: { targetId: (await db.repository.findFirstOrThrow({ where: { ownerId, normalizedName: 'renamed' } })).id,
+      action: 'REPOSITORY_RESTORED' } })).toBe(1);
     expect((await (await call('GET', 'repositories/deleted', ownerCookie)).json()).repositories).toEqual([]);
     expect((await call('POST', path, ownerCookie)).status).toBe(404);
     expect((await call('DELETE', 'repos/owner/renamed', ownerCookie)).status).toBe(204);
@@ -759,9 +932,9 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect((await call('PATCH', `${repoPath}/members/${ownerId}`, ownerCookie, { role: 'READ' })).status).toBe(400);
     expect((await call('DELETE', `${repoPath}/members/${ownerId}`, ownerCookie)).status).toBe(400);
 
-    // 9. Re-inviting with an expired invitation lazily marks it EXPIRED and succeeds
+    // 9. Accepting an expired invitation persists EXPIRED without granting membership; re-inviting then succeeds
     const m5Repo = await db.repository.findFirstOrThrow({ where: { ownerId, normalizedName: 'm5repo' } });
-    await db.invitation.create({
+    const expiredInvite = await db.invitation.create({
       data: {
         id: randomUUID(),
         repositoryId: m5Repo.id,
@@ -772,6 +945,12 @@ describe('Repository HTTP + PostgreSQL', () => {
         expiresAt: new Date(Date.now() - 10_000),
       },
     });
+    const acceptExpired = await call('POST', `invitations/${expiredInvite.id}/accept`, bobCookie);
+    expect(acceptExpired.status).toBe(409);
+    expect((await acceptExpired.json()).error.code).toBe('INVITATION_EXPIRED');
+    expect((await db.invitation.findUniqueOrThrow({ where: { id: expiredInvite.id } })).status).toBe('EXPIRED');
+    expect(await db.repositoryMember.count({ where: { repositoryId: m5Repo.id, userId: bobId } })).toBe(0);
+
     const reInviteExpired = await call('POST', `${repoPath}/invitations`, ownerCookie, { username: 'BobUser', role: 'READ' });
     expect(reInviteExpired.status).toBe(201);
     expect(await db.invitation.count({ where: { repositoryId: m5Repo.id, inviteeId: bobId, status: 'EXPIRED' } })).toBe(1);

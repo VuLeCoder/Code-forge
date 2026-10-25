@@ -55,6 +55,7 @@ process.stdin.on('end', () => {
   const lines = input.trim().split('\n').filter(Boolean);
   if (!lines.length || lines.length > 1000) reject('danh sách cập nhật ref không hợp lệ.');
   const proposed = [];
+  const updates = new Map();
   for (const line of lines) {
     const fields = line.split(' ');
     if (fields.length !== 3) reject('dữ liệu cập nhật ref không hợp lệ.');
@@ -63,6 +64,12 @@ process.stdin.on('end', () => {
       !ref.startsWith('refs/heads/')) reject('chỉ được cập nhật branch trong refs/heads.');
     const branch = ref.slice('refs/heads/'.length);
     if (git(['check-ref-format', '--branch', branch]) === null) reject('tên branch không hợp lệ.');
+    if (Buffer.byteLength(branch, 'utf8') > 255) reject('branch vượt quá 255 byte.');
+    if (ref === `refs/heads/${defaultBranch}` &&
+      !(zero(oldSha) && process.env.CODE_FORGE_ALLOW_DEFAULT_BRANCH_INITIALIZATION === 'true')) {
+      reject('branch mặc định chỉ được cập nhật qua pull request do owner merge.');
+    }
+    updates.set(ref, zero(newSha));
     if (zero(newSha)) {
       if (ref === `refs/heads/${defaultBranch}`) reject('không được xóa branch mặc định.');
       continue;
@@ -73,6 +80,16 @@ process.stdin.on('end', () => {
     }
     proposed.push(newSha);
   }
+
+  const currentRefs = git(['for-each-ref', '--format=%(refname)', 'refs/heads/']);
+  if (currentRefs === null) reject('không thể kiểm tra số branch.');
+  const current = new Set(currentRefs.split('\n').filter(Boolean));
+  let branchCount = current.size;
+  for (const [ref, deleted] of updates) {
+    if (deleted && current.has(ref)) branchCount--;
+    else if (!deleted && !current.has(ref)) branchCount++;
+  }
+  if (branchCount > 1000) reject('repository vượt giới hạn 1000 branch.');
 
   const listed = git(['rev-list', '--objects', '--all', ...proposed]);
   if (listed === null) reject('không thể kiểm tra object của repository.');

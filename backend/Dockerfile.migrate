@@ -1,0 +1,20 @@
+FROM node:24-bookworm-slim
+
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+RUN apt-get update \
+  && apt-get install --no-install-recommends -y openssl \
+  && rm -rf /var/lib/apt/lists/*
+RUN corepack enable
+WORKDIR /app
+
+# Keep the migration CLI and Prisma schema in this one-shot image. It contains
+# no application server entry point and requires no Git executable.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY backend/package.json backend/package.json
+COPY frontend/package.json frontend/package.json
+RUN --mount=type=cache,id=pnpm-migrate,target=/pnpm/store pnpm install --frozen-lockfile --filter backend...
+COPY backend/prisma backend/prisma
+RUN pnpm --filter backend prisma:generate
+
+CMD ["pnpm", "--filter", "backend", "prisma:migrate:deploy"]

@@ -5,7 +5,7 @@ services:
       POSTGRES_DB: code_forge
       POSTGRES_USER: code_forge
       POSTGRES_PASSWORD: code_forge
-    ports: ["5433:5432"]
+    ports: ["127.0.0.1:5433:5432"]
     volumes: ["postgres-data:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U code_forge -d code_forge"]
@@ -18,13 +18,15 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
       PORT: 4000
       API_PREFIX: api/v1
       DATABASE_URL: postgresql://code_forge:code_forge@postgres:5432/code_forge?schema=public
+      DATABASE_URL_UNPOOLED: postgresql://code_forge:code_forge@postgres:5432/code_forge?schema=public
       GIT_STORAGE_PATH: /data/git
       FRONTEND_ORIGIN: http://localhost:3000
       JWT_ACCESS_SECRET: local-only-change-this-secret-at-least-32-chars
+      RATE_LIMIT_PROXY_SECRET: local-only-change-this-proxy-secret-at-least-32-chars
       ACCESS_TOKEN_TTL_SECONDS: 900
       REFRESH_TOKEN_TTL_DAYS: 30
       COOKIE_SECURE: "false"
@@ -34,7 +36,7 @@ services:
       MAX_FILE_BYTES: 26214400
       MAX_PUSH_BYTES: 104857600
       SOFT_DELETE_RETENTION_DAYS: 30
-    ports: ["4000:4000"]
+    ports: ["127.0.0.1:4000:4000"]
     volumes: ["git-data:/data/git"]
     depends_on:
       postgres:

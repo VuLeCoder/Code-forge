@@ -9,6 +9,8 @@ import { GitHttpController } from './git-http.controller';
 import { GitHttpService } from './git-http.service';
 import { GitStorageService } from './git-storage.service';
 import { RepositoriesService } from './repositories.service';
+import { RepositoryLockService } from './repository-lock.service';
+import { GitPushJournalService } from './git-push-journal.service';
 
 describe('Git HTTP process lifecycle', () => {
   let app: INestApplication;
@@ -29,11 +31,14 @@ describe('Git HTTP process lifecycle', () => {
     logs = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
     children = [];
     start.mockClear();
-    prepareGit = jest.fn(() => Promise.resolve({ storageKey: 'key', defaultBranch: 'main' }));
+    const access = { storageKey: 'key', defaultBranch: 'main', repositoryId: 'repository-id', userId: undefined, actorIsOwner: true, operation: 'read' as const, storageGeneration: 0 };
+    prepareGit = jest.fn(() => Promise.resolve(access));
     script = `process.stdout.write(${JSON.stringify(header + '0000')}); setInterval(() => {}, 1000);`;
     const module = await Test.createTestingModule({ controllers: [GitHttpController], providers: [GitHttpService,
-      { provide: RepositoriesService, useValue: { prepareGit } },
+      { provide: RepositoriesService, useValue: { prepareGit, recheckGit: jest.fn(() => Promise.resolve(access)) } },
+      { provide: RepositoryLockService, useValue: { acquire: jest.fn(() => Promise.resolve({ signal: new AbortController().signal, release: jest.fn() })) } },
       { provide: GitStorageService, useValue: { openPack: start } },
+      { provide: GitPushJournalService, useValue: { begin: jest.fn(), finish: jest.fn(), fail: jest.fn(), markNeedsReconciliation: jest.fn() } },
       { provide: ConfigService, useValue: { getOrThrow: (key: string) => key === 'MAX_PUSH_BYTES' ? 1024 * 1024 : undefined } },
     ] }).compile();
     app = module.createNestApplication();
@@ -130,7 +135,7 @@ describe('Git HTTP process lifecycle', () => {
     expect(response.headers.get('content-type')).toBe('application/x-git-receive-pack-advertisement');
     expect(await response.text()).toBe('0000');
     expect(prepareGit).toHaveBeenCalledWith('owner', 'repo', 'Basic test', 'write');
-    expect(start).toHaveBeenCalledWith('key', 'main', 'git-receive-pack', true, undefined);
+    expect(start).toHaveBeenCalledWith('key', 'main', 'git-receive-pack', true, undefined, true);
     const raw = logs.mock.calls.map(([value]) => String(value)).find((value) => value.includes('"event":"git_write"'))!;
     expect(JSON.parse(raw)).toMatchObject({ event: 'git_write', operation: 'receive-pack-discovery', status: 200 });
   });

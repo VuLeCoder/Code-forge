@@ -16,7 +16,46 @@ git(['update-ref', 'refs/heads/main', commit]);
 
 // Public-profile fixture for Next server rendering; auth is mocked per browser test.
 let offlineRequests = 0;
+const pullProxyRequests = [];
+let pullProxyResponse = { status: 200, headers: {}, body: { pullRequests: [], page: 1, pageSize: 20, hasMore: false } };
 const server = createServer((request, response) => {
+  const url = new URL(request.url ?? '/', 'http://fixture');
+  if (url.pathname === '/__test/pull-proxy/reset' && request.method === 'POST') {
+    let body = '';
+    request.on('data', (chunk) => { body += chunk; });
+    request.on('end', () => {
+      try {
+        const value = JSON.parse(body || '{}');
+        pullProxyRequests.length = 0;
+        pullProxyResponse = {
+          status: Number.isInteger(value.status) && value.status >= 200 && value.status <= 599 ? value.status : 200,
+          headers: value.headers && typeof value.headers === 'object' && !Array.isArray(value.headers) ? value.headers : {},
+          body: value.body ?? { pullRequests: [], page: 1, pageSize: 20, hasMore: false },
+        };
+        response.writeHead(204).end();
+      } catch {
+        response.writeHead(400).end();
+      }
+    });
+    return;
+  }
+  if (url.pathname === '/__test/pull-proxy/requests' && request.method === 'GET') {
+    response.setHeader('Content-Type', 'application/json');
+    return response.end(JSON.stringify(pullProxyRequests));
+  }
+  if (/^\/api\/v1\/repos\/[^/]+\/[^/]+\/pulls(?:\/|$)/.test(url.pathname)) {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => {
+      pullProxyRequests.push({ method: request.method, path: `${url.pathname}${url.search}`,
+        headers: request.headers, body: Buffer.concat(chunks).toString('utf8') });
+      response.statusCode = pullProxyResponse.status;
+      for (const [name, value] of Object.entries(pullProxyResponse.headers)) response.setHeader(name, value);
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify(pullProxyResponse.body));
+    });
+    return;
+  }
   if (request.url?.startsWith('/api/v1/git/')) {
     const url = new URL(request.url, 'http://fixture');
     const privateRepo = url.pathname.startsWith('/api/v1/git/alice/private.git/');

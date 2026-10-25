@@ -32,7 +32,7 @@ test('M3.6 clone dialog copies public URL, handles clipboard errors, keyboard an
   try {
     const git = promisify(execFile);
     await git('git', ['-c', 'protocol.version=2', 'clone', url, join(root, 'clone')], { timeout: 20_000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
-    expect(await readFile(join(root, 'clone', 'README.md'), 'utf8')).toBe('Clone through Next proxy\n');
+    expect((await readFile(join(root, 'clone', 'README.md'), 'utf8')).replace(/\r\n/g, '\n')).toBe('Clone through Next proxy\n');
     await git('git', ['-C', join(root, 'clone'), '-c', 'protocol.version=0', 'fetch', 'origin'], { timeout: 20_000 });
   } finally { await rm(root, { recursive: true, force: true }); }
   const response = await page.request.get(`${url}/info/refs?service=git-upload-pack`, { headers: { Cookie: 'session=do-not-forward' } });

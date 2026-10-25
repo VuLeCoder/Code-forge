@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withBackendClientIp } from "@/lib/backend-client-ip";
 
 type Context = { params: Promise<{ id?: string[] }> };
 async function proxy(request: NextRequest, context: Context) {
@@ -15,7 +16,7 @@ async function proxy(request: NextRequest, context: Context) {
   try {
     const upstream = await fetch(`${(process.env.BACKEND_URL ?? "http://localhost:4000").replace(/\/$/, "")}/api/v1/tokens${id.length ? `/${id[0]}` : ""}`, {
       method: request.method, cache: "no-store", redirect: "error", signal: AbortSignal.timeout(30_000),
-      headers: { cookie: request.headers.get("cookie") ?? "", origin, "content-type": "application/json" },
+      headers: withBackendClientIp(request, { cookie: request.headers.get("cookie") ?? "", origin, "content-type": "application/json" }),
       ...(request.method === "POST" ? { body: await request.text() } : {}),
     });
     return new NextResponse(upstream.body, { status: upstream.status, headers });

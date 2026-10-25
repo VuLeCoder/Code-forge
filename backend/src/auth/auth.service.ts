@@ -71,8 +71,21 @@ export class AuthService {
     if (!user || !(await argon2.verify(user.passwordHash, dto.password))) {
       throw new AuthError(HttpStatus.UNAUTHORIZED, 'INVALID_CREDENTIALS', 'Thông tin đăng nhập không chính xác.');
     }
-    this.assertActive(user);
-    return this.createSession(user);
+    this.assertActive(user.status);
+    const rawToken = this.generateRefreshToken();
+    const session = await this.prisma.$transaction(async (tx) => {
+      const current = await tx.$queryRaw<{ status: User['status'] }[]>`SELECT status FROM users WHERE id = ${user.id}::uuid FOR UPDATE`;
+      this.assertActive(current[0]?.status);
+      return tx.session.create({
+        data: {
+          userId: user.id,
+          familyId: randomUUID(),
+          tokenHash: this.hashToken(rawToken),
+          expiresAt: this.refreshExpiry(),
+        },
+      });
+    });
+    return this.result(user, session, rawToken);
   }
 
   async refresh(rawToken: string | undefined): Promise<AuthResult> {
@@ -88,11 +101,13 @@ export class AuthService {
       this.invalidRefresh();
     }
     if (existing.expiresAt <= new Date()) this.invalidRefresh();
-    this.assertActive(existing.user);
+    this.assertActive(existing.user.status);
 
     const nextRawToken = this.generateRefreshToken();
     const now = new Date();
     const next = await this.prisma.$transaction(async (tx) => {
+      const current = await tx.$queryRaw<{ status: User['status'] }[]>`SELECT status FROM users WHERE id = ${existing.userId}::uuid FOR UPDATE`;
+      this.assertActive(current[0]?.status);
       const revoked = await tx.session.updateMany({
         where: { id: existing.id, revokedAt: null },
         data: { revokedAt: now, lastUsedAt: now },
@@ -125,19 +140,6 @@ export class AuthService {
     });
   }
 
-  private async createSession(user: User): Promise<AuthResult> {
-    const rawToken = this.generateRefreshToken();
-    const session = await this.prisma.session.create({
-      data: {
-        userId: user.id,
-        familyId: randomUUID(),
-        tokenHash: this.hashToken(rawToken),
-        expiresAt: this.refreshExpiry(),
-      },
-    });
-    return this.result(user, session, rawToken);
-  }
-
   private async result(user: User, session: Session, refreshToken: string): Promise<AuthResult> {
     const accessToken = await this.jwt.signAsync(
       { sub: user.id, sessionId: session.id, type: 'access' },
@@ -149,8 +151,8 @@ export class AuthService {
     return { user: toPublicUser(user), accessToken, refreshToken };
   }
 
-  private assertActive(user: User): void {
-    if (user.status === 'LOCKED') {
+  private assertActive(status: User['status'] | undefined): void {
+    if (status !== 'ACTIVE') {
       throw new AuthError(HttpStatus.FORBIDDEN, 'ACCOUNT_LOCKED', 'Tài khoản đã bị khóa.');
     }
   }

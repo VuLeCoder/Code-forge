@@ -13,7 +13,7 @@ export function CloneDialog({ repository }: { repository: RepositorySummary }) {
   const [message, setMessage] = useState("");
   const isPublic = repository.visibility === "PUBLIC";
   function open() {
-    setUrl(`${window.location.origin}/git/${encodeURIComponent(repository.owner.username)}/${encodeURIComponent(repository.name)}.git`);
+    setUrl(repository.cloneUrl ?? `${window.location.origin}/git/${encodeURIComponent(repository.owner.username)}/${encodeURIComponent(repository.name)}.git`);
     setMessage("");
     dialog.current?.showModal();
   }

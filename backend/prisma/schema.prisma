@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
 enum SystemRole {
@@ -41,47 +42,72 @@ enum InvitationStatus {
   REVOKED
 }
 
+enum PullRequestStatus {
+  OPEN
+  CLOSED
+  MERGED
+}
+
+enum MergeOperationStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  NEEDS_RECONCILIATION
+}
+
+enum GitPushOperationStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  NEEDS_RECONCILIATION
+}
+
 model User {
-  id                 String                @id @default(uuid()) @db.Uuid
-  username           String                @db.VarChar(39)
-  normalizedUsername String                @unique @map("normalized_username") @db.VarChar(39)
-  email              String                @db.VarChar(320)
-  normalizedEmail    String                @unique @map("normalized_email") @db.VarChar(320)
-  passwordHash       String                @map("password_hash") @db.VarChar(255)
-  systemRole         SystemRole            @default(USER) @map("system_role")
-  status             UserStatus            @default(ACTIVE)
-  lockedAt           DateTime?             @map("locked_at") @db.Timestamptz(3)
-  passwordChangedAt  DateTime              @default(now()) @map("password_changed_at") @db.Timestamptz(3)
-  createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt          DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
-  sessions           Session[]
-  repositories       Repository[]
-  tokens             PersonalAccessToken[]
-  memberships        RepositoryMember[]
-  sentInvitations     Invitation[]          @relation("SentInvitations")
-  receivedInvitations Invitation[]          @relation("ReceivedInvitations")
+  id                   String                @id @default(uuid()) @db.Uuid
+  username             String                @db.VarChar(39)
+  normalizedUsername   String                @unique @map("normalized_username") @db.VarChar(39)
+  email                String                @db.VarChar(320)
+  normalizedEmail      String                @unique @map("normalized_email") @db.VarChar(320)
+  passwordHash         String                @map("password_hash") @db.VarChar(255)
+  systemRole           SystemRole            @default(USER) @map("system_role")
+  status               UserStatus            @default(ACTIVE)
+  lockedAt             DateTime?             @map("locked_at") @db.Timestamptz(3)
+  passwordChangedAt    DateTime              @default(now()) @map("password_changed_at") @db.Timestamptz(3)
+  createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
+  sessions             Session[]
+  repositories         Repository[]
+  tokens               PersonalAccessToken[]
+  memberships          RepositoryMember[]
+  sentInvitations      Invitation[]          @relation("SentInvitations")
+  receivedInvitations  Invitation[]          @relation("ReceivedInvitations")
+  authoredPullRequests PullRequest[]         @relation("PullRequestAuthor")
+  mergedPullRequests   PullRequest[]         @relation("PullRequestMerger")
 
   @@map("users")
 }
 
 model Repository {
-  id                String               @id @default(uuid()) @db.Uuid
-  ownerId           String               @map("owner_id") @db.Uuid
-  name              String               @db.VarChar(100)
-  normalizedName    String               @map("normalized_name") @db.VarChar(100)
-  description       String?              @db.VarChar(2000)
-  visibility        RepositoryVisibility @default(PRIVATE)
-  status            RepositoryStatus     @default(ACTIVE)
-  defaultBranch     String               @default("main") @map("default_branch") @db.VarChar(255)
-  storageKey        String               @unique @map("storage_key") @db.VarChar(255)
-  storageGeneration Int                  @default(0) @map("storage_generation")
-  createdAt         DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt         DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
-  deletedAt         DateTime?            @map("deleted_at") @db.Timestamptz(3)
-  purgeAfter        DateTime?            @map("purge_after") @db.Timestamptz(3)
-  owner             User                 @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  id                String                      @id @default(uuid()) @db.Uuid
+  ownerId           String                      @map("owner_id") @db.Uuid
+  name              String                      @db.VarChar(100)
+  normalizedName    String                      @map("normalized_name") @db.VarChar(100)
+  description       String?                     @db.VarChar(2000)
+  visibility        RepositoryVisibility        @default(PRIVATE)
+  status            RepositoryStatus            @default(ACTIVE)
+  defaultBranch     String                      @default("main") @map("default_branch") @db.VarChar(255)
+  storageKey        String                      @unique @map("storage_key") @db.VarChar(255)
+  storageGeneration Int                         @default(0) @map("storage_generation")
+  createdAt         DateTime                    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime                    @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt         DateTime?                   @map("deleted_at") @db.Timestamptz(3)
+  purgeAfter        DateTime?                   @map("purge_after") @db.Timestamptz(3)
+  owner             User                        @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   members           RepositoryMember[]
   invitations       Invitation[]
+  pullRequests      PullRequest[]
+  mergeOperations   PullRequestMergeOperation[]
+  gitPushOperations GitPushOperation[]
 
   @@unique([ownerId, normalizedName])
   @@index([ownerId, status, createdAt])
@@ -142,13 +168,85 @@ model PersonalAccessToken {
 
 model AuditLog {
   id        String   @id @default(uuid()) @db.Uuid
-  actorId   String   @map("actor_id") @db.Uuid
+  actorId   String?  @map("actor_id") @db.Uuid
   action    String   @db.VarChar(80)
   targetId  String   @map("target_id") @db.Uuid
+  details   Json     @default("{}") @db.JsonB
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@index([actorId, createdAt])
   @@map("audit_logs")
+}
+
+model PullRequest {
+  id                String                      @id @default(uuid()) @db.Uuid
+  repositoryId      String                      @map("repository_id") @db.Uuid
+  number            Int
+  authorId          String                      @map("author_id") @db.Uuid
+  title             String                      @db.VarChar(256)
+  description       String?                     @db.VarChar(10000)
+  sourceBranch      String                      @map("source_branch") @db.VarChar(255)
+  targetBranch      String                      @map("target_branch") @db.VarChar(255)
+  status            PullRequestStatus           @default(OPEN)
+  version           Int                         @default(1)
+  storageGeneration Int                         @map("storage_generation")
+  sourceSha         String                      @map("source_sha") @db.VarChar(64)
+  targetSha         String                      @map("target_sha") @db.VarChar(64)
+  mergedById        String?                     @map("merged_by_id") @db.Uuid
+  mergedAt          DateTime?                   @map("merged_at") @db.Timestamptz(3)
+  mergeCommitSha    String?                     @map("merge_commit_sha") @db.VarChar(64)
+  createdAt         DateTime                    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime                    @updatedAt @map("updated_at") @db.Timestamptz(3)
+  repository        Repository                  @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  author            User                        @relation("PullRequestAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  mergedBy          User?                       @relation("PullRequestMerger", fields: [mergedById], references: [id], onDelete: SetNull)
+  mergeOperations   PullRequestMergeOperation[]
+
+  @@unique([repositoryId, number])
+  @@index([repositoryId, status, number])
+  @@index([authorId, createdAt])
+  @@map("pull_requests")
+}
+
+model PullRequestMergeOperation {
+  operationId       String               @id @map("operation_id") @db.Uuid
+  repositoryId      String               @map("repository_id") @db.Uuid
+  pullRequestId     String               @map("pull_request_id") @db.Uuid
+  actorId           String               @map("actor_id") @db.Uuid
+  status            MergeOperationStatus @default(PENDING)
+  storageGeneration Int                  @map("storage_generation")
+  expectedSourceSha String               @map("expected_source_sha") @db.VarChar(64)
+  expectedTargetSha String               @map("expected_target_sha") @db.VarChar(64)
+  oldTargetSha      String               @map("old_target_sha") @db.VarChar(64)
+  candidateSha      String?              @map("candidate_sha") @db.VarChar(64)
+  resultingSha      String?              @map("resulting_sha") @db.VarChar(64)
+  errorCode         String?              @map("error_code") @db.VarChar(80)
+  createdAt         DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+  repository        Repository           @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  pullRequest       PullRequest          @relation(fields: [pullRequestId], references: [id], onDelete: Cascade)
+
+  @@index([status, updatedAt])
+  @@index([repositoryId, status])
+  @@map("pull_request_merge_operations")
+}
+
+model GitPushOperation {
+  operationId       String                 @id @map("operation_id") @db.Uuid
+  repositoryId      String                 @map("repository_id") @db.Uuid
+  actorId           String                 @map("actor_id") @db.Uuid
+  status            GitPushOperationStatus @default(PENDING)
+  storageGeneration Int                    @map("storage_generation")
+  beforeRefs        Json?                  @map("before_refs") @db.JsonB
+  changedRefCount   Int?                   @map("changed_ref_count")
+  errorCode         String?                @map("error_code") @db.VarChar(80)
+  createdAt         DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
+  repository        Repository             @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@index([status, updatedAt])
+  @@index([repositoryId, status])
+  @@map("git_push_operations")
 }
 
 model Session {

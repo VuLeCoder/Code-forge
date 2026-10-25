@@ -44,6 +44,10 @@ describe('AuthService', () => {
     findUnique: jest.fn(),
     updateMany: updateSessions,
   };
+  const txQueryRaw = jest.fn();
+  const txCreateSession = jest.fn<Promise<Session>, [unknown]>();
+  const txUpdateSessions = jest.fn<Promise<{ count: number }>, [unknown]>();
+  const tx = { $queryRaw: txQueryRaw, session: { create: txCreateSession, updateMany: txUpdateSessions } };
   const prisma = {
     session: sessionApi,
     $transaction: transaction,
@@ -94,27 +98,51 @@ describe('AuthService', () => {
     });
   });
 
+  it('rechecks account status under the user lock before creating a login session', async () => {
+    const passwordHash = await argon2.hash('correct-password');
+    findByLogin.mockResolvedValue({ ...user, passwordHash, status: 'ACTIVE' });
+    txQueryRaw.mockResolvedValue([{ status: 'LOCKED' }]);
+    transaction.mockImplementation(async (callback: (client: Prisma.TransactionClient) => Promise<unknown>) =>
+      callback(tx as never),
+    );
+
+    await expect(service.login({ login: 'alice', password: 'correct-password' })).rejects.toMatchObject({
+      status: HttpStatus.FORBIDDEN,
+    });
+    expect(txCreateSession).not.toHaveBeenCalled();
+  });
+
   it('rotates a valid refresh token and keeps its token family', async () => {
     sessionApi.findUnique.mockResolvedValue({ ...session, user });
     sessionApi.updateMany.mockResolvedValue({ count: 1 });
-    const transactionSession = {
-      updateMany: jest.fn<Promise<{ count: number }>, [unknown]>().mockResolvedValue({ count: 1 }),
-      create: jest.fn<Promise<Session>, [unknown]>(),
-    };
-    transactionSession.create.mockResolvedValue({ ...session, id: 'new-session' });
+    txQueryRaw.mockResolvedValue([{ status: 'ACTIVE' }]);
+    txUpdateSessions.mockResolvedValue({ count: 1 });
+    txCreateSession.mockResolvedValue({ ...session, id: 'new-session' });
     transaction.mockImplementation(async (callback: (tx: Prisma.TransactionClient) => Promise<unknown>) =>
-      callback({ session: transactionSession } as never),
+      callback(tx as never),
     );
 
     const result = await service.refresh('valid-refresh-token');
 
     expect(result.accessToken).toBe('access-token');
     expect(result.refreshToken).not.toBe('valid-refresh-token');
-    const createInput = transactionSession.create.mock.calls[0]?.[0] as
+    const createInput = txCreateSession.mock.calls[0]?.[0] as
       | { data: { familyId: string; userId: string } }
       | undefined;
     expect(createInput?.data.familyId).toBe(session.familyId);
     expect(createInput?.data.userId).toBe(user.id);
+  });
+
+  it('does not rotate a refresh token if the account was locked before acquiring its user lock', async () => {
+    sessionApi.findUnique.mockResolvedValue({ ...session, user });
+    txQueryRaw.mockResolvedValue([{ status: 'LOCKED' }]);
+    transaction.mockImplementation(async (callback: (client: Prisma.TransactionClient) => Promise<unknown>) =>
+      callback(tx as never),
+    );
+
+    await expect(service.refresh('valid-refresh-token')).rejects.toMatchObject({ status: HttpStatus.FORBIDDEN });
+    expect(txUpdateSessions).not.toHaveBeenCalled();
+    expect(txCreateSession).not.toHaveBeenCalled();
   });
 
   it('revokes the active token family when a rotated token is reused', async () => {

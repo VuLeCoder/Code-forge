@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withBackendClientIp } from "@/lib/backend-client-ip";
 
 export async function GET(request: NextRequest, context: { params: Promise<{ owner: string; repo: string }> }) {
   const { owner, repo } = await context.params;
@@ -10,7 +11,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ own
   if (cookie) headers.set("cookie", cookie);
   try {
     const upstream = await fetch(`${(process.env.BACKEND_URL ?? "http://localhost:4000").replace(/\/$/, "")}/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, {
-      headers, cache: "no-store", signal: AbortSignal.timeout(10_000),
+      headers: withBackendClientIp(request, headers), cache: "no-store", signal: AbortSignal.timeout(10_000),
     });
     return new NextResponse(upstream.body, { status: upstream.status, headers: { "content-type": upstream.headers.get("content-type") ?? "application/json", "cache-control": "private, no-store" } });
   } catch {
@@ -33,7 +34,7 @@ async function mutate(request: NextRequest, context: { params: Promise<{ owner: 
   if (method === "PATCH") headers.set("content-type", "application/json");
   try {
     const upstream = await fetch(`${(process.env.BACKEND_URL ?? "http://localhost:4000").replace(/\/$/, "")}/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, {
-      method, headers, body: method === "PATCH" ? await request.text() : undefined,
+      method, headers: withBackendClientIp(request, headers), body: method === "PATCH" ? await request.text() : undefined,
       cache: "no-store", signal: AbortSignal.timeout(30_000),
     });
     return new NextResponse(upstream.body, { status: upstream.status, headers: { "content-type": upstream.headers.get("content-type") ?? "application/json", "cache-control": "private, no-store" } });

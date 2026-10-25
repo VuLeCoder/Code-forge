@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withBackendClientIp } from "@/lib/backend-client-ip";
 
 export async function GET(request: NextRequest, context: { params: Promise<{ owner: string; repo: string }> }) {
   const { owner, repo } = await context.params;
@@ -11,7 +12,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ own
     for (const name of ["ref", "path"]) {
       for (const value of request.nextUrl.searchParams.getAll(name)) url.searchParams.append(name, value);
     }
-    const upstream = await fetch(url, { headers, cache: "no-store", signal: AbortSignal.timeout(35_000) });
+    const upstream = await fetch(url, { headers: withBackendClientIp(request, headers), cache: "no-store", signal: AbortSignal.timeout(35_000) });
     return new NextResponse(upstream.body, { status: upstream.status, headers: responseHeaders });
   } catch {
     return NextResponse.json({ error: { code: "BACKEND_UNAVAILABLE" } }, { status: 503, headers: responseHeaders });

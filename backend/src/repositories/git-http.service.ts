@@ -6,6 +6,8 @@ import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
 import { GitStorageService } from './git-storage.service';
 import { RepositoriesService } from './repositories.service';
+import { RepositoryLockService, type RepositoryLock } from './repository-lock.service';
+import { GitPushJournalService } from './git-push-journal.service';
 
 @Injectable()
 export class GitHttpService implements OnModuleDestroy {
@@ -34,6 +36,7 @@ export class GitHttpService implements OnModuleDestroy {
     const requestId = randomUUID();
     let reported = false;
     let failureStatus: number | undefined;
+    let gitCompleted = false;
     const report = (aborted: boolean) => {
       if (reported) return;
       reported = true;
@@ -41,7 +44,7 @@ export class GitHttpService implements OnModuleDestroy {
       this.logger.log(JSON.stringify({ event: write ? 'git_write' : 'git_read', requestId,
         operation: advertise ? `${write ? 'receive' : 'upload'}-pack-discovery` : write ? 'receive-pack' : 'upload-pack',
         status: failureStatus ?? res.statusCode,
-        outcome: aborted ? 'aborted' : (res.statusCode === 200 ? 'success' : 'rejected'),
+        outcome: aborted ? 'aborted' : (res.statusCode === 200 && gitCompleted ? 'success' : 'rejected'),
         durationMs: Math.round(performance.now() - started), activeProcesses: this.running.size,
       }));
     };
@@ -53,7 +56,7 @@ export class GitHttpService implements OnModuleDestroy {
     const reject = (status: number) => { res.status(status).type('text/plain').end('Git request unavailable.\n'); };
     if (!/^[a-z0-9][a-z0-9._-]{1,37}[a-z0-9]$/i.test(owner) ||
       !/^(?!.*\.\.)(?!.*\.git\.git$)[a-z0-9](?:[a-z0-9._-]{0,98}[a-z0-9])?\.git$/i.test(repository)) return reject(404);
-    let access: { storageKey: string; defaultBranch: string };
+    let access: { storageKey: string; defaultBranch: string; repositoryId: string; userId?: string; actorIsOwner: boolean; operation: 'read' | 'write'; storageGeneration: number };
     try { access = await this.repositories.prepareGit(owner, repository.slice(0, -4), req.headers.authorization, write ? 'write' : 'read'); }
     catch (error) {
       const status = (error as { getStatus?: () => number }).getStatus?.();
@@ -70,13 +73,40 @@ export class GitHttpService implements OnModuleDestroy {
     if (rawLength !== undefined && (!/^\d+$/.test(rawLength) || Number(rawLength) > requestLimit)) return reject(413);
     if (this.running.size >= 4) return reject(503);
 
+    let lock: RepositoryLock | undefined;
+    try {
+      lock = await this.locks.acquire(access.repositoryId);
+      access = await this.repositories.recheckGit(access.repositoryId, access.userId, access.operation);
+    } catch (error) {
+      if (lock) await lock.release();
+      const status = (error as { getStatus?: () => number }).getStatus?.();
+      if (status === 401) res.setHeader('WWW-Authenticate', 'Basic realm="Code Forge Git", charset="UTF-8"');
+      return reject(status === 404 ? 404 : status === 401 ? 401 : 503);
+    }
+    if (req.aborted || res.destroyed) { await lock.release(); return; }
+
+    let pushOperationId: string | undefined;
+    if (write && !advertise) {
+      if (!access.userId) { await lock.release(); return reject(401); }
+      try {
+        const beforeRefs = await this.storage.snapshotRefs(access.storageKey);
+        const operation = await this.pushJournal.begin(access.repositoryId, access.userId, access.storageGeneration, beforeRefs);
+        pushOperationId = operation.operationId;
+      } catch {
+        await lock.release();
+        return reject(503);
+      }
+    }
+
     let child: ReturnType<GitStorageService['openPack']>;
-    try { child = this.storage.openPack(access.storageKey, access.defaultBranch, service, advertise, protocol); }
-    catch { return reject(503); }
+    try { child = this.storage.openPack(access.storageKey, access.defaultBranch, service, advertise, protocol, access.actorIsOwner); }
+    catch {
+      if (pushOperationId) await this.pushJournal.fail(pushOperationId, 'GIT_PROCESS_START_FAILED').catch(() => undefined);
+      await lock.release(); return reject(503);
+    }
     let stopped = false;
     let header = Buffer.alloc(0);
     let parsed = false;
-    let exited = false;
     let drained = false;
     const inputs: Transform[] = [];
     const stop = (status = 503) => {
@@ -129,30 +159,46 @@ export class GitHttpService implements OnModuleDestroy {
     this.running.add(stop);
     const timer = setTimeout(() => stop(504), this.timeoutMs);
     const cancel = () => stop();
+    const lockLost = () => stop(503);
     const cleanup = () => {
       clearTimeout(timer);
       req.off('aborted', cancel);
       res.off('close', cancel);
-    };
-    const complete = () => {
-      if (!stopped && exited && drained) { stopped = true; cleanup(); res.end(); }
+      lock?.signal.removeEventListener('abort', lockLost);
     };
     req.once('aborted', cancel);
     res.once('close', cancel);
+    lock.signal.addEventListener('abort', lockLost, { once: true });
     child.once('error', () => stop());
     child.stdin.on('error', () => stop());
     child.stdout.on('error', () => stop());
     output.on('error', () => stop());
-    output.once('end', () => { drained = true; complete(); });
+    output.once('end', () => { drained = true; });
     child.stderr.resume(); // Never expose source paths or Git diagnostics to clients/logs.
     child.stdout.pipe(output).pipe(res, { end: false });
     child.once('close', (code) => {
-      if (!stopped) {
-        if (code === 0 && parsed) { exited = true; complete(); }
-        else stop();
-      }
-      if (stopped) cleanup();
-      this.running.delete(stop);
+      void (async () => {
+        this.running.delete(stop);
+        let journaled = true;
+        if (pushOperationId) {
+          try {
+            const afterRefs = await this.storage.snapshotRefs(access.storageKey);
+            journaled = await this.pushJournal.finish(pushOperationId, afterRefs);
+          } catch {
+            journaled = false;
+            await this.pushJournal.markNeedsReconciliation(pushOperationId, 'REF_SNAPSHOT_UNAVAILABLE').catch(() => undefined);
+          }
+        }
+        if (!stopped) {
+          if (code === 0 && parsed && drained && journaled) {
+            gitCompleted = true;
+            stopped = true;
+            cleanup();
+            res.end();
+          } else stop();
+        } else cleanup();
+        await Promise.resolve(lock?.release()).catch(() => undefined);
+      })();
     });
     if (advertise) child.stdin.end();
     else {
@@ -171,5 +217,7 @@ export class GitHttpService implements OnModuleDestroy {
     private readonly repositories: RepositoriesService,
     private readonly storage: GitStorageService,
     private readonly config: ConfigService,
+    private readonly locks: RepositoryLockService,
+    private readonly pushJournal: GitPushJournalService,
   ) {}
 }

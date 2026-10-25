@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withBackendClientIp } from "@/lib/backend-client-ip";
 
 export async function GET(request: NextRequest) {
   const headers = new Headers({ accept: "application/json" });
@@ -6,7 +7,7 @@ export async function GET(request: NextRequest) {
   if (cookie) headers.set("cookie", cookie);
   try {
     const upstream = await fetch(`${(process.env.BACKEND_URL ?? "http://localhost:4000").replace(/\/$/, "")}/api/v1/repositories/deleted`, {
-      headers, cache: "no-store", signal: AbortSignal.timeout(10_000),
+      headers: withBackendClientIp(request, headers), cache: "no-store", signal: AbortSignal.timeout(10_000),
     });
     return new NextResponse(upstream.body, { status: upstream.status, headers: { "content-type": upstream.headers.get("content-type") ?? "application/json", "cache-control": "private, no-store" } });
   } catch {

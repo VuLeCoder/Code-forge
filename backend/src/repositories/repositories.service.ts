@@ -7,6 +7,8 @@ import { CreateRepositoryDto, InviteMemberDto, UpdateMemberRoleDto, UpdateReposi
 import { RepositoryPolicy } from './repository.policy';
 import { GitStorageService } from './git-storage.service';
 import { TokensService } from '../tokens/tokens.service';
+import { RepositoryLockService } from './repository-lock.service';
+import { GitPushJournalService } from './git-push-journal.service';
 
 @Injectable()
 export class RepositoriesService {
@@ -16,6 +18,8 @@ export class RepositoriesService {
     private readonly policy: RepositoryPolicy,
     private readonly storage: GitStorageService,
     private readonly tokens: TokensService,
+    private readonly locks: RepositoryLockService,
+    private readonly pushJournal: GitPushJournalService,
   ) {}
 
   private async activeOwner(tx: Prisma.TransactionClient, userId: string) {
@@ -35,11 +39,21 @@ export class RepositoriesService {
     });
   }
 
+  private async withRepositoryLock<T>(owner: string, name: string, operation: () => Promise<T>): Promise<T> {
+    const repo = await this.load(this.db, owner, name);
+    if (!repo) return operation();
+    const lock = await this.locks.acquire(repo.id);
+    try { await this.pushJournal.assertNoUnresolved(repo.id); return await operation(); }
+    finally { await lock.release(); }
+  }
+
   private response(repo: Repository & { owner: { username: string } }, userId?: string, storage?: { state: 'READY' | 'EMPTY' | 'RESET'; readme: string | null }) {
+    const gitBase = this.config.getOrThrow<string>('GIT_PUBLIC_BASE_URL').replace(/\/$/, '');
     return { repository: {
       id: repo.id, owner: { username: repo.owner.username }, name: repo.name,
       description: repo.description, visibility: repo.visibility, status: repo.status,
       defaultBranch: repo.defaultBranch, createdAt: repo.createdAt, updatedAt: repo.updatedAt,
+      cloneUrl: `${gitBase}/git/${encodeURIComponent(repo.owner.username)}/${encodeURIComponent(repo.name)}.git`,
       permissions: this.policy.permissions(repo, userId),
       ...(storage ? { storageState: storage.state, storageGeneration: repo.storageGeneration, readme: storage.readme } : {}),
     } };
@@ -75,6 +89,8 @@ export class RepositoriesService {
       await this.storage.create(repo.storageKey, repo.defaultBranch, dto.initializeReadme ?? false, repo.name);
       createdKey = repo.storageKey;
       const inspected = await this.storage.inspect(repo.storageKey, repo.defaultBranch);
+      await tx.auditLog.create({ data: { actorId: userId, action: 'REPOSITORY_CREATED', targetId: repo.id,
+        details: { repositoryId: repo.id, visibility: repo.visibility, initializedWithReadme: dto.initializeReadme ?? false } } });
       return this.response(repo, userId, inspected);
     }, { timeout: 30_000 })); }
     catch (error) {
@@ -93,11 +109,14 @@ export class RepositoriesService {
     if (branchQuery?.path !== undefined) this.storage.validateSourcePath(branchQuery.path);
     if (branchQuery?.blob && !branchQuery.path) throw new BadRequestException({ error: { code: 'INVALID_PATH', message: 'Cần đường dẫn tới file.' } });
     // Serialize recovery so concurrent readers do not increment generation twice.
-    const response = await this.db.$transaction(async (tx) => {
+    const lock = await this.locks.acquire(repo.id);
+    let response;
+    try { response = await this.db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM repositories WHERE id = ${repo.id}::uuid FOR UPDATE`;
       let current = await tx.repository.findUniqueOrThrow({ where: { id: repo.id }, include: { owner: { select: { username: true } }, members: { where: { userId: userId ?? '00000000-0000-0000-0000-000000000000' } } } });
       this.policy.assertRead(current, userId);
       if (!(await this.storage.exists(current.storageKey))) {
+        await this.pushJournal.assertNoUnresolved(current.id);
         await this.storage.create(current.storageKey, current.defaultBranch, false, current.name);
         current = await tx.repository.update({ where: { id: current.id }, data: { storageGeneration: { increment: 1 } }, include: { owner: { select: { username: true } }, members: { where: { userId: userId ?? '00000000-0000-0000-0000-000000000000' } } } });
       }
@@ -144,7 +163,8 @@ export class RepositoriesService {
       }
       const inspected = await this.storage.inspect(current.storageKey, current.defaultBranch);
       return this.response(current, userId, { ...inspected, state: current.storageGeneration > 0 && inspected.state === 'EMPTY' ? 'RESET' : inspected.state });
-    }, { timeout: 30_000 });
+    }, { timeout: 30_000 }); }
+    finally { await lock.release(); }
     if ('readError' in response) throw response.readError;
     // Commit recovery before reporting a missing requested ref; Git creation cannot roll back with SQL.
     if ('branches' in response && branchQuery?.ref !== undefined) {
@@ -189,11 +209,35 @@ export class RepositoriesService {
         if (!userId && (!current || !this.policy.permissions(current).canRead)) throw new UnauthorizedException();
         this.policy.assertRead(current, userId);
       }
-      if (!(await this.storage.exists(current.storageKey))) {
-        await this.storage.create(current.storageKey, current.defaultBranch, false, current.name);
-        await tx.repository.update({ where: { id: current.id }, data: { storageGeneration: { increment: 1 } } });
+      return { storageKey: current.storageKey, defaultBranch: current.defaultBranch, repositoryId: current.id,
+        userId, actorIsOwner: current.ownerId === userId, operation, storageGeneration: current.storageGeneration };
+    }, { timeout: 30_000 });
+  }
+
+  async recheckGit(repositoryId: string, userId: string | undefined, operation: 'read' | 'write') {
+    return this.db.$transaction(async (tx) => {
+      const current = await tx.repository.findUnique({ where: { id: repositoryId },
+        include: { members: { where: { userId: userId ?? '00000000-0000-0000-0000-000000000000' } } } });
+      if (operation === 'write' && !userId) throw new UnauthorizedException();
+      if (userId) {
+        const users = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM users WHERE id = ${userId}::uuid`;
+        if (users[0]?.status !== 'ACTIVE') throw new UnauthorizedException();
       }
-      return { storageKey: current.storageKey, defaultBranch: current.defaultBranch };
+      if (operation === 'write') {
+        this.policy.assertWrite(current, userId!);
+      } else {
+        this.policy.assertRead(current, userId);
+      }
+      if (operation === 'write') await this.pushJournal.assertNoUnresolved(current.id);
+      if (!(await this.storage.exists(current.storageKey))) {
+        await this.pushJournal.assertNoUnresolved(current.id);
+        await this.storage.create(current.storageKey, current.defaultBranch, false, current.name);
+        const updated = await tx.repository.update({ where: { id: current.id }, data: { storageGeneration: { increment: 1 } } });
+        return { storageKey: updated.storageKey, defaultBranch: updated.defaultBranch,
+          repositoryId: updated.id, userId, actorIsOwner: updated.ownerId === userId, operation, storageGeneration: updated.storageGeneration };
+      }
+      return { storageKey: current.storageKey, defaultBranch: current.defaultBranch,
+        repositoryId: current.id, userId, actorIsOwner: current.ownerId === userId, operation, storageGeneration: current.storageGeneration };
     }, { timeout: 30_000 });
   }
 
@@ -226,7 +270,7 @@ export class RepositoriesService {
     if (dto.name === undefined && dto.description === undefined && dto.visibility === undefined) {
       throw new BadRequestException({ error: { code: 'EMPTY_UPDATE', message: 'Cần ít nhất một trường để cập nhật.', details: {} } });
     }
-    return this.conflict(() => this.db.$transaction(async (tx) => {
+    return this.withRepositoryLock(owner, name, () => this.conflict(() => this.db.$transaction(async (tx) => {
       await this.activeOwner(tx, userId);
       const repo = await this.load(tx, owner, name);
       this.policy.assertManage(repo, userId);
@@ -235,24 +279,29 @@ export class RepositoriesService {
         data: { name: dto.name, normalizedName: dto.name?.toLowerCase(), description: dto.description, visibility: dto.visibility },
         include: { owner: { select: { username: true } } },
       });
+      await tx.auditLog.create({ data: { actorId: userId, action: 'REPOSITORY_UPDATED', targetId: repo.id,
+        details: { repositoryId: repo.id, changedFields: Object.keys(dto),
+          ...(dto.visibility === undefined ? {} : { visibility: { from: repo.visibility, to: dto.visibility } }) } } });
       return this.response(updated, userId);
-    }));
+    })));
   }
 
   async remove(owner: string, name: string, userId: string): Promise<void> {
-    await this.db.$transaction(async (tx) => {
+    await this.withRepositoryLock(owner, name, () => this.db.$transaction(async (tx) => {
       await this.activeOwner(tx, userId);
       const repo = await this.load(tx, owner, name);
       this.policy.assertManage(repo, userId);
       const deletedAt = new Date();
       const purgeAfter = new Date(deletedAt.getTime() + this.config.getOrThrow<number>('SOFT_DELETE_RETENTION_DAYS') * 86_400_000);
       await tx.repository.update({ where: { id: repo.id }, data: { status: 'DELETED', deletedAt, purgeAfter } });
-    });
+      await tx.auditLog.create({ data: { actorId: userId, action: 'REPOSITORY_SOFT_DELETED', targetId: repo.id,
+        details: { repositoryId: repo.id, purgeAfter: purgeAfter.toISOString() } } });
+    }));
   }
 
 
   async restore(owner: string, name: string, userId: string) {
-    return this.db.$transaction(async (tx) => {
+    return this.withRepositoryLock(owner, name, () => this.db.$transaction(async (tx) => {
       await this.activeOwner(tx, userId);
       await tx.$queryRaw`SELECT r.id FROM repositories r JOIN users u ON u.id = r.owner_id
         WHERE u.normalized_username = ${owner.toLowerCase()} AND r.normalized_name = ${name.toLowerCase()} FOR UPDATE OF r`;
@@ -267,8 +316,10 @@ export class RepositoriesService {
         where: { id: repo.id }, data: { status: 'ACTIVE', deletedAt: null, purgeAfter: null },
         include: { owner: { select: { username: true } } },
       });
+      await tx.auditLog.create({ data: { actorId: userId, action: 'REPOSITORY_RESTORED', targetId: repo.id,
+        details: { repositoryId: repo.id } } });
       return this.response(updated, userId);
-    });
+    }));
   }
 
   async listMembers(owner: string, name: string, userId: string) {
@@ -291,7 +342,7 @@ export class RepositoriesService {
   }
 
   async inviteMember(owner: string, name: string, userId: string, dto: InviteMemberDto) {
-    return this.db.$transaction(async (tx) => {
+    return this.withRepositoryLock(owner, name, () => this.db.$transaction(async (tx) => {
       await this.activeOwner(tx, userId);
       const repo = await this.load(tx, owner, name, userId);
       this.policy.assertManage(repo, userId);
@@ -360,7 +411,7 @@ export class RepositoriesService {
           invitee: { id: invitation.invitee.id, username: invitation.invitee.username },
         },
       };
-    });
+    }));
   }
 
   async listInvitations(owner: string, name: string, userId: string) {
@@ -384,7 +435,7 @@ export class RepositoriesService {
   }
 
   async revokeInvitation(owner: string, name: string, userId: string, invitationId: string) {
-    await this.db.$transaction(async (tx) => {
+    await this.withRepositoryLock(owner, name, () => this.db.$transaction(async (tx) => {
       await this.activeOwner(tx, userId);
       const repo = await this.load(tx, owner, name, userId);
       this.policy.assertManage(repo, userId);
@@ -408,11 +459,11 @@ export class RepositoriesService {
       await tx.auditLog.create({
         data: { id: randomUUID(), actorId: userId, action: 'INVITATION_REVOKED', targetId: invitation.id },
       });
-    });
+    }));
   }
 
   async updateMemberRole(owner: string, name: string, userId: string, memberUserId: string, dto: UpdateMemberRoleDto) {
-    return this.db.$transaction(async (tx) => {
+    return this.withRepositoryLock(owner, name, () => this.db.$transaction(async (tx) => {
       await this.activeOwner(tx, userId);
       const repo = await this.load(tx, owner, name, userId);
       this.policy.assertManage(repo, userId);
@@ -445,11 +496,11 @@ export class RepositoriesService {
           user: { id: updated.user.id, username: updated.user.username },
         },
       };
-    });
+    }));
   }
 
   async removeMember(owner: string, name: string, userId: string, memberUserId: string) {
-    await this.db.$transaction(async (tx) => {
+    await this.withRepositoryLock(owner, name, () => this.db.$transaction(async (tx) => {
       await this.activeOwner(tx, userId);
       const repo = await this.load(tx, owner, name, userId);
       this.policy.assertManage(repo, userId);
@@ -470,6 +521,6 @@ export class RepositoriesService {
       await tx.auditLog.create({
         data: { id: randomUUID(), actorId: userId, action: 'MEMBER_REMOVED', targetId: memberUserId },
       });
-    });
+    }));
   }
 }

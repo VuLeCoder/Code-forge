@@ -5,6 +5,7 @@ export type RepositorySummary = {
   description: string | null;
   visibility: "PUBLIC" | "PRIVATE";
   updatedAt: string;
+  cloneUrl?: string;
   deletedAt?: string | null;
   purgeAfter?: string | null;
   permissions: { canRead: boolean; canWrite?: boolean; canManage: boolean };

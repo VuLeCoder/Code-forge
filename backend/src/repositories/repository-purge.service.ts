@@ -1,6 +1,8 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
 import { GitStorageService } from './git-storage.service';
+import { RepositoryLockService } from './repository-lock.service';
+import { GitPushJournalService } from './git-push-journal.service';
 
 @Injectable()
 export class RepositoryPurgeService implements OnModuleInit, OnModuleDestroy {
@@ -8,7 +10,8 @@ export class RepositoryPurgeService implements OnModuleInit, OnModuleDestroy {
   private timer?: NodeJS.Timeout;
   private running = false;
 
-  constructor(private readonly db: PrismaService, private readonly storage: GitStorageService) {}
+  constructor(private readonly db: PrismaService, private readonly storage: GitStorageService, private readonly locks: RepositoryLockService,
+    private readonly pushJournal: GitPushJournalService) {}
 
   onModuleInit() {
     this.timer = setInterval(() => void this.runScheduled(), 60 * 60 * 1000);
@@ -33,7 +36,10 @@ export class RepositoryPurgeService implements OnModuleInit, OnModuleDestroy {
         orderBy: [{ purgeAfter: 'asc' }, { id: 'asc' }], select: { id: true }, take: limit,
       });
       for (const candidate of candidates) {
+        let lock: Awaited<ReturnType<RepositoryLockService['acquire']>> | undefined;
         try {
+          lock = await this.locks.acquire(candidate.id);
+          await this.pushJournal.assertNoUnresolved(candidate.id);
           const removed = await this.db.$transaction(async (tx) => {
             const rows = await tx.$queryRaw<{ id: string; storage_key: string }[]>`
               SELECT id, storage_key FROM repositories
@@ -50,7 +56,7 @@ export class RepositoryPurgeService implements OnModuleInit, OnModuleDestroy {
           if (removed) purged++;
         } catch (error) {
           this.logger.warn(`Could not purge repository ${candidate.id}; retrying later.`, error);
-        }
+        } finally { if (lock) await lock.release(); }
       }
       return purged;
     } finally { this.running = false; }

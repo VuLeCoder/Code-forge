@@ -1,5 +1,5 @@
 import { plainToInstance, Transform, Type } from 'class-transformer';
-import { IsBoolean, IsIn, IsInt, IsNotEmpty, IsString, Max, Min, MinLength, validateSync } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Max, Min, MinLength, validateSync } from 'class-validator';
 
 class EnvironmentVariables {
   @IsIn(['development', 'test', 'production'])
@@ -19,6 +19,11 @@ class EnvironmentVariables {
   @IsNotEmpty()
   DATABASE_URL!: string;
 
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  DATABASE_URL_UNPOOLED?: string;
+
   @IsString()
   @IsNotEmpty()
   GIT_STORAGE_PATH = '../data/git';
@@ -28,8 +33,23 @@ class EnvironmentVariables {
   FRONTEND_ORIGIN = 'http://localhost:3000';
 
   @IsString()
+  @IsNotEmpty()
+  GIT_PUBLIC_BASE_URL = 'http://localhost:3000';
+
+  @IsString()
   @MinLength(32)
   JWT_ACCESS_SECRET!: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(32)
+  RATE_LIMIT_PROXY_SECRET?: string;
+
+  @IsInt()
+  @Min(0)
+  @Max(10)
+  @Type(() => Number)
+  TRUST_PROXY_HOPS = 0;
 
   @IsInt()
   @Min(60)
@@ -90,8 +110,18 @@ export function validateEnvironment(config: Record<string, unknown>): Environmen
   if (validated.COOKIE_SAME_SITE === 'none' && !validated.COOKIE_SECURE) {
     throw new Error('Cấu hình môi trường không hợp lệ: COOKIE_SAME_SITE=none yêu cầu COOKIE_SECURE=true');
   }
+  if (validated.NODE_ENV === 'production' && !validated.RATE_LIMIT_PROXY_SECRET) {
+    throw new Error('Cấu hình môi trường không hợp lệ: production cần RATE_LIMIT_PROXY_SECRET dài tối thiểu 32 ký tự');
+  }
+  if (validated.NODE_ENV === 'production' && !validated.COOKIE_SECURE) {
+    throw new Error('Cấu hình môi trường không hợp lệ: production cần COOKIE_SECURE=true');
+  }
   if (validated.MAX_FILE_BYTES > validated.MAX_REPOSITORY_BYTES) {
     throw new Error('Cấu hình môi trường không hợp lệ: MAX_FILE_BYTES không được lớn hơn MAX_REPOSITORY_BYTES');
+  }
+  if (!validated.DATABASE_URL_UNPOOLED) {
+    if (validated.NODE_ENV === 'production') throw new Error('Cấu hình môi trường không hợp lệ: production cần DATABASE_URL_UNPOOLED trực tiếp cho migration và khóa repository');
+    validated.DATABASE_URL_UNPOOLED = validated.DATABASE_URL;
   }
   return validated;
 }

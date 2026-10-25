@@ -1,19 +1,102 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import type { Dir, Dirent } from 'node:fs';
+import * as fsPromises from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, rm, symlink, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigService } from '@nestjs/config';
 import { GitStorageService } from './git-storage.service';
 
 describe('GitStorageService with real Git', () => {
+  // Spawning Git repeatedly is substantially slower on Windows hosts.
+  jest.setTimeout(60_000);
   let root: string;
   let storage: GitStorageService;
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'code-forge-storage-test-'));
-    storage = new GitStorageService({ getOrThrow: () => root } as unknown as ConfigService);
+    storage = new GitStorageService({ getOrThrow: (key: string) => key === 'GIT_STORAGE_PATH' ? root
+      : key === 'MAX_FILE_BYTES' ? 25 * 1024 * 1024 : 500 * 1024 * 1024 } as unknown as ConfigService);
   });
   afterEach(async () => { await rm(root, { recursive: true, force: true }); });
+
+  it('removes only old app-owned staging and README directories, safely and in bounded idempotent batches', async () => {
+    const gitRoot = join(root, 'git-root');
+    const readmeRoot = join(root, 'readme-root');
+    const outside = join(root, 'outside');
+    await Promise.all([mkdir(gitRoot), mkdir(readmeRoot), mkdir(outside)]);
+    const stale = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    const makeDirectory = async (parent: string, name: string, modifiedAt?: Date) => {
+      const path = join(parent, name);
+      await mkdir(path);
+      if (modifiedAt) await utimes(path, modifiedAt, modifiedAt);
+      return path;
+    };
+
+    const staleStage = await makeDirectory(gitRoot, '.stage-12345678-1234-4234-9234-123456789abc', stale);
+    const staleReadme = await makeDirectory(readmeRoot, 'code-forge-readme-a1B2c3', stale);
+    const freshStage = await makeDirectory(gitRoot, '.stage-12345678-1234-4234-9234-123456789abd');
+    const unrecognized = await makeDirectory(gitRoot, '.stage-not-a-uuid', stale);
+    const unrelated = await makeDirectory(readmeRoot, 'code-forge-readme-too-long', stale);
+    const outsideSentinel = await makeDirectory(outside, 'preserve-me');
+    const linkedStage = join(gitRoot, '.stage-12345678-1234-4234-9234-123456789abe');
+    let symlinkSupported = true;
+    try {
+      await symlink(outsideSentinel, linkedStage, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch (error) {
+      if (process.platform === 'win32' && ['EPERM', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) {
+        symlinkSupported = false;
+      } else {
+        throw error;
+      }
+    }
+    const staleStages = await Promise.all(Array.from({ length: 27 }, (_, index) =>
+      makeDirectory(gitRoot, `.stage-22345678-1234-4234-9234-${String(index).padStart(12, '0')}`, stale)));
+
+    await expect(storage.cleanupOrphanedTemporaryDirectories(gitRoot, readmeRoot)).resolves.toBe(26);
+    await expect(storage.cleanupOrphanedTemporaryDirectories(gitRoot, readmeRoot)).resolves.toBe(3);
+    await expect(storage.cleanupOrphanedTemporaryDirectories(gitRoot, readmeRoot)).resolves.toBe(0);
+
+    for (const path of [staleStage, staleReadme, ...staleStages]) await expect(lstat(path)).rejects.toMatchObject({ code: 'ENOENT' });
+    for (const path of [freshStage, unrecognized, unrelated, outsideSentinel]) await expect(lstat(path)).resolves.toBeDefined();
+    if (symlinkSupported) expect((await lstat(linkedStage)).isSymbolicLink()).toBe(true);
+  });
+
+  it('reaches an exact-name stale candidate after more than 2000 unrelated entries', async () => {
+    const gitRoot = join(root, 'git-root-large');
+    await mkdir(gitRoot);
+    const stale = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    const candidate = join(gitRoot, '.stage-32345678-1234-4234-9234-123456789abc');
+    await mkdir(candidate);
+    await utimes(candidate, stale, stale);
+
+    const entries = Array.from({ length: 2050 }, (_, index) => ({
+      name: `unrelated-${String(index).padStart(4, '0')}`,
+      isDirectory: () => false,
+    } as unknown as Dirent));
+    entries.push({ name: '.stage-32345678-1234-4234-9234-123456789abc', isDirectory: () => true } as unknown as Dirent);
+    const streamedDirectory = {
+      *[Symbol.iterator]() {
+        yield* entries;
+      },
+    } as unknown as Dir;
+    const originalOpendir = fsPromises.opendir;
+    const opendirSpy = jest.spyOn(fsPromises, 'opendir').mockImplementation(async (path) => {
+      if (String(path) === gitRoot) return streamedDirectory;
+      return originalOpendir(path);
+    });
+
+    try {
+      await expect(storage.cleanupOrphanedTemporaryDirectories(gitRoot, join(root, 'missing-readme'))).resolves.toBe(1);
+      await expect(lstat(candidate)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      opendirSpy.mockRestore();
+    }
+  });
+
+  it('tolerates a temp root that disappeared before a cleanup pass', async () => {
+    await expect(storage.cleanupOrphanedTemporaryDirectories(join(root, 'missing-git'), join(root, 'missing-readme'))).resolves.toBe(0);
+  });
 
   it('paginates a pinned history, reads merge parents and isolates reachable commits', async () => {
     const key = `${randomUUID()}.git`;
@@ -74,6 +157,41 @@ describe('GitStorageService with real Git', () => {
     expect(await storage.exists(key)).toBe(true);
     expect(await storage.inspect(key, 'main')).toEqual({ state: 'EMPTY', readme: null });
     expect(execFileSync('git', ['--git-dir', join(root, key), 'symbolic-ref', 'HEAD'], { encoding: 'utf8' }).trim()).toBe('refs/heads/main');
+    expect(await storage.snapshotRefs(key)).toEqual({});
+  });
+
+  it('returns a sorted complete ref snapshot and fails closed on malformed or over-limit output', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'main', true, 'Snapshot');
+    const sha = execFileSync('git', ['--git-dir', join(root, key), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    execFileSync('git', ['--git-dir', join(root, key), 'update-ref', 'refs/heads/feature/demo', sha]);
+    expect(await storage.snapshotRefs(key)).toEqual({
+      'refs/heads/feature/demo': sha,
+      'refs/heads/main': sha,
+    });
+
+    const git = jest.spyOn(storage as unknown as { git: (...args: unknown[]) => Promise<{ stdout: string; stderr: string }> }, 'git');
+    git.mockResolvedValueOnce({ stdout: `refs/heads/bad..name\t${sha}\n`, stderr: '' });
+    await expect(storage.snapshotRefs(key)).rejects.toMatchObject({ response: { error: { code: 'GIT_REF_SNAPSHOT_UNAVAILABLE' } } });
+
+    git.mockResolvedValueOnce({ stdout: `refs/heads/main\tinvalid-sha\n`, stderr: '' });
+    await expect(storage.snapshotRefs(key)).rejects.toMatchObject({ response: { error: { code: 'GIT_REF_SNAPSHOT_UNAVAILABLE' } } });
+
+    git.mockResolvedValueOnce({ stdout: `refs/tags/release\t${sha}\n`, stderr: '' });
+    await expect(storage.snapshotRefs(key)).rejects.toMatchObject({ response: { error: { code: 'GIT_REF_SNAPSHOT_UNAVAILABLE' } } });
+
+    git.mockResolvedValueOnce({ stdout: `${Array.from({ length: 1001 }, (_, index) => `refs/heads/branch-${index.toString().padStart(4, '0')}\t${sha}`).join('\n')}\n`, stderr: '' });
+    await expect(storage.snapshotRefs(key)).rejects.toMatchObject({ response: { error: { code: 'GIT_REF_SNAPSHOT_UNAVAILABLE' } } });
+  });
+
+  it('sanitizes Git snapshot command failures', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'main', false, 'Snapshot');
+    jest.spyOn(storage as unknown as { git: (...args: unknown[]) => Promise<{ stdout: string; stderr: string }> }, 'git')
+      .mockRejectedValueOnce(new Error('sensitive Git stderr'));
+    await expect(storage.snapshotRefs(key)).rejects.toMatchObject({
+      response: { error: { code: 'GIT_REF_SNAPSHOT_UNAVAILABLE', message: 'Không thể xác minh Git refs.' } },
+    });
   });
 
   it('commits a README and can detect missing storage', async () => {
@@ -97,6 +215,145 @@ describe('GitStorageService with real Git', () => {
     await expect(storage.branches('../escape.git', 'main')).rejects.toThrow();
   });
 
+  it('pins a compare snapshot to exact branch commits and returns bounded text diff data', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'main', true, 'Compare');
+    const git = (args: string[], input?: string) => execFileSync('git', ['--git-dir', join(root, key), ...args], { encoding: 'utf8', input }).trim();
+    const base = git(['rev-parse', 'refs/heads/main']);
+    const entries = ['README.md', 'feature.txt'].map((name, index) => {
+      const content = index ? 'added line\n' : '# Compare changed\n';
+      const sha = git(['hash-object', '-w', '--stdin'], content);
+      return `100644 blob ${sha}\t${name}\0`;
+    }).join('');
+    const tree = git(['mktree', '-z'], entries);
+    const source = git(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', tree, '-p', base, '-m', 'Compare changes']);
+    git(['update-ref', 'refs/heads/feature/compare', source]);
+    const result = await storage.compare(key, 'feature/compare', 'main');
+    expect(result).toMatchObject({ state: 'READY', sourceSha: source, targetSha: base, mergeBase: base, diffTruncated: false });
+    expect(result.commits.map((commit) => commit.sha)).toEqual([source]);
+    expect(result.files).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: 'M', path: 'README.md' }),
+      expect.objectContaining({ status: 'A', path: 'feature.txt' }),
+    ]));
+    expect(result.diff).toContain('+added line');
+
+    const summary = await storage.compareSummary(key, 'feature/compare', 'main');
+    expect(summary).toEqual({ state: 'READY', sourceSha: source, targetSha: base, mergeBase: base });
+    const commitPage = await storage.comparePage(key, source, base, 'commits', 1, 1);
+    expect(commitPage).toMatchObject({ sourceSha: source, targetSha: base, page: 1, pageSize: 1, totalItems: 1, hasMore: false });
+    expect(commitPage.items).toEqual([expect.objectContaining({ sha: source })]);
+    const firstFilePage = await storage.comparePage(key, source, base, 'files', 1, 1);
+    const secondFilePage = await storage.comparePage(key, source, base, 'files', 2, 1);
+    expect(firstFilePage).toMatchObject({ totalItems: 2, page: 1, pageSize: 1, hasMore: true });
+    expect(secondFilePage).toMatchObject({ totalItems: 2, page: 2, pageSize: 1, hasMore: false });
+    const diffPage = await storage.comparePage(key, source, base, 'diff', 1, 1);
+    expect(diffPage.items[0]).toMatchObject({ diffStatus: 'TEXT' });
+    expect((diffPage.items[0] as { diff?: string }).diff).toContain('diff --git');
+    await expect(storage.comparePage(key, source, base, 'commits', 0, 20)).rejects.toMatchObject({
+      response: { error: { code: 'INVALID_COMPARE_PAGE' } },
+    });
+    await expect(storage.comparePage(key, source, base, 'commits', 1, 101)).rejects.toMatchObject({
+      response: { error: { code: 'INVALID_COMPARE_PAGE' } },
+    });
+  });
+
+  it('returns per-file compare states for text, binary, and diffs above the file limit', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'main', true, 'Compare file states');
+    const git = (args: string[], input?: Buffer | string) => execFileSync('git', ['--git-dir', join(root, key), ...args], { encoding: 'utf8', input }).trim();
+    const base = git(['rev-parse', 'refs/heads/main']);
+    const textBlob = git(['hash-object', '-w', '--stdin'], 'small text\n');
+    const binaryBlob = git(['hash-object', '-w', '--stdin'], Buffer.from([0, 1, 2, 255]));
+    const largeBlob = git(['hash-object', '-w', '--stdin'], 'x'.repeat(140 * 1024));
+    const tree = git(['mktree', '-z'], [
+      `100644 blob ${textBlob}\ttext.txt\0`,
+      `100644 blob ${binaryBlob}\tbinary.dat\0`,
+      `100644 blob ${largeBlob}\tlarge.txt\0`,
+    ].join(''));
+    const source = git(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', tree, '-p', base, '-m', 'File states']);
+    git(['update-ref', 'refs/heads/feature/file-states', source]);
+
+    const result = await storage.compare(key, 'feature/file-states', 'main');
+
+    expect(result.files).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'text.txt', diffStatus: 'TEXT' }),
+      expect.objectContaining({ path: 'binary.dat', diffStatus: 'BINARY' }),
+      expect.objectContaining({ path: 'large.txt', diffStatus: 'TRUNCATED' }),
+    ]));
+    expect(result.files.find((file) => file.path === 'text.txt')?.diff).toContain('+small text');
+    expect(result.diff).toContain('+small text');
+    expect(result.diff).not.toContain('x'.repeat(140 * 1024));
+    expect(result.diffTruncated).toBe(true);
+    const diffPage = await storage.comparePage(key, source, result.targetSha, 'diff', 1, 100);
+    expect(diffPage.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'text.txt', diffStatus: 'TEXT' }),
+      expect.objectContaining({ path: 'binary.dat', diffStatus: 'BINARY' }),
+      expect.objectContaining({ path: 'large.txt', diffStatus: 'TRUNCATED' }),
+    ]));
+  });
+
+  it('returns NO_MERGE_BASE for unrelated branch histories without changing refs', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'main', true, 'Unrelated histories');
+    const git = (args: string[], input?: string) => execFileSync('git', ['--git-dir', join(root, key), ...args], {
+      encoding: 'utf8', input,
+    }).trim();
+    const targetSha = git(['rev-parse', 'refs/heads/main']);
+    const emptyTree = git(['mktree'], '');
+    const sourceSha = git(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', emptyTree,
+      '-m', 'Unrelated root']);
+    git(['update-ref', 'refs/heads/feature/unrelated-root', sourceSha]);
+    const beforeRefs = await storage.snapshotRefs(key);
+
+    const result = await storage.compare(key, 'feature/unrelated-root', 'main');
+
+    expect(result).toEqual({ state: 'NO_MERGE_BASE', sourceSha, targetSha, mergeBase: null,
+      commits: [], files: [], diff: '', diffTruncated: false });
+    await expect(storage.compareSummary(key, 'feature/unrelated-root', 'main'))
+      .resolves.toEqual({ state: 'NO_MERGE_BASE', sourceSha, targetSha, mergeBase: null });
+    await expect(storage.comparePage(key, sourceSha, targetSha, 'files', 1, 20))
+      .resolves.toMatchObject({ state: 'NO_MERGE_BASE', items: [], totalItems: 0, hasMore: false });
+    expect(await storage.snapshotRefs(key)).toEqual(beforeRefs);
+  });
+
+  it('rejects a merge candidate containing a file above the configured file quota', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'main', true, 'Quota');
+    const git = (args: string[], input?: string) => execFileSync('git', ['--git-dir', join(root, key), ...args], { encoding: 'utf8', input }).trim();
+    const base = git(['rev-parse', 'refs/heads/main']);
+    const blob = git(['hash-object', '-w', '--stdin'], 'x'.repeat(1025));
+    const tree = git(['mktree', '-z'], `100644 blob ${blob}\toversized.bin\0`);
+    const source = git(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', tree, '-p', base, '-m', 'Oversized source']);
+    git(['update-ref', 'refs/heads/feature/quota', source]);
+    const candidate = await storage.createMergeCandidate(key, 'main', base, source, 1);
+    const limited = new GitStorageService({ getOrThrow: (name: string) => name === 'GIT_STORAGE_PATH' ? root
+      : name === 'MAX_FILE_BYTES' ? 1024 : 32 * 1024 } as unknown as ConfigService);
+
+    await expect(limited.assertMergeCandidateQuota(key, candidate)).rejects.toMatchObject({
+      response: { error: { code: 'MERGE_FILE_QUOTA_EXCEEDED' } },
+    });
+    expect(await storage.branchSha(key, 'main')).toBe(base);
+  });
+
+  it('rejects a merge candidate whose reachable objects exceed the repository quota', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'main', true, 'Quota');
+    const git = (args: string[], input?: string) => execFileSync('git', ['--git-dir', join(root, key), ...args], { encoding: 'utf8', input }).trim();
+    const base = git(['rev-parse', 'refs/heads/main']);
+    const blob = git(['hash-object', '-w', '--stdin'], 'feature data');
+    const tree = git(['mktree', '-z'], `100644 blob ${blob}\tfeature.txt\0`);
+    const source = git(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', tree, '-p', base, '-m', 'Source']);
+    git(['update-ref', 'refs/heads/feature/quota', source]);
+    const candidate = await storage.createMergeCandidate(key, 'main', base, source, 1);
+    const limited = new GitStorageService({ getOrThrow: (name: string) => name === 'GIT_STORAGE_PATH' ? root
+      : name === 'MAX_FILE_BYTES' ? 1024 : 1 } as unknown as ConfigService);
+
+    await expect(limited.assertMergeCandidateQuota(key, candidate)).rejects.toMatchObject({
+      response: { error: { code: 'MERGE_REPOSITORY_QUOTA_EXCEEDED' } },
+    });
+    expect(await storage.branchSha(key, 'main')).toBe(base);
+  });
+
   it('returns no branches for unborn HEAD and rejects unsafe refs/paths', async () => {
     const key = `${randomUUID()}.git`;
     await storage.create(key, 'main', false, 'Empty');
@@ -114,7 +371,7 @@ describe('GitStorageService with real Git', () => {
   it('fails closed when branch count or output exceeds the read limit', async () => {
     const key = `${randomUUID()}.git`;
     await storage.create(key, 'main', true, 'Limits');
-    const args = ['--git-dir', join(root, key)];
+    const args = ['-c', 'core.longpaths=true', '--git-dir', join(root, key)];
     const sha = execFileSync('git', [...args, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     execFileSync('git', [...args, 'update-ref', '--stdin'], {
       input: Array.from({ length: 1000 }, (_, i) => `create refs/heads/branch-${i} ${sha}\n`).join(''),

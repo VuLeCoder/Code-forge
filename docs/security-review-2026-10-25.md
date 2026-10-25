@@ -1,0 +1,86 @@
+# Security review — Code Forge
+
+Review date: 2026-10-25
+Scope: authentication/session handling, repository permissions, Git HTTP/proxy, PR merge/reconciliation, admin/audit/bootstrap, trusted-proxy IP signing, and local Compose exposure.
+Method: read-only code/test review; no destructive payloads or production/cloud access. The source review is not a cloud penetration test.
+
+## Findings and dispositions
+
+### High — PostgreSQL development port was exposed on all host interfaces
+
+- **Status:** fixed in commit `9c2439b`; rendered Compose config verified.
+- **Evidence:** at baseline `7bf51ec`, [`compose.yaml`](../compose.yaml) line 7 used a known development database credential and line 8 published `5433:5432` without a loopback address. Compose therefore bound the host port on all interfaces by default. A reachable LAN client could attempt database access using the repository's known development credential.
+- **Severity:** High; reviewer estimate CVSS 8.8, conditional on network reachability. This is local-development exposure, not evidence of cloud exposure.
+- **Remediation:** PostgreSQL and backend mappings now bind to `127.0.0.1` (`compose.yaml` lines 8 and 37). `docker compose config --format json` rendered `127.0.0.1:5433 -> 5432` and `127.0.0.1:4000 -> 4000`.
+- **Retest:** Docker Engine was not responsive, so containers were not started. The rendered configuration check passed; actual socket binding remains unverified until Docker runs.
+
+### Hardening — PR proxy mutation body had no route-level byte cap
+
+- **Status:** fixed in commit `9c2439b`; focused proxy tests pass.
+- **Evidence:** before the fix, the Next route buffered mutation data with `request.text()` without enforcing a route-level cap. Hosting limits might reduce exposure, but standalone/local behavior was not established. The PR DTO fields total well below 32 KiB.
+- **Severity:** no CVSS assigned; this was a resource-exhaustion hardening gap, not a confirmed exploitable vulnerability in the deployed hosting setup.
+- **Remediation:** the proxy now validates `Content-Length` and reads mutation bodies as a bounded stream with a 32 KiB limit, cancelling oversized requests before forwarding.
+- **Retest:** proxy browser tests cover declared oversized content and chunked content without `Content-Length`; both return 413 and produce no upstream request.
+
+## Reviewed controls
+
+No confirmed exploitable authentication bypass, private-repository disclosure, command injection, admin escalation, or secret logging was found in the inspected code and tests. Verified controls include session revalidation against active, unrevoked, unexpired database sessions; atomic refresh-token rotation and family revocation on reuse; private repository read policy; Git execution through argument arrays and streaming quotas; repository advisory locks and expected-snapshot checks for merges; and allowlisted admin audit details.
+
+### P6 control gap — successful Git pushes have no durable attributable audit
+
+- **Status:** the review-time gap has an implementation in commit `edb0ced`; hosted CI passes, with owner review and operator runbook still pending. Tracked in [GitHub issue #5](https://github.com/VuLeCoder/Code-forge/issues/5).
+- **Evidence:** in [`git-http.service.ts`](../backend/src/repositories/git-http.service.ts), receive-pack requests emit fixed operational logs only. HTTP 200 is set after parsing CGI response headers, before the child process exits and its output drains. On child close, the service releases the repository lock but does not persist actor/repository/ref changes. The `pre-receive` quota hook validates proposed updates but writes no durable journal. A successful push can therefore change refs without an attributable audit row.
+- **Severity:** P2 operational/security-control gap; no direct exploit or CVSS assigned. This fails the P6 requirement to audit the actual outcome of pushes, not HTTP status.
+- **Implementation:** `edb0ced` adds a pending journal before receive-pack, sorted refs/heads snapshots, actor and storage generation, atomic status/audit completion from the actual ref delta, reconciliation after interrupted DB finalization, and gates on subsequent Git/PR/repository/admin/invitation/purge/storage-recovery writes. Ref snapshots are cleared on terminal operations; unresolved rows retain them only for reconciliation. Audit details contain operation/repository/generation/changed-ref count only, not branch names or SHAs.
+- **Verification:** local unit 15 suites/93 tests; isolated PostgreSQL 17 + real Git E2E 8 suites/29 tests, including audit DB failure after refs moved, blocking a second push, and one attributed reconciliation audit; Prisma validate/generate, workspace lint/typecheck/build and diff check pass. Hosted workflow `40147767567` succeeded on this commit.
+- **Residual risk:** permanently ambiguous or generation-mismatched rows fail closed and can leave a repository unwritable. There is no admin-facing resolution workflow yet; operator recovery must inspect the exact operation and storage before taking a manual action. No automatic ref rollback is attempted.
+- **Acceptance:** add hosted evidence for the above and complete the admin/operator recovery runbook before declaring P6/release complete. Never log/store pack data, diffs, path/content, credentials, headers, URLs, or stderr.
+
+## Remaining release verification
+
+### Follow-up review: session and merge journal races
+
+- **Finding 1 — P2 session lifecycle race:** Login/refresh could pass the ACTIVE check before an admin lock, then create/rotate a session after the admin had revoked current sessions. If later unlocked, that session could become usable. Commit `298fb62` acquires the `users` row `FOR UPDATE` and rechecks ACTIVE inside login/refresh transactions; admin status mutations acquire the same target-row lock before updating/revoking. Final-admin locking still uses stable ordering. Auth/admin unit tests pass, and deterministic PostgreSQL E2E queues login and refresh behind an explicit row lock; the latest hosted workflow `40162474987` passes these gates.
+- **Finding 2 — P2 repository write-fence gap:** An unresolved merge operation did not block subsequent pushes/lifecycle writes, allowing non-default target refs to move before merge reconciliation. In `298fb62`, normal repository fences check both push and merge journals; reconciliation uses explicit opposite-type checks and freezes cross-type ambiguous operations rather than attributing or rolling back refs. Targeted PostgreSQL/Git E2E proves a descendant push is rejected with the ref unchanged until reconciliation, then succeeds afterward. Unit tests pass; latest hosted workflow `40162474987` passes all gates.
+- **Cloud boundary:** These local fixes do not establish cloud acceptance. The Vercel/Render trusted-proxy, direct Render Git and source-reset checks below remain required.
+
+- Verify Vercel/Render trusted-proxy settings against real cloud requests, including attempts to spoof forwarded-IP headers. Vercel documents that it overwrites `X-Forwarded-For` to prevent IP spoofing: [request headers](https://vercel.com/docs/headers/request-headers). This documentation is not a substitute for a smoke test of the configured deployment.
+- Test direct Render Git HTTPS, source loss after restart, and recovery on the selected cloud resources.
+- Run real multi-process Git write races and crash/reconciliation scenarios in isolated PostgreSQL/Git fixtures.
+- Run local Docker image smoke when the Docker Engine is available. No containers or volumes were modified during this review.
+
+### Conditional hardening — production could omit Secure cookie attributes
+
+- **Status:** fixed in commit `1227730`; focused config test and subsequent hosted workflows pass.
+- **Evidence:** at `d1019a2`, `COOKIE_SECURE` defaulted to `false`, and production validation did not require it. The auth controller applies this setting to access and refresh cookies. Deployment documentation says production must set it to `true`, but configuration was not enforced.
+- **Impact/severity:** deployment-dependent. If production omits the setting and accepts HTTP, browser cookies can lack the `Secure` attribute. No active deployment exposure was established; no CVSS assigned.
+- **Remediation:** `validateEnvironment` now rejects `NODE_ENV=production` unless `COOKIE_SECURE=true`. Local/test behavior still defaults to `false`; unit tests cover both modes.
+- **Verification:** backend typecheck, focused ESLint, `environment.spec.ts` (8/8), and `git diff --check` pass locally; hosted workflow `40145289400` on `2305390` passes.
+
+## Evidence boundaries
+
+At `edb0ced`, local backend unit tests pass (15 suites/93 tests), isolated PostgreSQL/Git E2E passes (8 suites/29 tests), workspace lint/typecheck/build pass, and hosted workflow `40147767567` succeeded. Commit `298fb62` passes local backend unit (15 suites/100 tests), targeted PostgreSQL/Git E2E (2 suites/5 tests), workspace lint/typecheck/build, and Compose config validation; hosted run `40149241856` is running. The test DBs were disposable PostgreSQL 17 containers with no mounted volume; they were stopped/removed. AGY attempts: the collaboration bridge timed out after 300 seconds; an async run failed while loading an invalid Postman MCP schema; the final direct CLI attempt timed out after partial lint/Playwright output and made no changes. Both related worktrees are clean and preserved. No global permission or Windows/Antigravity setting was changed. The project includes `scripts/agy.ps1` to pin local AGY CLI calls to `gemini-3.8-flash-medium`; the Codex AGY bridge does not expose a model selector.
+
+### Current audit update (2026-10-25, HEAD `9c2eb81`)
+
+- Hosted workflow `40162474987` succeeded on the current pushed commit and all
+  workflow gates passed.
+- Independent Codex read-only static audit found no confirmed actionable
+  vulnerability in the reviewed auth/session, invitation, Git push/lock, PR
+  merge/reconciliation, admin, or audit paths. It did not exercise cloud proxy,
+  TLS, storage reset, or process/connection-loss behavior.
+- AGY was asked for an independent read-only review with
+  `dangerously_skip_permissions=false`; it timed out after 120 seconds without
+  usable findings. This is an incomplete review, not a pass. No permission
+  bypass or persistent permission change was made.
+- `9c2eb81` includes branch ref UTF-8 byte-limit enforcement and boundary tests;
+  the older “fix in progress” finding is resolved in current source.
+- A valid-pack receive-pack lock-loss case is now integrated in
+  `backend/test/repository-lock.e2e-spec.ts` and passed on an isolated Linux
+  runner (1/1), as well as hosted CI. It asserts HTTP 503, unchanged refs,
+  release of the lock connection, and exit of Git and its hook. The independent
+  security review found no remaining actionable issue in that test. This does
+  not prove the separate backend process-crash/restart path.
+- Still required: abrupt backend process-kill/restart acceptance, direct
+  Render Git/proxy checks, source-reset recovery, and manual accessibility
+  review. Keep these risks visible until separately verified.

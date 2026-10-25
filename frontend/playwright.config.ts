@@ -12,13 +12,14 @@ export default defineConfig({
       reuseExistingServer: false,
     },
     {
-      command: "pnpm build && pnpm start --port 3111",
+      command: "corepack pnpm build && corepack pnpm start --port 3111",
       url: "http://localhost:3111",
       reuseExistingServer: false,
       timeout: 180_000,
       env: {
         BACKEND_URL: "http://127.0.0.1:4111",
         APP_ORIGIN: "http://localhost:3111",
+        RATE_LIMIT_PROXY_SECRET: "playwright-only-signing-secret-at-least-32-characters",
       },
     },
   ],
