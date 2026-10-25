@@ -495,3 +495,21 @@ snapshots, not current status. Current acceptance state is in the task board.
 - Next: do not retry this AGY task. Preserve the timeout as an unresolved
   review attempt; rely only on the separately recorded static review evidence
   and pending Linux runtime CI until new direction is given.
+
+## T-AGY-MODEL-LOW — verify and pin a responsive local AGY model
+
+- Owner: Codex lead; model check requested by user.
+- Status: local model listing and wrapper smoke passed; no global AGY/MCP
+  configuration or credentials changed.
+- Evidence: `agy.exe models` listed Gemini 4 Argon, Gemini 3.8 Flash, Claude
+  Opus 5.5, Claude Sonnet 5.5, and GPT-OSS 120B variants. A no-tools prompt
+  with `gemini-3.8-flash-low` returned `AGY_MODEL_SMOKE_OK`; the project wrapper
+  then returned `AGY_WRAPPER_READY` with its pinned model. Each invocation
+  completed within the 30-second timeout.
+- Change: `scripts/agy.ps1` now pins `gemini-3.8-flash-low`, and
+  `docs/agy-plans/README.md` records the available model list and smoke result.
+  The earlier Medium audit timeout remains classified as inconclusive; this
+  smoke does not prove a full repository audit or MCP access.
+- Next: use the wrapper only for bounded tasks; keep permission bypass off and
+  do not retry the timed-out audit unless separately authorized with a new
+  bounded scope.
