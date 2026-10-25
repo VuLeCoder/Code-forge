@@ -24,7 +24,10 @@ export class MaintenanceJobsService implements OnModuleInit, OnModuleDestroy {
     void this.runOnce();
   }
 
-  onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
+  async onModuleDestroy() {
+    if (this.timer) clearInterval(this.timer);
+    await this.activeRun;
+  }
 
   /** Runs one maintenance batch or awaits the in-flight batch. */
   runOnce() {

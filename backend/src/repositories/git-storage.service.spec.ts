@@ -76,7 +76,7 @@ describe('GitStorageService with real Git', () => {
     } as unknown as Dirent));
     entries.push({ name: '.stage-32345678-1234-4234-9234-123456789abc', isDirectory: () => true } as unknown as Dirent);
     const streamedDirectory = {
-      async *[Symbol.asyncIterator]() {
+      *[Symbol.iterator]() {
         yield* entries;
       },
     } as unknown as Dir;

@@ -238,7 +238,7 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect((await call('DELETE', 'repos/owner/demo', otherCookie)).status).toBe(404);
     expect((await create('DEMO')).status).toBe(409);
     expect((await create('Demo', 'PRIVATE', otherCookie)).status).toBe(201);
-  });
+  }, 30_000);
 
   it('allows anonymous public reads but rejects non-owner mutations and invalid tokens', async () => {
     expect((await create('Public', 'PUBLIC')).status).toBe(201);

@@ -456,11 +456,6 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
   }, 60_000);
 
   it('rejects a merge over repository quota without moving refs or merging metadata, while an in-quota merge preserves both parents', async () => {
-    const registered = await call('POST', 'auth/register', {
-      username: 'QuotaOwner', email: 'quota-owner@example.test', password: 'test-password-123',
-    }, '');
-    expect(registered.status).toBe(201);
-    ownerCookie = cookie(registered);
     const createdRepo = await call('POST', 'repositories', {
       name: 'MergeQuota', visibility: 'PRIVATE', initializeReadme: true,
     });
@@ -486,7 +481,7 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     git(['clone', bare, work]);
     git(['-C', work, 'config', 'user.name', 'Quota Owner']);
     git(['-C', work, 'config', 'user.email', 'quota-owner@example.test']);
-    const repoPath = 'repos/quotaowner/mergequota/pulls';
+    const repoPath = 'repos/pullowner/mergequota/pulls';
     const configuration = app.get(ConfigService);
     const originalMaxFileBytes = configuration.getOrThrow<number>('MAX_FILE_BYTES');
     const originalMaxRepositoryBytes = configuration.getOrThrow<number>('MAX_REPOSITORY_BYTES');

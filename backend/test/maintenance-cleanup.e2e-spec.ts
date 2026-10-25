@@ -82,7 +82,7 @@ describe('MaintenanceJobsService PostgreSQL cleanup and purge', () => {
   }, 60_000);
 
   afterAll(async () => {
-    maintenance?.onModuleDestroy();
+    await maintenance?.onModuleDestroy();
     await db?.$disconnect();
     await locks?.onModuleDestroy();
     if (schemaCreated && admin) await admin.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
@@ -100,15 +100,16 @@ describe('MaintenanceJobsService PostgreSQL cleanup and purge', () => {
 
   it('applies cleanup and purge batches once per eligible row, retains in-window data, and is safe to repeat', async () => {
     if (!db || !maintenance || !storageRoot) throw new Error('Maintenance test fixture was not initialized.');
+    const gitStorageRoot = storageRoot;
     const now = Date.now();
     const owner = await db.user.create({ data: {
       username: 'MaintOwner', normalizedUsername: 'maintowner', email: 'maint-owner@example.test',
       normalizedEmail: 'maint-owner@example.test', passwordHash: 'test-hash',
     } });
-    const invitee = await db.user.create({ data: {
-      username: 'MaintInvitee', normalizedUsername: 'maintinvitee', email: 'maint-invitee@example.test',
-      normalizedEmail: 'maint-invitee@example.test', passwordHash: 'test-hash',
-    } });
+    const invitees = await Promise.all(Array.from({ length: 106 }, (_, index) => db!.user.create({ data: {
+      username: `MaintInvitee${index}`, normalizedUsername: `maintinvitee${index}`,
+      email: `maint-invitee-${index}@example.test`, normalizedEmail: `maint-invitee-${index}@example.test`, passwordHash: 'test-hash',
+    } })));
 
     const anchorId = randomUUID();
     const eligiblePurgeRepos = Array.from({ length: 52 }, (_, index) => {
@@ -125,13 +126,13 @@ describe('MaintenanceJobsService PostgreSQL cleanup and purge', () => {
     const anchorRepo = { id: anchorId, ownerId: owner.id, name: 'InvitationAnchor', normalizedName: 'invitationanchor',
       storageKey: `${anchorId}.git`, updatedAt: new Date(now) };
     await db.repository.createMany({ data: [...eligiblePurgeRepos, retainedDeletedRepo, activeWithOldPurgeDate, anchorRepo] });
-    await Promise.all(eligiblePurgeRepos.map((repository) => mkdir(join(storageRoot, repository.storageKey))));
-    await Promise.all([retainedDeletedRepo, activeWithOldPurgeDate, anchorRepo].map((repository) => mkdir(join(storageRoot, repository.storageKey))));
+    await Promise.all(eligiblePurgeRepos.map((repository) => mkdir(join(gitStorageRoot, repository.storageKey))));
+    await Promise.all([retainedDeletedRepo, activeWithOldPurgeDate, anchorRepo].map((repository) => mkdir(join(gitStorageRoot, repository.storageKey))));
 
     await db.invitation.createMany({ data: [
-      ...Array.from({ length: 105 }, (_, index) => ({ repositoryId: anchorId, inviterId: owner.id, inviteeId: invitee.id,
+      ...Array.from({ length: 105 }, (_, index) => ({ repositoryId: anchorId, inviterId: owner.id, inviteeId: invitees[index]!.id,
         role: 'READ' as const, status: 'PENDING' as const, expiresAt: new Date(now - (40 + index) * 24 * 60 * 60 * 1000), updatedAt: new Date(now) })),
-      { repositoryId: anchorId, inviterId: owner.id, inviteeId: invitee.id, role: 'READ', status: 'PENDING',
+      { repositoryId: anchorId, inviterId: owner.id, inviteeId: invitees[105]!.id, role: 'READ', status: 'PENDING',
         expiresAt: new Date(now + 24 * 60 * 60 * 1000), updatedAt: new Date(now) },
     ] });
     await db.session.createMany({ data: [
@@ -163,7 +164,7 @@ describe('MaintenanceJobsService PostgreSQL cleanup and purge', () => {
     expect(await db.session.count()).toBe(8);
     expect(await db.personalAccessToken.count()).toBe(8);
     expect(await db.repository.count({ where: { id: { in: eligiblePurgeRepos.map(({ id }) => id) } } })).toBe(2);
-    expect((await Promise.all(eligiblePurgeRepos.map(({ storageKey }) => pathExists(join(storageRoot, storageKey)))))
+    expect((await Promise.all(eligiblePurgeRepos.map(({ storageKey }) => pathExists(join(gitStorageRoot, storageKey)))))
       .filter(Boolean)).toHaveLength(2);
 
     await maintenance.runOnce();
@@ -174,7 +175,7 @@ describe('MaintenanceJobsService PostgreSQL cleanup and purge', () => {
     expect(await db.session.count()).toBe(2);
     expect(await db.personalAccessToken.count()).toBe(2);
     expect(await db.repository.count({ where: { id: { in: eligiblePurgeRepos.map(({ id }) => id) } } })).toBe(0);
-    expect((await Promise.all(eligiblePurgeRepos.map(({ storageKey }) => pathExists(join(storageRoot, storageKey)))))
+    expect((await Promise.all(eligiblePurgeRepos.map(({ storageKey }) => pathExists(join(gitStorageRoot, storageKey)))))
       .filter(Boolean)).toHaveLength(0);
 
     await maintenance.runOnce();
@@ -188,6 +189,6 @@ describe('MaintenanceJobsService PostgreSQL cleanup and purge', () => {
       .toHaveLength(3);
     expect(await db.repository.count()).toBe(3);
     expect(await Promise.all([retainedDeletedRepo, activeWithOldPurgeDate, anchorRepo]
-      .map(({ storageKey }) => pathExists(join(storageRoot, storageKey))))).toEqual([true, true, true]);
+      .map(({ storageKey }) => pathExists(join(gitStorageRoot, storageKey))))).toEqual([true, true, true]);
   });
 });

@@ -12,7 +12,7 @@ export default defineConfig({
       reuseExistingServer: false,
     },
     {
-      command: "pnpm build && pnpm start --port 3111",
+      command: "corepack pnpm build && corepack pnpm start --port 3111",
       url: "http://localhost:3111",
       reuseExistingServer: false,
       timeout: 180_000,

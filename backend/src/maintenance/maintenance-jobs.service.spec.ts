@@ -86,7 +86,7 @@ describe('MaintenanceJobsService', () => {
       await jest.advanceTimersByTimeAsync(60_000);
       expect(run).toHaveBeenCalledTimes(2);
 
-      fixture.service.onModuleDestroy();
+      await fixture.service.onModuleDestroy();
       await jest.advanceTimersByTimeAsync(60_000);
       expect(run).toHaveBeenCalledTimes(2);
     } finally {
@@ -110,6 +110,25 @@ describe('MaintenanceJobsService', () => {
     await overlapping;
     expect(fixture.db.$executeRaw).toHaveBeenCalledTimes(3);
     expect(fixture.purge.purgeDue).toHaveBeenCalledTimes(1);
+  });
+
+  it('drains an active batch before maintenance shutdown completes', async () => {
+    const fixture = makeFixture();
+    let finishBatch!: (result: number) => void;
+    const batch = new Promise<number>((resolve) => { finishBatch = resolve; });
+    fixture.db.$executeRaw.mockImplementationOnce(() => batch);
+
+    const running = fixture.service.runOnce();
+    await Promise.resolve();
+    let stopped = false;
+    const shutdown = fixture.service.onModuleDestroy().then(() => { stopped = true; });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+
+    finishBatch(1);
+    await Promise.all([running, shutdown]);
+    expect(stopped).toBe(true);
+    expect(fixture.lock.release).toHaveBeenCalledTimes(1);
   });
 
   it('starts a fresh runOnce batch after the previous shared promise settles', async () => {
