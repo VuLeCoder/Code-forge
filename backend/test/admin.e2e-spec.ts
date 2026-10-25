@@ -145,6 +145,30 @@ describe('Admin HTTP + isolated PostgreSQL + Git', () => {
     expect(relogin.status).toBe(200);
     expect((await call('GET', 'auth/me', cookie(relogin))).status).toBe(200);
 
+    const restorableResponse = await call('POST', 'repositories', repositoryOwner.cookie, {
+      name: 'AdminRestore', visibility: 'PRIVATE', initializeReadme: true,
+    });
+    expect(restorableResponse.status).toBe(201);
+    const restorable = await db!.repository.findFirstOrThrow({
+      where: { ownerId: repositoryOwner.userId, normalizedName: 'adminrestore' },
+    });
+    expect((await call('DELETE', 'repos/PrivateOwner/AdminRestore', repositoryOwner.cookie)).status).toBe(204);
+    expect(await db!.repository.findUniqueOrThrow({ where: { id: restorable.id } })).toMatchObject({ status: 'DELETED' });
+
+    const restoreResponse = await call('POST', `admin/repositories/${restorable.id}/restore`, admin.cookie);
+    expect(restoreResponse.status).toBe(201);
+    expect(await restoreResponse.json()).toMatchObject({
+      repository: { id: restorable.id, status: 'ACTIVE' },
+      sourceMayBeReset: true,
+    });
+    expect(await db!.repository.findUniqueOrThrow({ where: { id: restorable.id } })).toMatchObject({
+      status: 'ACTIVE', deletedAt: null, purgeAfter: null,
+    });
+    expect(await db!.auditLog.findFirst({ where: {
+      actorId: admin.userId, targetId: restorable.id, action: 'ADMIN_REPOSITORY_RESTORED',
+      details: { equals: { from: 'DELETED', to: 'ACTIVE' } },
+    } })).not.toBeNull();
+
     const createdRepository = await call('POST', 'repositories', repositoryOwner.cookie, {
       name: 'AdminBoundary', visibility: 'PRIVATE', initializeReadme: true,
     });

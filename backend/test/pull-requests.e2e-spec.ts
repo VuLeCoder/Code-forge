@@ -49,6 +49,11 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     originalUnpooledUrl = process.env.DATABASE_URL_UNPOOLED;
     originalStorage = process.env.GIT_STORAGE_PATH;
     if (!originalUrl) throw new Error('DATABASE_URL is required for integration tests');
+    const targetDatabase = new URL(originalUrl);
+    const databaseName = decodeURIComponent(targetDatabase.pathname.replace(/^\/+/, ''));
+    if (!['localhost', '127.0.0.1', '[::1]'].includes(targetDatabase.hostname) || !databaseName.endsWith('_test')) {
+      throw new Error('Pull request E2E requires a loopback PostgreSQL database whose name ends in _test.');
+    }
 
     storageRoot = await mkdtemp(join(tmpdir(), 'code-forge-pulls-'));
     process.env.GIT_STORAGE_PATH = storageRoot;
@@ -260,6 +265,64 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     expect(await responseJson(replay)).toMatchObject({ status: 'MERGED', mergeCommitSha: merged.mergeCommitSha });
     expect((await git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).stdout.trim()).toBe(merged.mergeCommitSha);
     expect(await db.auditLog.count({ where: { targetId: detail.pullRequest.id, action: 'PULL_REQUEST_MERGED' } })).toBe(1);
+
+    // A real Git conflict must fail before target ref movement and leave the PR open.
+    await git(['-C', writerWork, 'checkout', '-B', 'main', 'refs/remotes/origin/main']);
+    const conflictTargetBranch = 'conflict/target';
+    await git(['-C', writerWork, 'checkout', '-b', conflictTargetBranch]);
+    await writeFile(join(writerWork, 'merge-conflict.txt'), 'target version\n');
+    await git(['-C', writerWork, 'add', 'merge-conflict.txt']);
+    await git(['-C', writerWork, 'commit', '-m', 'Add target side of merge conflict']);
+    await git(['-C', writerWork, 'push', '--set-upstream', 'origin', conflictTargetBranch]);
+    const conflictTargetSha = (await git(['--git-dir', bare, 'rev-parse', `refs/heads/${conflictTargetBranch}`])).stdout.trim();
+
+    await git(['-C', writerWork, 'checkout', '-b', 'feature/conflict-source', 'main']);
+    await writeFile(join(writerWork, 'merge-conflict.txt'), 'source version\n');
+    await git(['-C', writerWork, 'add', 'merge-conflict.txt']);
+    await git(['-C', writerWork, 'commit', '-m', 'Add source side of merge conflict']);
+    const conflictSourceSha = (await git(['-C', writerWork, 'rev-parse', 'HEAD'])).stdout.trim();
+    await git(['-C', writerWork, 'push', '--set-upstream', 'origin', 'feature/conflict-source']);
+
+    const conflictCreated = await call('POST', repoPath, {
+      title: 'Conflict leaves target unchanged',
+      description: 'A real merge-tree conflict must not move the target ref or mark the PR merged.',
+      sourceBranch: 'feature/conflict-source', targetBranch: conflictTargetBranch,
+    });
+    expect(conflictCreated.status).toBe(201);
+    const conflictPull = await responseJson<{ pullRequest: { id: string; number: number } }>(conflictCreated);
+    const conflictDetailResponse = await call('GET', `${repoPath}/${conflictPull.pullRequest.number}`);
+    expect(conflictDetailResponse.status).toBe(200);
+    const conflictDetail = await responseJson<{ pullRequest: { version: number; status: string } }>(conflictDetailResponse);
+    expect(conflictDetail.pullRequest).toMatchObject({ status: 'OPEN', version: 1 });
+    const conflictCompareResponse = await call('GET', `${repoPath}/${conflictPull.pullRequest.number}/compare`);
+    expect(conflictCompareResponse.status).toBe(200);
+    const conflictCompare = await responseJson<{ state: string; sourceSha: string; targetSha: string;
+      storageGeneration: number }>(conflictCompareResponse);
+    expect(conflictCompare).toMatchObject({ state: 'READY', sourceSha: conflictSourceSha,
+      targetSha: conflictTargetSha, storageGeneration: storedRepo.storageGeneration });
+
+    const conflictOperationId = randomUUID();
+    const conflictMergeResponse = await call('POST', `${repoPath}/${conflictPull.pullRequest.number}/merge`, {
+      operationId: conflictOperationId, expectedSourceSha: conflictCompare.sourceSha,
+      expectedTargetSha: conflictCompare.targetSha, storageGeneration: conflictCompare.storageGeneration,
+      version: conflictDetail.pullRequest.version,
+    });
+    expect(conflictMergeResponse.status).toBe(409);
+    expect(await responseJson<{ error: { code: string } }>(conflictMergeResponse))
+      .toMatchObject({ error: { code: 'MERGE_CONFLICT' } });
+    expect((await git(['--git-dir', bare, 'rev-parse', `refs/heads/${conflictTargetBranch}`])).stdout.trim())
+      .toBe(conflictTargetSha);
+    const conflictPullAfter = await db.pullRequest.findUniqueOrThrow({ where: { id: conflictPull.pullRequest.id } });
+    expect(conflictPullAfter).toMatchObject({ status: 'OPEN', version: conflictDetail.pullRequest.version,
+      mergeCommitSha: null, mergedById: null });
+    const conflictOperations = await db.pullRequestMergeOperation.findMany({
+      where: { pullRequestId: conflictPull.pullRequest.id },
+    });
+    expect(conflictOperations).toHaveLength(1);
+    expect(conflictOperations[0]).toMatchObject({ operationId: conflictOperationId, status: 'FAILED',
+      errorCode: 'MERGE_CONFLICT', oldTargetSha: conflictTargetSha, resultingSha: null });
+    expect(await db.auditLog.count({ where: { targetId: conflictPull.pullRequest.id, action: 'PULL_REQUEST_MERGED' } }))
+      .toBe(0);
 
     // Exercise the shared repository lock across two different lifecycle mutations.
     await git(['-C', writerWork, 'checkout', '-B', 'main', 'refs/remotes/origin/main']);
