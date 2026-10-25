@@ -926,9 +926,9 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect((await call('PATCH', `${repoPath}/members/${ownerId}`, ownerCookie, { role: 'READ' })).status).toBe(400);
     expect((await call('DELETE', `${repoPath}/members/${ownerId}`, ownerCookie)).status).toBe(400);
 
-    // 9. Re-inviting with an expired invitation lazily marks it EXPIRED and succeeds
+    // 9. Accepting an expired invitation persists EXPIRED without granting membership; re-inviting then succeeds
     const m5Repo = await db.repository.findFirstOrThrow({ where: { ownerId, normalizedName: 'm5repo' } });
-    await db.invitation.create({
+    const expiredInvite = await db.invitation.create({
       data: {
         id: randomUUID(),
         repositoryId: m5Repo.id,
@@ -939,6 +939,12 @@ describe('Repository HTTP + PostgreSQL', () => {
         expiresAt: new Date(Date.now() - 10_000),
       },
     });
+    const acceptExpired = await call('POST', `invitations/${expiredInvite.id}/accept`, bobCookie);
+    expect(acceptExpired.status).toBe(409);
+    expect((await acceptExpired.json()).error.code).toBe('INVITATION_EXPIRED');
+    expect((await db.invitation.findUniqueOrThrow({ where: { id: expiredInvite.id } })).status).toBe('EXPIRED');
+    expect(await db.repositoryMember.count({ where: { repositoryId: m5Repo.id, userId: bobId } })).toBe(0);
+
     const reInviteExpired = await call('POST', `${repoPath}/invitations`, ownerCookie, { username: 'BobUser', role: 'READ' });
     expect(reInviteExpired.status).toBe(201);
     expect(await db.invitation.count({ where: { repositoryId: m5Repo.id, inviteeId: bobId, status: 'EXPIRED' } })).toBe(1);
