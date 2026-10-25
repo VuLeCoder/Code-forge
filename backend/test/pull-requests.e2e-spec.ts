@@ -1280,6 +1280,9 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       expect(await db.auditLog.count({ where: { targetId: largeFilePull.pullRequest.id, action: 'PULL_REQUEST_MERGED' } }))
         .toBe(fileQuotaAuditsBefore);
 
+      // Remove this deliberately-invalid fixture branch before the aggregate
+      // quota case: merge quota walks all reachable refs, not just the target.
+      git(['--git-dir', bare, 'update-ref', '-d', 'refs/heads/feature/over-file-quota']);
       git(['-C', work, 'switch', '-C', 'main', 'refs/remotes/origin/main']);
       git(['-C', work, 'switch', '-c', 'feature/over-quota']);
       await writeFile(join(work, 'over.txt'), 'small over-quota content\n');
