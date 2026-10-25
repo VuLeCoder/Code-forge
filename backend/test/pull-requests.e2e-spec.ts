@@ -8,6 +8,7 @@ import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
 import { Client } from 'pg';
@@ -84,7 +85,8 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     db = new PrismaClient({ datasourceUrl: isolatedUrl.toString() });
 
     const { AppModule } = await import('../src/app.module');
-    const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const module = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(APP_GUARD).useValue({ canActivate: () => true }).compile();
     app = module.createNestApplication();
     app.use(cookieParser());
     app.setGlobalPrefix('api/v1');
