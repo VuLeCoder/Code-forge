@@ -7,6 +7,7 @@ import { RepositoryLockService } from './repository-lock.service';
 
 const UNRESOLVED = ['PENDING', 'NEEDS_RECONCILIATION'] as const;
 const RECONCILIATION_GRACE_MS = 120_000;
+const CROSS_TYPE_UNRESOLVED = 'CROSS_TYPE_OPERATION_UNRESOLVED';
 
 @Injectable()
 export class GitPushJournalService {
@@ -14,10 +15,23 @@ export class GitPushJournalService {
     private readonly locks: RepositoryLockService) {}
 
   async assertNoUnresolved(repositoryId: string) {
+    await this.assertNoUnresolvedPush(repositoryId);
+    await this.assertNoUnresolvedMerge(repositoryId);
+  }
+
+  async assertNoUnresolvedPush(repositoryId: string) {
     const unresolved = await this.db.gitPushOperation.count({ where: { repositoryId, status: { in: [...UNRESOLVED] } } });
     if (unresolved) throw new ConflictException({ error: {
       code: 'GIT_PUSH_RECONCILIATION_REQUIRED',
       message: 'Một lần push trước đó cần được đối soát trước khi thay đổi repository.', details: {},
+    } });
+  }
+
+  async assertNoUnresolvedMerge(repositoryId: string) {
+    const unresolved = await this.db.pullRequestMergeOperation.count({ where: { repositoryId, status: { in: [...UNRESOLVED] } } });
+    if (unresolved) throw new ConflictException({ error: {
+      code: 'MERGE_RECONCILIATION_REQUIRED',
+      message: 'Một lần merge trước đó cần được đối soát trước khi thay đổi repository.', details: {},
     } });
   }
 
@@ -56,7 +70,8 @@ export class GitPushJournalService {
   async reconcilePending(limit = 25) {
     const cutoff = new Date(Date.now() - RECONCILIATION_GRACE_MS);
     const operations = await this.db.gitPushOperation.findMany({
-      where: { status: { in: [...UNRESOLVED] }, createdAt: { lte: cutoff } },
+      where: { status: { in: [...UNRESOLVED] }, createdAt: { lte: cutoff },
+        OR: [{ errorCode: null }, { errorCode: { not: CROSS_TYPE_UNRESOLVED } }] },
       orderBy: [{ updatedAt: 'asc' }, { operationId: 'asc' }], take: limit,
       select: { operationId: true, repositoryId: true },
     });
@@ -64,9 +79,12 @@ export class GitPushJournalService {
       let lock: Awaited<ReturnType<RepositoryLockService['acquire']>> | undefined;
       try {
         lock = await this.locks.acquire(item.repositoryId);
+        await this.assertNoUnresolvedMerge(item.repositoryId);
         await this.reconcileOne(item.operationId);
-      } catch {
-        await this.markNeedsReconciliation(item.operationId, 'RECONCILIATION_UNAVAILABLE').catch(() => undefined);
+      } catch (error) {
+        const code = this.responseCode(error);
+        await this.markNeedsReconciliation(item.operationId,
+          code === 'MERGE_RECONCILIATION_REQUIRED' ? CROSS_TYPE_UNRESOLVED : 'RECONCILIATION_UNAVAILABLE').catch(() => undefined);
       } finally { if (lock) await lock.release(); }
     }
   }
@@ -125,6 +143,13 @@ export class GitPushJournalService {
     let changed = 0;
     for (const ref of names) if (before[ref] !== after[ref]) changed++;
     return changed;
+  }
+
+  private responseCode(error: unknown) {
+    const response = (error as { getResponse?: () => unknown } | null)?.getResponse?.();
+    if (!response || typeof response !== 'object' || !('error' in response)) return undefined;
+    const body = (response as { error?: unknown }).error;
+    return body && typeof body === 'object' && 'code' in body ? (body as { code?: unknown }).code : undefined;
   }
 
   private safeErrorCode(value: string) { return /^[A-Z0-9_]{1,80}$/.test(value) ? value : 'GIT_PUSH_FAILED'; }

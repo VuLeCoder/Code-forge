@@ -2,6 +2,7 @@ import type { PrismaService } from '../database/prisma.service';
 import type { GitStorageService } from '../repositories/git-storage.service';
 import type { RepositoryLockService } from '../repositories/repository-lock.service';
 import type { RepositoryPurgeService } from '../repositories/repository-purge.service';
+import { ConflictException } from '@nestjs/common';
 import { MaintenanceJobsService } from './maintenance-jobs.service';
 
 type MergeOperation = {
@@ -41,6 +42,7 @@ function makeFixture(operation?: Partial<MergeOperation>) {
       update: jest.fn().mockResolvedValue({}),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
+    gitPushOperation: { count: jest.fn().mockResolvedValue(0) },
   };
   const lock = { release: jest.fn().mockResolvedValue(undefined) };
   const locks = { acquire: jest.fn().mockResolvedValue(lock) };
@@ -50,19 +52,24 @@ function makeFixture(operation?: Partial<MergeOperation>) {
     commit: jest.fn().mockResolvedValue({ parentShas: ['target-old', 'source-sha'] }),
   };
   const purge = { purgeDue: jest.fn().mockResolvedValue(undefined) };
+  const pushJournal = {
+    assertNoUnresolved: jest.fn().mockResolvedValue(undefined),
+    assertNoUnresolvedPush: jest.fn().mockResolvedValue(undefined),
+    reconcilePending: jest.fn().mockResolvedValue(undefined),
+  };
   const service = new MaintenanceJobsService(
     db as unknown as PrismaService,
     locks as unknown as RepositoryLockService,
     storage as unknown as GitStorageService,
     purge as unknown as RepositoryPurgeService,
-    { assertNoUnresolved: jest.fn().mockResolvedValue(undefined), reconcilePending: jest.fn().mockResolvedValue(undefined) } as never,
+    pushJournal as never,
   );
   const internals = service as unknown as {
     runScheduled: () => Promise<void>;
     reconcileMerges: () => Promise<void>;
     reconcileOperation: (operationId: string) => Promise<void>;
   };
-  return { service, internals, db, tx, locks, lock, storage, purge, operation: current };
+  return { service, internals, db, tx, locks, lock, storage, purge, pushJournal, operation: current };
 }
 
 describe('MaintenanceJobsService', () => {
@@ -102,6 +109,21 @@ describe('MaintenanceJobsService', () => {
     await overlapping;
     expect(fixture.db.$executeRaw).toHaveBeenCalledTimes(3);
     expect(fixture.purge.purgeDue).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts a fresh runOnce batch after the previous shared promise settles', async () => {
+    const fixture = makeFixture();
+
+    const first = fixture.service.runOnce();
+    await first;
+    const second = fixture.service.runOnce();
+    await second;
+
+    expect(second).not.toBe(first);
+    expect(fixture.locks.acquire).toHaveBeenCalledTimes(2);
+    expect(fixture.db.$executeRaw).toHaveBeenCalledTimes(6);
+    expect(fixture.purge.purgeDue).toHaveBeenCalledTimes(2);
+    expect(fixture.lock.release).toHaveBeenCalledTimes(2);
   });
 
   it('skips an overlapping batch and releases the process-wide job lock once', async () => {
@@ -219,6 +241,30 @@ describe('MaintenanceJobsService', () => {
     expect(fixture.lock.release).toHaveBeenCalledTimes(1);
     expect(fixture.storage.branchSha).toHaveBeenCalledTimes(1);
     expect(fixture.storage.isAncestor).not.toHaveBeenCalled();
+  });
+
+  it('leaves a merge pending for operator reconciliation if a push is also unresolved', async () => {
+    const fixture = makeFixture();
+    fixture.db.pullRequestMergeOperation.findMany.mockResolvedValue([
+      { operationId: fixture.operation.operationId, repositoryId: fixture.operation.repositoryId },
+    ]);
+    fixture.pushJournal.assertNoUnresolvedPush.mockRejectedValueOnce(new ConflictException({
+      error: { code: 'GIT_PUSH_RECONCILIATION_REQUIRED' },
+    }));
+
+    await fixture.internals.reconcileMerges();
+
+    expect(fixture.db.pullRequestMergeOperation.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: {
+      status: { in: ['PENDING', 'NEEDS_RECONCILIATION'] },
+      OR: [{ errorCode: null }, { errorCode: { not: 'CROSS_TYPE_OPERATION_UNRESOLVED' } }],
+    } }));
+    expect(fixture.pushJournal.assertNoUnresolvedPush).toHaveBeenCalledWith(fixture.operation.repositoryId);
+    expect(fixture.storage.branchSha).not.toHaveBeenCalled();
+    expect(fixture.db.pullRequestMergeOperation.updateMany).toHaveBeenCalledWith({ where: {
+      operationId: fixture.operation.operationId, status: { in: ['PENDING', 'NEEDS_RECONCILIATION'] },
+    }, data: { status: 'NEEDS_RECONCILIATION', errorCode: 'CROSS_TYPE_OPERATION_UNRESOLVED' } });
+    expect(fixture.db.$transaction).not.toHaveBeenCalled();
+    expect(fixture.lock.release).toHaveBeenCalledTimes(1);
   });
 
   it('retries a transaction failure on the next reconciliation run and audits only the successful attempt', async () => {

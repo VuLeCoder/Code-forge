@@ -8,9 +8,11 @@ Tạo image và chuẩn bị hướng dẫn không chứng minh dịch vụ clou
 
 ### Bằng chứng hiện tại
 
-Commit code mới nhất trên `thviet` là `2305390` (PR conflict và admin restore E2E). Hosted workflow [40145289400](https://github.com/VuLeCoder/Code-forge/actions/runs/40145289400) succeeded trên commit này qua backend unit/E2E, lint, typecheck, build, browser/full-stack E2E, Docker API/migration image checks, migration-image Prisma check/deploy và `git diff --check`. Local frontend lint/typecheck/browser 49/49 và backend unit 14 suite/86 test cùng lint/typecheck/build đạt.
+Commit code mới nhất trên `thviet` là `edb0ced` (durable Git push journal/audit). Hosted workflow [40147767567](https://github.com/VuLeCoder/Code-forge/actions/runs/40147767567) succeeded trên commit này qua backend unit/E2E, lint, typecheck, build, browser/full-stack E2E, Docker API/migration image checks, migration-image Prisma check/deploy và `git diff --check`.
 
-Trên checkout hiện tại, backend unit đạt 14 suites/86 tests, lint/typecheck đạt; frontend lint/typecheck và browser đạt 49/49. Hosted E2E mới trong `2305390` pass trên CI với PostgreSQL/Git cô lập. Local E2E guard từ chối DB không loopback/`*_test`; chưa tạo schema hay storage. Local Docker Engine không phản hồi và PostgreSQL tại `localhost:5433` không nghe, nên local container runtime smoke chưa chạy. Cloud deployment, nâng cấp từ snapshot production-like, proxy/TLS, Git HTTP trực tiếp Render hoặc source recovery cũng chưa được nghiệm thu.
+Local verification trên `edb0ced`: backend unit 15 suites/93 tests và PostgreSQL/Git E2E 8 suites/29 tests; Prisma validate/generate, workspace lint/typecheck/build và `git diff --check` đều đạt. API và migration Docker images đã build; migration image áp dụng đủ 7 migration vào PostgreSQL disposable không mount volume, API readiness trả HTTP 200. Các container kiểm thử đã được dừng/gỡ; không đụng container hoặc volume phát triển có sẵn. `docker compose config` đã được kiểm tra nhưng Compose runtime chưa khởi chạy.
+
+Chưa có cloud deployment hoặc smoke test: nâng cấp từ snapshot production-like, proxy/TLS, Git HTTP trực tiếp Render, cold start, mất source khi restart và quy trình phục hồi vẫn chưa được nghiệm thu. Không suy ra cloud acceptance từ CI hay local image smoke.
 
 Chỉ đánh dấu cloud release đạt sau khi điền kết quả thật theo release commit vào [cloud smoke checklist](./cloud-smoke-checklist.md).
 
@@ -49,7 +51,7 @@ Vercel cần `BACKEND_URL=https://<render-host>` (không gồm `/api/v1`), `APP_
 
 Các biến TTL mặc định hiện tại nằm trong `backend/.env.example`; chỉ override khi có acceptance test cho cấu hình mới. Không copy giá trị secret mẫu sang cloud.
 
-`compose.yaml` chỉ dành cho local: dùng PostgreSQL trực tiếp và các secret đánh dấu `local-only-*`, không dùng các giá trị đó cho cloud hoặc môi trường public. Các port host chỉ bind loopback. Compose truyền `DATABASE_URL_UNPOOLED` và `RATE_LIMIT_PROXY_SECRET` để qua kiểm tra cấu hình `NODE_ENV=production`; cần chạy runtime smoke trên máy có Docker Engine trước khi coi cấu hình local đã được nghiệm thu.
+`compose.yaml` chỉ dành cho local: dùng `NODE_ENV=development`, PostgreSQL trực tiếp và các secret đánh dấu `local-only-*`; không dùng các giá trị đó cho cloud hoặc môi trường public. Các port host chỉ bind loopback. Chế độ local cho phép `COOKIE_SECURE=false`; production vẫn bắt buộc `COOKIE_SECURE=true` qua kiểm tra backend. Compose config đã được xác thực, nhưng chưa chạy `docker compose up` hoặc health check runtime; cần nghiệm thu riêng trên máy local trước khi coi stack Compose là đã chạy.
 
 ## Trình tự release
 

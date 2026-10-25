@@ -38,6 +38,12 @@ No confirmed exploitable authentication bypass, private-repository disclosure, c
 
 ## Remaining release verification
 
+### Follow-up review: session and merge journal races
+
+- **Finding 1 — P2 session lifecycle race:** Login/refresh could pass the ACTIVE check before an admin lock, then create/rotate a session after the admin had revoked current sessions. If later unlocked, that session could become usable. The working fix acquires the `users` row `FOR UPDATE` and rechecks ACTIVE inside login/refresh transactions; admin status mutations acquire the same target-row lock before updating/revoking. Final-admin locking still uses stable ordering. Auth/admin unit tests pass, and deterministic PostgreSQL E2E queues login and refresh behind an explicit row lock; the targeted suite passes. The change is not yet committed/hosted.
+- **Finding 2 — P2 repository write-fence gap:** An unresolved merge operation did not block subsequent pushes/lifecycle writes, allowing non-default target refs to move before merge reconciliation. Normal repository fences now check both push and merge journals; reconciliation uses explicit opposite-type checks and freezes cross-type ambiguous operations rather than attributing or rolling back refs. Targeted PostgreSQL/Git E2E proves a descendant push is rejected with the ref unchanged until reconciliation, then succeeds afterward. Unit tests pass; changes are not yet committed/hosted.
+- **Cloud boundary:** These local fixes do not establish cloud acceptance. The Vercel/Render trusted-proxy, direct Render Git and source-reset checks below remain required.
+
 - Verify Vercel/Render trusted-proxy settings against real cloud requests, including attempts to spoof forwarded-IP headers. Vercel documents that it overwrites `X-Forwarded-For` to prevent IP spoofing: [request headers](https://vercel.com/docs/headers/request-headers). This documentation is not a substitute for a smoke test of the configured deployment.
 - Test direct Render Git HTTPS, source loss after restart, and recovery on the selected cloud resources.
 - Run real multi-process Git write races and crash/reconciliation scenarios in isolated PostgreSQL/Git fixtures.

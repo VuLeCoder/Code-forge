@@ -24,6 +24,7 @@ describe('GitPushJournalService', () => {
         findUnique: jest.fn().mockResolvedValue(operation), findMany: jest.fn().mockResolvedValue([]),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
+      pullRequestMergeOperation: { count: jest.fn().mockResolvedValue(0) },
       $transaction: jest.fn((callback: (client: typeof tx) => unknown) => Promise.resolve(callback(tx))),
     };
     const storage = { exists: jest.fn().mockResolvedValue(true), snapshotRefs: jest.fn().mockResolvedValue({}),
@@ -41,6 +42,24 @@ describe('GitPushJournalService', () => {
     await expect(f.service.assertNoUnresolved(repositoryId)).rejects.toBeInstanceOf(ConflictException);
     expect(f.db.gitPushOperation.count).toHaveBeenCalledWith({ where: { repositoryId,
       status: { in: ['PENDING', 'NEEDS_RECONCILIATION'] } } });
+  });
+
+  it('blocks normal repository writes for either unresolved journal type', async () => {
+    const f = fixture();
+    f.db.pullRequestMergeOperation.count.mockResolvedValueOnce(1);
+    await expect(f.service.assertNoUnresolved(repositoryId)).rejects.toMatchObject({
+      response: { error: { code: 'MERGE_RECONCILIATION_REQUIRED' } },
+    });
+    expect(f.db.gitPushOperation.count).toHaveBeenCalledTimes(1);
+    expect(f.db.pullRequestMergeOperation.count).toHaveBeenCalledWith({ where: { repositoryId,
+      status: { in: ['PENDING', 'NEEDS_RECONCILIATION'] } } });
+  });
+
+  it('offers a push-only fence for merge reconciliation', async () => {
+    const f = fixture();
+    await expect(f.service.assertNoUnresolvedPush(repositoryId)).resolves.toBeUndefined();
+    expect(f.db.gitPushOperation.count).toHaveBeenCalledTimes(1);
+    expect(f.db.pullRequestMergeOperation.count).not.toHaveBeenCalled();
   });
 
   it('atomically records one audit for the exact number of changed refs without storing ref names or SHAs in audit', async () => {
@@ -88,5 +107,21 @@ describe('GitPushJournalService', () => {
     expect(f.lock.release).toHaveBeenCalledTimes(1);
     expect(f.db.$transaction).toHaveBeenCalledTimes(1);
     expect(f.tx.auditLog.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reconcile a push while an unresolved merge could explain its ref delta', async () => {
+    const f = fixture();
+    f.db.gitPushOperation.findMany.mockResolvedValue([{ operationId, repositoryId }]);
+    f.db.pullRequestMergeOperation.count.mockResolvedValueOnce(1);
+
+    await f.service.reconcilePending();
+
+    expect(f.locks.acquire).toHaveBeenCalledWith(repositoryId);
+    expect(f.storage.snapshotRefs).not.toHaveBeenCalled();
+    expect(f.db.gitPushOperation.updateMany).toHaveBeenCalledWith({ where: { operationId,
+      status: { in: ['PENDING', 'NEEDS_RECONCILIATION'] } },
+      data: { status: 'NEEDS_RECONCILIATION', errorCode: 'CROSS_TYPE_OPERATION_UNRESOLVED' } });
+    expect(f.lock.release).toHaveBeenCalledTimes(1);
+    expect(f.db.$transaction).not.toHaveBeenCalled();
   });
 });

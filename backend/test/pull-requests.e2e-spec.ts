@@ -473,18 +473,37 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     git(['clone', bare, work]);
     git(['-C', work, 'config', 'user.name', 'Recovery Owner']);
     git(['-C', work, 'config', 'user.email', 'recovery-owner@example.test']);
+    git(['-C', work, 'switch', '-c', 'release/recovery-target']);
+    git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/release/recovery-target']);
+    git(['-C', work, 'switch', 'main']);
     git(['-C', work, 'switch', '-c', 'feature/recovery']);
     await writeFile(join(work, 'recovered.txt'), 'recovered merge content\n');
     git(['-C', work, 'add', 'recovered.txt']);
     git(['-C', work, 'commit', '-m', 'Add recovery fixture']);
     const sourceSha = git(['-C', work, 'rev-parse', 'HEAD']).trim();
     git(['-C', work, 'push', 'origin', 'feature/recovery']);
-    const targetSha = git(['--git-dir', bare, 'rev-parse', 'refs/heads/main']).trim();
+    const targetSha = git(['--git-dir', bare, 'rev-parse', 'refs/heads/release/recovery-target']).trim();
+    const tokenResponse = await call('POST', 'tokens', {
+      name: 'Merge recovery E2E', scopes: ['repo:read', 'repo:write'],
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+    }, recoveryCookie);
+    expect(tokenResponse.status).toBe(201);
+    const token = await responseJson<{ token: { id: string }; secret: string }>(tokenResponse);
+    const askpass = join(storageRoot, 'merge-recovery-askpass.sh');
+    await writeFile(askpass,
+      '#!/bin/sh\ncase "$1" in *Username*) printf "%s\\n" "$TEST_GIT_USER" ;; *) printf "%s\\n" "$TEST_GIT_PAT" ;; esac\n',
+      { mode: 0o700 });
+    const runGit = promisify(execFile);
+    const gitHttp = (args: string[]) => runGit('git', ['-c', 'credential.helper=', ...args], {
+      timeout: 20_000,
+      env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(storageRoot, 'empty-git-config'),
+        GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: askpass, TEST_GIT_USER: 'RecoveryOwner', TEST_GIT_PAT: token.secret },
+    });
 
     const repoPath = 'repos/recoveryowner/mergerecovery/pulls';
     const createdPull = await call('POST', repoPath, {
       title: 'Recover merge metadata', description: 'Verify Git and PostgreSQL reconciliation.',
-      sourceBranch: 'feature/recovery', targetBranch: 'main',
+      sourceBranch: 'feature/recovery', targetBranch: 'release/recovery-target',
     }, recoveryCookie);
     expect(createdPull.status).toBe(201);
     const { pullRequest } = await responseJson<{ pullRequest: { id: string; number: number } }>(createdPull);
@@ -516,7 +535,7 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       expect(mergeResponse.status).toBe(202);
       expect(await responseJson(mergeResponse)).toMatchObject({ status: 'RECONCILING', operationId });
 
-      candidateSha = git(['--git-dir', bare, 'rev-parse', 'refs/heads/main']).trim();
+      candidateSha = git(['--git-dir', bare, 'rev-parse', 'refs/heads/release/recovery-target']).trim();
       expect(candidateSha).not.toBe(targetSha);
       const parents = git(['--git-dir', bare, 'rev-list', '--parents', '-n', '1', candidateSha]).trim().split(' ');
       expect(parents).toHaveLength(3);
@@ -527,6 +546,19 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
         pullRequest: { status: 'OPEN', mergedById: null }, mergeOperation: { status: 'PENDING' },
       });
       expect(await db.auditLog.count({ where: { targetId: pullRequest.id, action: 'PULL_REQUEST_MERGED' } })).toBe(0);
+
+      // Make a valid fast-forward from the newly moved non-default target, then prove the
+      // unresolved merge journal fences it before receive-pack can update the ref.
+      await gitHttp(['-C', work, 'remote', 'set-url', 'origin', `${base}/git/RecoveryOwner/MergeRecovery.git`]);
+      git(['-C', work, 'fetch', bare, 'refs/heads/release/recovery-target']);
+      git(['-C', work, 'switch', '--detach', 'FETCH_HEAD']);
+      git(['-C', work, 'switch', '-c', 'feature/blocked-unresolved-merge']);
+      await writeFile(join(work, 'blocked-push.txt'), 'must not reach the target before reconciliation\n');
+      git(['-C', work, 'add', 'blocked-push.txt']);
+      git(['-C', work, 'commit', '-m', 'Attempt write during merge reconciliation']);
+      await expect(gitHttp(['-C', work, 'push', 'origin', 'HEAD:refs/heads/release/recovery-target'])).rejects.toThrow();
+      expect(git(['--git-dir', bare, 'rev-parse', 'refs/heads/release/recovery-target']).trim()).toBe(candidateSha);
+      expect(await db.gitPushOperation.count({ where: { repositoryId: storedRepo.id, status: 'COMPLETED' } })).toBe(0);
     } finally {
       await admin.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "${triggerName}" ON "${schema}"."pull_requests"`);
       await admin.$executeRawUnsafe(`DROP FUNCTION IF EXISTS "${schema}"."${functionName}"()`);
@@ -558,8 +590,13 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     });
     const recoveredOperation = await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId } });
     expect(recoveredOperation).toMatchObject({ status: 'COMPLETED', resultingSha: candidateSha, actorId: recoveryOwner.id });
-    expect(git(['--git-dir', bare, 'rev-parse', 'refs/heads/main']).trim()).toBe(candidateSha);
+    expect(git(['--git-dir', bare, 'rev-parse', 'refs/heads/release/recovery-target']).trim()).toBe(candidateSha);
     expect(await db.auditLog.count({ where: { targetId: pullRequest.id, action: 'PULL_REQUEST_MERGE_RECONCILED' } })).toBe(1);
+
+    await gitHttp(['-C', work, 'push', 'origin', 'HEAD:refs/heads/release/recovery-target']);
+    expect(git(['--git-dir', bare, 'rev-parse', 'refs/heads/release/recovery-target']).trim())
+      .toBe(git(['-C', work, 'rev-parse', 'HEAD']).trim());
+    expect(await db.gitPushOperation.count({ where: { repositoryId: storedRepo.id, status: 'COMPLETED' } })).toBe(1);
 
     const retry = await call('POST', `${repoPath}/${pullRequest.number}/merge`, {
       operationId, expectedSourceSha: comparison.sourceSha, expectedTargetSha: comparison.targetSha,
@@ -567,12 +604,13 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     }, recoveryCookie);
     expect(retry.status).toBe(200);
     expect(await responseJson(retry)).toMatchObject({ status: 'MERGED', operationId, mergeCommitSha: candidateSha });
-    expect(git(['--git-dir', bare, 'rev-parse', 'refs/heads/main']).trim()).toBe(candidateSha);
+    expect(git(['--git-dir', bare, 'rev-parse', 'refs/heads/release/recovery-target']).trim())
+      .toBe(git(['-C', work, 'rev-parse', 'HEAD']).trim());
     expect(await db.auditLog.count({ where: { targetId: pullRequest.id, action: 'PULL_REQUEST_MERGE_RECONCILED' } })).toBe(1);
 
     const fetched = join(storageRoot, 'merge-recovery-fetch');
-    git(['clone', bare, fetched]);
-    expect(git(['-C', fetched, 'show', 'main:recovered.txt'])).toBe('recovered merge content\n');
+    git(['clone', '--branch', 'release/recovery-target', bare, fetched]);
+    expect(git(['-C', fetched, 'show', 'HEAD:recovered.txt'])).toBe('recovered merge content\n');
   }, 60_000);
 
   it('serializes a source-branch push against a merge snapshot', async () => {

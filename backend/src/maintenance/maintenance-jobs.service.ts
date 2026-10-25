@@ -5,6 +5,8 @@ import { RepositoryLockService } from '../repositories/repository-lock.service';
 import { RepositoryPurgeService } from '../repositories/repository-purge.service';
 import { GitPushJournalService } from '../repositories/git-push-journal.service';
 
+const CROSS_TYPE_UNRESOLVED = 'CROSS_TYPE_OPERATION_UNRESOLVED';
+
 @Injectable()
 export class MaintenanceJobsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(MaintenanceJobsService.name);
@@ -84,20 +86,25 @@ export class MaintenanceJobsService implements OnModuleInit, OnModuleDestroy {
 
   private async reconcileMerges() {
     const candidates = await this.db.pullRequestMergeOperation.findMany({
-      where: { status: { in: ['PENDING', 'NEEDS_RECONCILIATION'] } },
+      where: { status: { in: ['PENDING', 'NEEDS_RECONCILIATION'] },
+        OR: [{ errorCode: null }, { errorCode: { not: CROSS_TYPE_UNRESOLVED } }] },
       orderBy: [{ updatedAt: 'asc' }, { operationId: 'asc' }], take: 25,
       select: { operationId: true, repositoryId: true },
     });
     for (const candidate of candidates) {
       const lock = await this.locks.acquire(candidate.repositoryId);
       try {
-        await this.pushJournal.assertNoUnresolved(candidate.repositoryId);
+        await this.pushJournal.assertNoUnresolvedPush(candidate.repositoryId);
         await this.reconcileOperation(candidate.operationId);
-      }
-      catch {
+      } catch (error) {
+        const response = (error as { getResponse?: () => unknown } | null)?.getResponse?.();
+        const body = response && typeof response === 'object' && 'error' in response
+          ? (response as { error?: unknown }).error : undefined;
+        const code = body && typeof body === 'object' && 'code' in body ? (body as { code?: unknown }).code : undefined;
         await this.db.pullRequestMergeOperation.updateMany({ where: { operationId: candidate.operationId,
           status: { in: ['PENDING', 'NEEDS_RECONCILIATION'] } },
-          data: { status: 'NEEDS_RECONCILIATION', errorCode: 'RECONCILIATION_UNAVAILABLE' } }).catch(() => undefined);
+          data: { status: 'NEEDS_RECONCILIATION', errorCode: code === 'GIT_PUSH_RECONCILIATION_REQUIRED'
+            ? CROSS_TYPE_UNRESOLVED : 'RECONCILIATION_UNAVAILABLE' } }).catch(() => undefined);
       } finally { await lock.release(); }
     }
   }

@@ -24,6 +24,7 @@ describe('Admin HTTP + isolated PostgreSQL + Git', () => {
   let originalDatabaseUrl: string | undefined;
   let originalDatabaseUrlUnpooled: string | undefined;
   let originalGitStoragePath: string | undefined;
+  let adminAccount: { userId: string; cookie: string } | undefined;
 
   const cookie = (response: Response) => response.headers.getSetCookie()
     .map((value) => value.split(';')[0]).join('; ');
@@ -101,6 +102,7 @@ describe('Admin HTTP + isolated PostgreSQL + Git', () => {
     };
 
     const admin = await register('AdminOwner');
+    adminAccount = admin;
     const lockedUser = await register('LockedMember');
     const repositoryOwner = await register('PrivateOwner');
     await db!.user.update({ where: { id: admin.userId }, data: { systemRole: 'ADMIN' } });
@@ -222,5 +224,77 @@ describe('Admin HTTP + isolated PostgreSQL + Git', () => {
     expect(JSON.stringify(auditBody)).not.toContain(tokenSecret);
     expect(JSON.stringify(auditBody)).not.toContain('password-fixture');
     expect(JSON.stringify(auditBody)).not.toContain(privateSource);
+  }, 60_000);
+
+  it('serializes racing login and refresh against account lock before unlock', async () => {
+    const register = async (username: string) => {
+      const response = await call('POST', 'auth/register', '', {
+        username, email: `${username.toLowerCase()}@example.test`, password,
+      });
+      expect(response.status).toBe(201);
+      const body = await response.json() as { user: { id: string } };
+      return { userId: body.user.id, cookie: cookie(response) };
+    };
+    const admin = adminAccount;
+    if (!admin) throw new Error('Admin account fixture was not created by the preceding admin acceptance test.');
+
+    const waitForBlockedQuery = async (fragment: string) => {
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const rows = await adminDb!.$queryRaw<{ waiting: boolean }[]>`
+          SELECT EXISTS (
+            SELECT 1 FROM pg_stat_activity
+            WHERE datname = current_database() AND wait_event_type = 'Lock'
+              AND position(${fragment} in query) > 0
+          ) AS waiting`;
+        if (rows[0]?.waiting) return;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      throw new Error(`Timed out waiting for a PostgreSQL lock wait on query fragment: ${fragment}`);
+    };
+
+    const raceLockAgainst = async (username: string, operation: 'login' | 'refresh') => {
+      const account = await register(username);
+      let releaseRowLock!: () => void;
+      let rowLockAcquired!: () => void;
+      const acquired = new Promise<void>((resolve) => { rowLockAcquired = resolve; });
+      const keepLocked = new Promise<void>((resolve) => { releaseRowLock = resolve; });
+      const rowLock = db!.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM users WHERE id = ${account.userId}::uuid FOR UPDATE`;
+        rowLockAcquired();
+        await keepLocked;
+      });
+      await acquired;
+
+      let lockRequest: Promise<Response> | undefined;
+      let operationRequest: Promise<Response> | undefined;
+      try {
+        lockRequest = call('PATCH', `admin/users/${account.userId}/status`, admin.cookie, { status: 'LOCKED' });
+        await waitForBlockedQuery('SELECT id FROM users WHERE id =');
+        operationRequest = operation === 'login'
+          ? call('POST', 'auth/login', '', { login: username, password })
+          : call('POST', 'auth/refresh', account.cookie);
+        await waitForBlockedQuery('SELECT status FROM users');
+      } finally {
+        releaseRowLock();
+        await rowLock;
+      }
+
+      const [lockResponse, resultResponse] = await Promise.all([lockRequest, operationRequest]);
+      expect(lockResponse.status).toBe(200);
+      expect(resultResponse.status).toBe(403);
+      expect(await db!.session.count({ where: { userId: account.userId, revokedAt: null } })).toBe(0);
+
+      const unlock = await call('PATCH', `admin/users/${account.userId}/status`, admin.cookie, { status: 'ACTIVE' });
+      expect(unlock.status).toBe(200);
+      expect((await call('GET', 'auth/me', account.cookie)).status).toBe(401);
+      expect(await db!.session.count({ where: { userId: account.userId, revokedAt: null } })).toBe(0);
+      if (operation === 'refresh') {
+        expect((await call('POST', 'auth/refresh', account.cookie)).status).toBe(401);
+      }
+    };
+
+    await raceLockAgainst('LoginRaceUser', 'login');
+    await raceLockAgainst('RefreshRaceUser', 'refresh');
   }, 60_000);
 });

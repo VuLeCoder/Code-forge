@@ -94,6 +94,8 @@ export class AdminService {
     return this.db.$transaction(async (tx) => {
       // Lock all active admins in a stable order so concurrent requests cannot lock the final one.
       const activeAdmins = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM users WHERE system_role = 'ADMIN' AND status = 'ACTIVE' ORDER BY id FOR UPDATE`;
+      // Session creation and rotation take the target user lock before writing sessions.
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${userId}::uuid FOR UPDATE`;
       const target = await tx.user.findUnique({ where: { id: userId } });
       if (!target) throw new NotFoundException({ error: { code: 'USER_NOT_FOUND', message: 'Không tìm thấy user.' } });
       if (status === 'LOCKED' && target.systemRole === 'ADMIN' && target.status === 'ACTIVE' && activeAdmins.length <= 1) {
