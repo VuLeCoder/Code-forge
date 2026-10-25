@@ -1,6 +1,6 @@
 # GitHub issue update drafts
 
-Prepared 2026-10-25 for the existing public issues below. The public issue pages were observed as Open. These are drafts only; do not create duplicates. Latest pushed code is `0403bda`; hosted run `40143448486` succeeded with backend E2E/unit, lint, typecheck, build, browser/full-stack E2E, Docker API/migration image checks, and diff whitespace. Local frontend/backend gates are recorded in `implementation-status.md`.
+Prepared 2026-10-25 for the existing public issues below. The public issue pages were observed as Open. These are drafts only; do not create duplicates. Latest pushed code is `2955e36`; hosted run `40144424454` succeeded with backend E2E/unit, lint, typecheck, build, browser/full-stack E2E, Docker API/migration image/deploy checks, and diff whitespace. Local frontend/backend gates are recorded in `implementation-status.md`.
 
 ## Issue #3 — [P3/P4/P7] Kiểm thử full-stack PR, merge an toàn và phục hồi cạnh tranh
 
@@ -9,9 +9,10 @@ Suggested comment/update:
 ```markdown
 ### Cập nhật trạng thái (2026-10-25)
 
-- Nhánh `thviet` có commit code mới nhất `0403bda`; backend hardening gần nhất là `1227730`.
+- Nhánh `thviet` có commit code mới nhất `2955e36`; backend hardening gần nhất là `1227730`.
 - Run `40138087574` trên `7e0aa27` trước đó pass bộ acceptance hosted.
 - Logs xác thực: `40142759395` lộ lỗi parse body hai lần; `40143199809` lộ assertion đòi `resultingSha` từ API detail dù endpoint chỉ chọn operationId/status/errorCode. Commit `0403bda` giữ contract, kiểm tra journal SHA/actor trong PostgreSQL và retry/ref/audit như trước; run `40143448486` đã thành công.
+- Commit `51fca2a`/`2955e36` bổ sung E2E PostgreSQL/Git cho hai merge request cùng operation ID và AdminController lock/unlock: session cũ bị thu hồi, PAT Git chuyển từ 200 sang 401 khi user bị khóa, Admin không có membership không đọc/merge private repo, audit API lọc secret. Run `40144424454` pass.
 - Commit `d1019a2` thêm PostgreSQL failure injection sau khi Git ref được cập nhật; hosted E2E sau đó xác nhận HTTP `202`, merge commit hai parent, reconciliation, actor attribution, một audit và retry idempotent trên run `40143448486`.
 - Commit `851013e` sửa lỗi focus khi mở form từ empty state và hiển thị/retry lỗi tải branches; `141f749` bổ sung admin UI assertions; `31cb306` bổ sung admin restore/audit privacy tests. Local frontend 49/49 và backend 14 suite/86 test cùng lint/typecheck/build đạt.
 - Commit `1227730` bổ sung enforce `COOKIE_SECURE=true` cho production; backend unit (14 suite/84 test), lint, typecheck, build đã đạt local.
@@ -36,9 +37,9 @@ Suggested comment/update:
 ```markdown
 ### Cập nhật trạng thái (2026-10-25)
 
-- Branch `thviet`, latest pushed code commit `0403bda`; latest backend runtime hardening is `1227730`.
+- Branch `thviet`, latest pushed code commit `2955e36`; latest backend runtime hardening is `1227730`.
 - Hosted run `40138087574` trên `7e0aa27` đã pass toàn bộ gates của revision đó.
-- Runs `40142759395`/`40143199809` fail tại backend E2E do test-harness assertions; `0403bda` sửa cả hai và run `40143448486` pass toàn workflow. Log thứ hai cho thấy API trả MERGED cùng merge SHA/actor đúng; run mới xác nhận test đối soát journal, ref, retry và audit. Các acceptance cloud và race matrix khác vẫn mở.
+- Runs `40142759395`/`40143199809` fail tại backend E2E do test-harness assertions; `0403bda` sửa cả hai và run `40143448486` pass toàn workflow. Run `40144424454` trên `2955e36` tiếp tục pass sau khi thêm same-operation merge và AdminController E2E (lock/session/PAT, private boundary, audit privacy). Local Docker runtime và mọi smoke Vercel/Render/Neon, backup/restore, direct Render Git và source recovery vẫn chưa được xác minh.
 - Docker Desktop đang mở nhưng Docker Engine/PostgreSQL local chưa phản hồi; local image/runtime smoke chưa chạy. Không reset hoặc xóa container/volume để chữa trạng thái này.
 - Chưa có smoke trên Vercel/Render/Neon; URLs, proxy headers, Render-direct Git payload và source-reset recovery đều chưa được xác minh.
 - Cấu hình Vercel cần đặt server-side `APP_ORIGIN` bằng origin production canonical cùng `BACKEND_URL` và proxy secret; preview/custom origins cần quyết định và kiểm thử rõ.

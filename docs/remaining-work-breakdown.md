@@ -1,13 +1,13 @@
 # Code Forge — remaining work breakdown
 
-State date: 2026-10-25. Branch: `thviet`. Latest pushed code commit: `0403bda` (align merge-recovery assertions with API and journal contracts); latest backend runtime hardening remains `1227730`. This register decomposes the approved P0–P8 plan; it does not narrow or replace that scope.
+State date: 2026-10-25. Branch: `thviet`. Latest pushed code commit: `2955e36` (same-operation merge and admin HTTP E2E); latest backend runtime hardening remains `1227730`. This register decomposes the approved P0–P8 plan; it does not narrow or replace that scope.
 
 ## Current verified state
 
-- Previous fully green hosted workflow: `40138087574` on `7e0aa27`.
-- Authenticated logs for `40142759395`/`40143199809` identified two test-harness errors: double-read Response body, then expecting internal `resultingSha` from API detail. Commit `0403bda` parses once and checks operation SHA/actor directly in the isolated database row; full hosted workflow `40143448486` succeeded.
-- Local on the current code line through `0403bda` plus documentation edits: backend unit (14 suites/86 tests), lint, typecheck and build pass; frontend lint/typecheck and Playwright (49/49) pass. Current-head hosted full workflow also passes in `40143448486`.
-- Merge-recovery E2E and current-head hosted regression pass in `40143448486`; production secure-cookie validation and focused environment suite (8/8) pass locally. Broader conflict/process-crash/quota/lifecycle cases remain open.
+- Full hosted workflow `40144424454` on `2955e36` passes; it includes all 7 backend E2E suites / 28 tests and the full frontend/Docker/migration gates.
+- Earlier authenticated logs for `40142759395`/`40143199809` identified double-read response and an incorrect assumption about internal journal fields in the detail API. `0403bda` fixed the test contract; `40143448486` passed.
+- Local backend unit (14 suites/86 tests), lint/typecheck, frontend lint/typecheck and Playwright (49/49) pass. Local Docker Engine/PostgreSQL remains unavailable; local E2E is not established.
+- Hosted merge recovery, same-operation concurrency, admin lock→session/PAT rejection, private-repository boundaries, and audit-detail filtering pass. Broader conflict/process-crash/quota/lifecycle cases remain open.
 - Docker Desktop process is open, but Docker Engine commands do not return promptly and PostgreSQL `localhost:5433` is unavailable; do not reset containers or volumes. Local image/PostgreSQL smoke remains unverified.
 - Public issue pages identify issues #3 (PR/Git race/recovery) and #4 (Docker/CI/cloud release) as open at the time checked. Drafts are updated with current CI evidence; only post to the existing issues after the owner chooses which comments to publish.
 
@@ -19,9 +19,9 @@ State date: 2026-10-25. Branch: `thviet`. Latest pushed code commit: `0403bda` (
 - **Dependency:** Start here; do not infer the failing case from run duration.
 - **Writable scope:** `backend/test/*.e2e-spec.ts` and the smallest directly implicated backend source/test files.
 - **Forbidden:** Existing dev/cloud database, secrets, broad refactors, unrelated UI or migration files.
-- **Actions:** Fixes are pushed in `0403bda` and hosted run `40143448486` passed the current full workflow, including isolated PostgreSQL/Git E2E. Continue uncovered P3/P4 race/recovery matrix. The local focused E2E remains unavailable because PostgreSQL on `127.0.0.1:5433` is not listening.
+- **Actions:** Root test-contract fixes are in `0403bda`; the current full hosted workflow `40144424454` passed on `2955e36`, including new isolated PostgreSQL/Git E2E. Continue uncovered P3/P4 race/recovery matrix. The local focused E2E remains unavailable because PostgreSQL on `127.0.0.1:5433` is not listening.
 - **Focused reproducer (once isolated PostgreSQL is available):** `corepack pnpm --filter backend exec jest --config test/jest-e2e.json --runInBand test/pull-requests.e2e-spec.ts -t "reconciles a Git-updated merge"` with loopback `*_test` database URLs and isolated `GIT_STORAGE_PATH`; then run the full E2E suite.
-- **Acceptance:** Exact failing case and cause recorded; hosted backend E2E passes against isolated test PostgreSQL and temporary Git storage on `0403bda` in `40143448486`; `git diff --check` passes. Local reproduction remains unavailable because local PostgreSQL is not listening.
+- **Acceptance:** Exact failing cases and causes recorded; hosted backend E2E passes against isolated test PostgreSQL and temporary Git storage on `2955e36` in `40144424454`; `git diff --check` passes. Local reproduction remains unavailable because local PostgreSQL is not listening.
 
 ### T1 — Accept merge ref-update / metadata-recovery path
 
@@ -44,8 +44,8 @@ State date: 2026-10-25. Branch: `thviet`. Latest pushed code commit: `0403bda` (
 - **Owner:** Codex lead + backend test agent.
 - **Dependency:** T0/T1 pass; first compare existing integration tests to avoid duplicate cases.
 - **Writable scope:** Targeted backend repository/PR integration tests and smallest necessary backend implementation files.
-- **Cases still to inventory:** conflict/no ref movement; stale source/target/version; source missing or storage generation reset; permission/state change before mutation; merge quota and branch-count limits; process crash around CAS/DB boundary; lock-loss/timeout cancellation; same-operation concurrent retry; push/merge/delete/reset interactions not already covered.
-- **Audit result (2026-10-25):** Existing real PostgreSQL/Git E2E covers distinct-operation concurrent merges, push–merge, merge–soft-delete, DB metadata failure/reconciliation and sequential idempotent retry. Service/unit tests cover conflict/quota rejection without CAS, but not the combined HTTP+real-Git+DB invariants. Same-operation concurrent replay, end-to-end source reset/missing branch, lock-loss cancellation and abrupt process-kill remain gaps. A same-operation replay E2E is in progress.
+- **Cases still to inventory:** conflict/no ref movement; stale source/target/version; source missing or storage generation reset; permission/state change before mutation; merge quota and branch-count limits; process crash around CAS/DB boundary; lock-loss/timeout cancellation; push/merge/delete/reset interactions not already covered.
+- **Audit result (2026-10-25):** Existing real PostgreSQL/Git E2E covers distinct-operation concurrent merges, push–merge, merge–soft-delete, DB metadata failure/reconciliation and sequential idempotent retry. `2955e36` adds and `40144424454` verifies same-operation concurrent replay with one ref advancement/journal/audit. Service/unit tests cover conflict/quota rejection without CAS, but not combined HTTP+real-Git+DB invariants. End-to-end source reset/missing branch, lock-loss cancellation and abrupt process-kill remain gaps.
 - **Acceptance:** For each implemented case, isolated PostgreSQL/Git assertions prove whether Git refs and metadata moved, audit outcome, operation state, and retry behavior. No case is counted from mock-only tests when the plan requires real Git/database behavior.
 
 ### T4 — Finish P6 admin and maintenance acceptance
@@ -54,8 +54,8 @@ State date: 2026-10-25. Branch: `thviet`. Latest pushed code commit: `0403bda` (
 - **Dependency:** Existing contracts remain unchanged unless a separately approved contract edit is needed.
 - **Files:** Admin/auth/maintenance tests first; UI agent owns only `frontend/src/app/admin/page.tsx`, `frontend/src/app/admin/admin.module.css`, and `frontend/test/admin.spec.ts` if UI changes are required.
 - **Acceptance:** Isolated integration proves locked user session/PAT rejection, public repository anonymous reads still work, admin cannot read private source or merge, last active admin cannot be locked, restore retention works, and audit omits secrets/source. Maintenance jobs remain batch/idempotent after repeated startup/run.
-- **Progress:** Current unit tests cover final-admin/self-lock rejection, session revocation, expired restore without DB update/audit plus lock release, and allowlisted audit details that omit token/password/diff data. Hosted DB-backed bootstrap create/promote and audit privacy are verified by run `40136064222`; current-head unit/E2E gates pass in `40143448486`. Private-source isolation, locked-user/PAT behavior, and scheduler timing still need targeted acceptance.
-- **Acceptance gap:** No `AdminController` route currently has DB-backed E2E. Bootstrap CLI is verified in hosted PostgreSQL; separate repository E2E proves system ADMIN does not bypass private-repository policy, public reads remain available for a locked owner, and locked users cannot write/authenticate. Missing cross-layer checks include admin HTTP lock revoking an existing session/PAT, admin restore success/audit, and audit API secret filtering; a focused AdminController E2E is in progress.
+- **Progress:** Hosted DB-backed bootstrap create/promote is verified in `40136064222`; `40144424454` verifies AdminController lock/unlock, old session revoked, valid PAT Git request 200→401 after lock, non-member admin private source/PR/merge denial without ref movement, and audit API secret filtering. Unit/browser coverage includes final-admin/self-lock, expired restore behavior, audit allowlist, admin status UI and keyboard/focus.
+- **Acceptance gap:** Admin restore route success/audit and source reset disclosure have no DB-backed AdminController E2E; job batch/idempotence and sleeping-service timing remain to verify.
 
 ### T5 — Accessibility and responsive review for existing PR/admin UI
 
@@ -63,7 +63,7 @@ State date: 2026-10-25. Branch: `thviet`. Latest pushed code commit: `0403bda` (
 - **Dependency:** No API/route/auth/schema changes. Confirm whether code changes are needed after read-only review.
 - **Candidate AGY-owned paths:** PR list/detail components and their CSS module plus frontend UI tests; admin page/CSS only in a separate task. AGY must not edit backend, API proxy routes, global auth, shared contracts, or migration files.
 - **Acceptance:** Keyboard-only flow, visible focus, semantic names/roles, state announcements for merge/reconciliation, 375px and desktop layouts, browser tests, lint/typecheck. Report any screen-reader limitations and manual checks still outstanding.
-- **Progress:** Commit `851013e` fixes empty-state trigger focus restoration and distinguishes/retries branch-fetch failures. Commit `141f749` adds Admin role/status actions and confirmation dialog focus/keyboard assertions. Local lint/typecheck and the full Playwright suite pass (49/49); hosted browser/full-stack gates pass in `40143448486`. Screen-reader/manual multi-viewport review remains open.
+- **Progress:** Commit `851013e` fixes empty-state trigger focus restoration and distinguishes/retries branch-fetch failures. Commit `141f749` adds Admin role/status actions and confirmation dialog focus/keyboard assertions. Local lint/typecheck and Playwright pass (49/49); hosted browser/full-stack gates pass in `40144424454`. Screen-reader/manual multi-viewport review remains open.
 - **AGY review:** A bounded read-only review of the admin UI and deploy-origin guidance timed out at 60 seconds with no usable result; no AGY approval is claimed.
 
 ### T6 — Local Docker runtime smoke
