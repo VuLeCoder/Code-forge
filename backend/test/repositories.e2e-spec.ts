@@ -857,9 +857,10 @@ process.exit(result.status ?? 1);
       expect(recoveryError).toBeUndefined();
       expect(recoveryResponse?.status).toBe(200);
       expect(await recoveryResponse!.json()).toMatchObject({
-        branches: [], selectedBranch: null, storageState: 'RESET', storageGeneration: 1,
+        branches: [], defaultBranch: 'main', selectedBranch: null, storageState: 'RESET', storageGeneration: 1,
       });
-      expect(await db.repository.findUniqueOrThrow({ where: { id: stored.id } })).toMatchObject({ storageGeneration: 1 });
+      expect(await db.repository.findUniqueOrThrow({ where: { id: stored.id } }))
+        .toMatchObject({ defaultBranch: 'main', storageGeneration: 1 });
       expect(await db.gitPushOperation.findUniqueOrThrow({ where: { operationId: completedPush.operationId } }))
         .toMatchObject({ status: 'COMPLETED', storageGeneration: 0, changedRefCount: 1 });
       expect(execFileSync('git', ['--git-dir', bare, 'for-each-ref', '--format=%(refname)', 'refs/heads'], { encoding: 'utf8' }).trim())
