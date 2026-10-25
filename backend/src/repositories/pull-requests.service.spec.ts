@@ -198,4 +198,28 @@ describe('PullRequestsService', () => {
     expect(locks.acquire).toHaveBeenCalledWith(repoId);
     expect(db.pullRequest.updateMany).not.toHaveBeenCalled();
   });
+
+  it('rejects merge with STALE_COMPARE when source or target branch is deleted before merge', async () => {
+    storage.compare.mockRejectedValueOnce(new NotFoundException({ error: { code: 'REF_NOT_FOUND', message: 'Branch không tồn tại.' } }));
+    await expect(service.merge('owner', 'repo', ownerId, 4, {
+      operationId, expectedSourceSha: sourceSha, expectedTargetSha: targetSha, storageGeneration: 2, version: 3,
+    })).rejects.toMatchObject({ response: { error: { code: 'STALE_COMPARE' } } });
+    expect(db.pullRequestMergeOperation.create).not.toHaveBeenCalled();
+    expect(storage.compareAndSwapBranch).not.toHaveBeenCalled();
+  });
+
+  it('marks operation FAILED when compareAndSwapBranch detects concurrent target ref movement', async () => {
+    storage.compareAndSwapBranch.mockRejectedValueOnce(new ConflictException({ error: { code: 'STALE_COMPARE' } }));
+    storage.branchSha.mockResolvedValueOnce(targetSha);
+    db.pullRequestMergeOperation.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    await expect(service.merge('owner', 'repo', ownerId, 4, {
+      operationId, expectedSourceSha: sourceSha, expectedTargetSha: targetSha, storageGeneration: 2, version: 3,
+    })).rejects.toMatchObject({ response: { error: { code: 'STALE_COMPARE' } } });
+
+    expect(db.pullRequestMergeOperation.updateMany).toHaveBeenCalledWith({
+      where: { operationId, status: 'PENDING' },
+      data: { status: 'FAILED', errorCode: 'STALE_COMPARE' },
+    });
+  });
 });
