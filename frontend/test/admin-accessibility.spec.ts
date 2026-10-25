@@ -98,7 +98,10 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
     await expect(secondDialog).not.toBeVisible();
     await expect(secondLockButton).toBeFocused();
 
-    await lockButton.press("Enter");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await lockButton.focus();
+    await expect(lockButton).toBeFocused();
+    await page.keyboard.press("Enter");
     await expect(dialog).toBeVisible();
     await lockButton.evaluate((button) => button.remove());
     await page.keyboard.press("Escape");
