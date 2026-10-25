@@ -346,6 +346,7 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       }
 
       const refsBeforeMerge = git(['for-each-ref', '--format=%(refname)%09%(objectname)', 'refs/heads/']);
+      const auditRowsBeforeMerge = await db.auditLog.count({ where: { targetId: created.pullRequest.id } });
       const mergeResponse = await call('POST', `${repoPath}/${created.pullRequest.number}/merge`, {
         operationId: randomUUID(), expectedSourceSha: comparison.sourceSha, expectedTargetSha: comparison.targetSha,
         storageGeneration: comparison.storageGeneration, version: created.pullRequest.version,
@@ -361,6 +362,7 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
         .toMatchObject({ status: 'OPEN', version: created.pullRequest.version, mergeCommitSha: null, mergedById: null });
       expect(await db.pullRequestMergeOperation.count({ where: { pullRequestId: created.pullRequest.id } })).toBe(0);
       expect(await db.auditLog.count({ where: { targetId: created.pullRequest.id, action: 'PULL_REQUEST_MERGED' } })).toBe(0);
+      expect(await db.auditLog.count({ where: { targetId: created.pullRequest.id } })).toBe(auditRowsBeforeMerge);
     }
   }, 60_000);
 
