@@ -57,6 +57,110 @@
   .pagination > div { width: 100%; }
   .pagination .button { flex: 1; }
   .alert { align-items: flex-start; flex-direction: column; }
+
+  /* Responsive card presentation for admin records */
+  .tableWrap {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    overflow-x: visible;
+  }
+  .tableWrap table {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  .tableWrap thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .tableWrap tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    width: 100%;
+  }
+  .tableWrap tbody tr {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    padding: 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+  }
+  .tableWrap td {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.75rem;
+    padding: 0.35rem 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--border), transparent 45%);
+    font-size: 0.88rem;
+  }
+  .tableWrap tbody tr:last-child td {
+    border-bottom: 1px solid color-mix(in srgb, var(--border), transparent 45%);
+  }
+  .tableWrap tbody tr td:last-child {
+    border-bottom: 0;
+  }
+  .tableWrap td[data-label]::before {
+    content: attr(data-label);
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: #475467;
+    flex-shrink: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .tableWrap td:first-child {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.2rem;
+    padding-top: 0;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.55rem;
+  }
+  .tableWrap td:first-child strong {
+    font-size: 1rem;
+    color: var(--text);
+  }
+  .tableWrap td small {
+    max-width: 100%;
+    margin-top: 0.15rem;
+  }
+  .tableWrap td code {
+    font-size: 0.78rem;
+    max-width: 15rem;
+    text-align: right;
+  }
+  .tableWrap td.actionCell {
+    margin-top: 0.35rem;
+    padding-top: 0.65rem;
+    border-top: 1px dashed var(--border);
+    border-bottom: 0;
+    align-items: center;
+  }
+  .tableWrap td.actionCell .tableButton {
+    min-height: 38px;
+    padding: 0.35rem 0.65rem;
+    background: color-mix(in srgb, var(--brand-600), transparent 92%);
+    border-radius: var(--radius-sm);
+    text-decoration: none;
+  }
+  .tableWrap td.actionCell .tableButton:hover {
+    background: color-mix(in srgb, var(--brand-600), transparent 84%);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
