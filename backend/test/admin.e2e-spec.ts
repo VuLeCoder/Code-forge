@@ -7,6 +7,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
+import { Client } from 'pg';
 // cookie-parser is CommonJS; use the compatible import form in the Jest runtime.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import cookieParser = require('cookie-parser');
@@ -57,6 +58,7 @@ describe('Admin HTTP + isolated PostgreSQL + Git', () => {
     schemaCreated = true;
     const isolatedUrl = new URL(originalDatabaseUrl);
     isolatedUrl.searchParams.set('schema', schema);
+    isolatedUrl.searchParams.set('application_name', `admin-e2e-${schema.slice(-12)}`);
     process.env.DATABASE_URL = isolatedUrl.toString();
     process.env.DATABASE_URL_UNPOOLED = isolatedUrl.toString();
     execFileSync(process.execPath, [require.resolve('prisma/build/index.js'), 'migrate', 'deploy'], {
@@ -224,6 +226,132 @@ describe('Admin HTTP + isolated PostgreSQL + Git', () => {
     expect(JSON.stringify(auditBody)).not.toContain(tokenSecret);
     expect(JSON.stringify(auditBody)).not.toContain('password-fixture');
     expect(JSON.stringify(auditBody)).not.toContain(privateSource);
+  }, 60_000);
+
+  it('serializes concurrent attempts to lock the last two active administrators', async () => {
+    const previousAdmin = adminAccount;
+    const registerAdmin = async (username: string) => {
+      const response = await call('POST', 'auth/register', '', {
+        username, email: `${username.toLowerCase()}@example.test`, password,
+      });
+      expect(response.status).toBe(201);
+      const body = await response.json() as { user: { id: string } };
+      const account = { userId: body.user.id, cookie: cookie(response) };
+      await db!.user.update({ where: { id: account.userId }, data: { systemRole: 'ADMIN' } });
+      return account;
+    };
+    const firstAdmin = previousAdmin ?? await registerAdmin('RaceAdminOne');
+    const secondAdmin = await registerAdmin('RaceAdminTwo');
+
+    const applicationName = `admin-e2e-${schema.slice(-12)}`;
+    const barrierKey = `admin-last-admin-${schema.slice(-12)}`;
+    const functionName = `pause_admin_lock_${schema.slice(-12)}`;
+    const triggerName = `pause_admin_lock_${schema.slice(-12)}`;
+    const barrier = new Client({ connectionString: originalDatabaseUrl, connectionTimeoutMillis: 5_000 });
+    let barrierConnected = false;
+    let barrierHeld = false;
+    let functionCreated = false;
+    let triggerCreated = false;
+    let firstRequest: Promise<{ status: number; body: unknown }> | undefined;
+    let secondRequest: Promise<{ status: number; body: unknown }> | undefined;
+
+    const waitForActivity = async (
+      predicate: () => Promise<boolean>, description: string,
+    ) => {
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        if (await predicate()) return;
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 20));
+      }
+      throw new Error(`Timed out waiting for ${description}.`);
+    };
+
+    try {
+      await barrier.connect();
+      barrierConnected = true;
+      await barrier.query("SET statement_timeout = '30s'");
+      await barrier.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [barrierKey]);
+      barrierHeld = true;
+
+      await adminDb!.$executeRawUnsafe(`CREATE FUNCTION "${schema}"."${functionName}"() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF OLD.system_role = 'ADMIN' AND OLD.status = 'ACTIVE' AND NEW.status = 'LOCKED' THEN
+            PERFORM pg_advisory_lock(hashtextextended('${barrierKey}', 0));
+            PERFORM pg_advisory_unlock(hashtextextended('${barrierKey}', 0));
+          END IF;
+          RETURN NEW;
+        END;
+      $$`);
+      functionCreated = true;
+      await adminDb!.$executeRawUnsafe(`CREATE TRIGGER "${triggerName}" BEFORE UPDATE OF status ON "${schema}".users
+        FOR EACH ROW EXECUTE FUNCTION "${schema}"."${functionName}"()`);
+      triggerCreated = true;
+
+      const appActivity = () => adminDb!.$queryRaw<{ pid: number }[]>`
+        SELECT pid FROM pg_stat_activity
+        WHERE datname = current_database() AND application_name = ${applicationName}`;
+
+      firstRequest = call('PATCH', `admin/users/${secondAdmin.userId}/status`, firstAdmin.cookie, { status: 'LOCKED' })
+        .then(async (response) => ({ status: response.status, body: await response.json() as Record<string, unknown> }));
+      let firstPid: number | undefined;
+      const barrierPidResult = await barrier.query<{ pid: number }>('SELECT pg_backend_pid() AS pid');
+      const barrierPid = barrierPidResult.rows[0]?.pid;
+      if (!barrierPid) throw new Error('Could not identify the PostgreSQL test barrier connection.');
+      await waitForActivity(async () => {
+        const rows = await appActivity();
+        const appPids = rows.map(({ pid }) => pid);
+        if (appPids.length === 0) return false;
+        const waiting = await adminDb!.$queryRaw<{ pid: number }[]>`
+          SELECT pid FROM pg_stat_activity
+          WHERE datname = current_database() AND application_name = ${applicationName}
+            AND wait_event_type = 'Lock' AND wait_event = 'advisory'
+            AND query ILIKE '%UPDATE%users%'
+            AND pg_blocking_pids(pid) @> ARRAY[${barrierPid}::int]`;
+        if (waiting.length === 1) { firstPid = waiting[0]!.pid; return true; }
+        return false;
+      }, 'first admin transaction to reach the PostgreSQL lock barrier');
+
+      secondRequest = call('PATCH', `admin/users/${firstAdmin.userId}/status`, secondAdmin.cookie, { status: 'LOCKED' })
+        .then(async (response) => ({ status: response.status, body: await response.json() as Record<string, unknown> }));
+      await waitForActivity(async () => {
+        const rows = await adminDb!.$queryRaw<{ pid: number }[]>`
+          SELECT pid FROM pg_stat_activity
+          WHERE datname = current_database() AND application_name = ${applicationName}
+            AND wait_event_type = 'Lock' AND wait_event <> 'advisory'
+            AND query ILIKE '%SELECT id FROM users WHERE system_role%'
+            AND pg_blocking_pids(pid) @> ARRAY[${firstPid ?? -1}::int]`;
+        return rows.length === 1;
+      }, 'second admin transaction to queue behind the first admin-row lock');
+
+      const unlocked = await barrier.query<{ pg_advisory_unlock: boolean }>(
+        'SELECT pg_advisory_unlock(hashtextextended($1, 0))', [barrierKey]);
+      expect(unlocked.rows[0]?.pg_advisory_unlock).toBe(true);
+      barrierHeld = false;
+
+      const [firstResult, secondResult] = await Promise.all([firstRequest, secondRequest]);
+      expect(firstResult.status).toBe(200);
+      expect(firstResult.body).toMatchObject({ changed: true, user: { id: secondAdmin.userId, status: 'LOCKED' } });
+      expect(secondResult.status).toBe(409);
+      expect(secondResult.body).toMatchObject({ error: { code: 'LAST_ACTIVE_ADMIN' } });
+
+      expect(await db!.user.count({ where: { systemRole: 'ADMIN', status: 'ACTIVE' } })).toBe(1);
+      expect(await db!.user.findUniqueOrThrow({ where: { id: firstAdmin.userId }, select: { status: true } }))
+        .toMatchObject({ status: 'ACTIVE' });
+      expect(await db!.user.findUniqueOrThrow({ where: { id: secondAdmin.userId }, select: { status: true } }))
+        .toMatchObject({ status: 'LOCKED' });
+      expect(await db!.auditLog.count({ where: { action: 'ADMIN_USER_LOCKED', targetId: { in: [firstAdmin.userId, secondAdmin.userId] } } }))
+        .toBe(1);
+    } finally {
+      if (barrierHeld && barrierConnected) {
+        await barrier.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [barrierKey]).catch(() => undefined);
+        barrierHeld = false;
+      }
+      if (firstRequest || secondRequest) await Promise.allSettled([firstRequest, secondRequest].filter(Boolean) as Promise<unknown>[]);
+      if (triggerCreated) await adminDb!.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "${triggerName}" ON "${schema}".users`).catch(() => undefined);
+      if (functionCreated) await adminDb!.$executeRawUnsafe(`DROP FUNCTION IF EXISTS "${schema}"."${functionName}"()`).catch(() => undefined);
+      await db!.user.update({ where: { id: secondAdmin.userId }, data: { systemRole: 'USER', status: 'ACTIVE', lockedAt: null } }).catch(() => undefined);
+      if (barrierConnected) await barrier.end().catch(() => undefined);
+    }
   }, 60_000);
 
   it('serializes racing login and refresh against account lock before unlock', async () => {
