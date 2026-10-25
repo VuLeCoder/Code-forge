@@ -505,7 +505,7 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     git(['-C', work, 'commit', '-m', 'Create stale version fixture']);
     git(['-C', work, 'push', '--set-upstream', 'origin', 'feature/stale-version']);
 
-    const repoPath = 'repos/mergestaleversion/mergestaleversion/pulls';
+    const repoPath = 'repos/mergestaleversionowner/mergestaleversion/pulls';
     const createdResponse = await call('POST', repoPath, {
       title: 'Queued title v1', sourceBranch: 'feature/stale-version', targetBranch: 'main',
     }, staleOwnerCookie);
