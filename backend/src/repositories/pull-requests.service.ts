@@ -5,11 +5,13 @@ import { RepositoryPolicy } from './repository.policy';
 import { GitStorageService } from './git-storage.service';
 import { CreatePullRequestDto, MergePullRequestDto, UpdatePullRequestDto } from './pull-request.dto';
 import { RepositoryLockService } from './repository-lock.service';
+import { GitPushJournalService } from './git-push-journal.service';
 
 @Injectable()
 export class PullRequestsService {
   constructor(private readonly db: PrismaService, private readonly policy: RepositoryPolicy,
-    private readonly storage: GitStorageService, private readonly locks: RepositoryLockService) {}
+    private readonly storage: GitStorageService, private readonly locks: RepositoryLockService,
+    private readonly pushJournal: GitPushJournalService) {}
 
   private async repository(owner: string, name: string, userId?: string) {
     const repo = await this.db.repository.findFirst({
@@ -47,6 +49,7 @@ export class PullRequestsService {
     const initial = await this.repository(owner, name, userId);
     const lock = await this.locks.acquire(initial.id);
     try {
+      await this.pushJournal.assertNoUnresolved(initial.id);
       return await this.db.$transaction(async (tx) => {
         const users = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM users WHERE id = ${userId}::uuid FOR UPDATE`;
         if (users[0]?.status !== 'ACTIVE') throw new ForbiddenException();
@@ -115,6 +118,7 @@ export class PullRequestsService {
     const initial = await this.repository(owner, name, userId);
     const lock = await this.locks.acquire(initial.id);
     try {
+      await this.pushJournal.assertNoUnresolved(initial.id);
       await this.db.$transaction(async (tx) => {
         const users = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM users WHERE id = ${userId}::uuid FOR UPDATE`;
         if (users[0]?.status !== 'ACTIVE') throw new ForbiddenException();
@@ -168,6 +172,7 @@ export class PullRequestsService {
 
     const lock = await this.locks.acquire(repoId);
     try {
+      await this.pushJournal.assertNoUnresolved(repoId);
       const users = await this.db.$queryRaw<{ status: string }[]>`SELECT status FROM users WHERE id = ${userId}::uuid`;
       if (users[0]?.status !== 'ACTIVE') throw new ForbiddenException();
       const repo = await this.db.repository.findUnique({ where: { id: repoId } });

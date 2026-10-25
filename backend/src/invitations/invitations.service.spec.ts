@@ -45,7 +45,8 @@ describe('InvitationsService', () => {
       $queryRaw: jest.fn().mockResolvedValue([{ status: 'ACTIVE' }]),
     };
     locks.acquire.mockClear();
-    service = new InvitationsService(db as unknown as PrismaService, locks as unknown as RepositoryLockService);
+    service = new InvitationsService(db as unknown as PrismaService, locks as unknown as RepositoryLockService,
+      { assertNoUnresolved: jest.fn().mockResolvedValue(undefined) } as never);
   });
 
   describe('list', () => {

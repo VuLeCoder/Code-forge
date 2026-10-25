@@ -3,12 +3,14 @@ import { Prisma, type RepositoryStatus, type UserStatus } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { AdminListQueryDto } from './admin.dto';
 import { RepositoryLockService } from '../repositories/repository-lock.service';
+import { GitPushJournalService } from '../repositories/git-push-journal.service';
 
-const DETAIL_KEYS = new Set(['repositoryId', 'number', 'operationId', 'mergeCommitSha', 'from', 'to', 'invitationId', 'memberId', 'role', 'channel']);
+const DETAIL_KEYS = new Set(['repositoryId', 'number', 'operationId', 'mergeCommitSha', 'changedRefCount', 'storageGeneration', 'from', 'to', 'invitationId', 'memberId', 'role', 'channel']);
 
 @Injectable()
 export class AdminService {
-  constructor(private readonly db: PrismaService, private readonly locks: RepositoryLockService) {}
+  constructor(private readonly db: PrismaService, private readonly locks: RepositoryLockService,
+    private readonly pushJournal: GitPushJournalService) {}
 
   private page(value?: string) {
     if (value !== undefined && (!/^[1-9][0-9]{0,3}$/.test(value) || Number(value) > 1000)) {
@@ -109,7 +111,7 @@ export class AdminService {
 
   async setRepositoryStatus(actorId: string, repositoryId: string, status: 'ACTIVE' | 'LOCKED') {
     const lock = await this.locks.acquire(repositoryId);
-    try { return await this.db.$transaction(async (tx) => {
+    try { await this.pushJournal.assertNoUnresolved(repositoryId); return await this.db.$transaction(async (tx) => {
       const target = await tx.repository.findUnique({ where: { id: repositoryId } });
       if (!target) throw new NotFoundException({ error: { code: 'REPOSITORY_NOT_FOUND', message: 'Không tìm thấy repository.' } });
       if (target.status === 'DELETED') throw new ConflictException({ error: { code: 'REPOSITORY_DELETED', message: 'Hãy dùng thao tác khôi phục cho repository đã xóa.' } });
@@ -122,7 +124,7 @@ export class AdminService {
 
   async restoreRepository(actorId: string, repositoryId: string) {
     const lock = await this.locks.acquire(repositoryId);
-    try { return await this.db.$transaction(async (tx) => {
+    try { await this.pushJournal.assertNoUnresolved(repositoryId); return await this.db.$transaction(async (tx) => {
       const target = await tx.repository.findUnique({ where: { id: repositoryId } });
       if (!target) throw new NotFoundException({ error: { code: 'REPOSITORY_NOT_FOUND', message: 'Không tìm thấy repository.' } });
       if (target.status !== 'DELETED') throw new ConflictException({ error: { code: 'REPOSITORY_NOT_DELETED', message: 'Repository hiện không ở trạng thái đã xóa.' } });

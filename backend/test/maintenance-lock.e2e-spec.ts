@@ -62,6 +62,7 @@ function maintenanceService(
     locks,
     storage,
     purge as unknown as RepositoryPurgeService,
+    { assertNoUnresolved: jest.fn().mockResolvedValue(undefined), reconcilePending: jest.fn().mockResolvedValue(undefined) } as never,
   );
 }
 

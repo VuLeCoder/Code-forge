@@ -3,6 +3,7 @@ import { PrismaService } from '../database/prisma.service';
 import { GitStorageService } from '../repositories/git-storage.service';
 import { RepositoryLockService } from '../repositories/repository-lock.service';
 import { RepositoryPurgeService } from '../repositories/repository-purge.service';
+import { GitPushJournalService } from '../repositories/git-push-journal.service';
 
 @Injectable()
 export class MaintenanceJobsService implements OnModuleInit, OnModuleDestroy {
@@ -12,7 +13,8 @@ export class MaintenanceJobsService implements OnModuleInit, OnModuleDestroy {
   private activeRun?: Promise<void>;
 
   constructor(private readonly db: PrismaService, private readonly locks: RepositoryLockService,
-    private readonly storage: GitStorageService, private readonly purge: RepositoryPurgeService) {}
+    private readonly storage: GitStorageService, private readonly purge: RepositoryPurgeService,
+    private readonly pushJournal: GitPushJournalService) {}
 
   onModuleInit() {
     this.timer = setInterval(() => void this.runOnce(), 60_000);
@@ -43,6 +45,7 @@ export class MaintenanceJobsService implements OnModuleInit, OnModuleDestroy {
       jobLock = await this.locks.acquire('code-forge-maintenance-jobs');
       await this.expireInvitations();
       await this.cleanupExpiredCredentials();
+      await this.pushJournal.reconcilePending();
       await this.reconcileMerges();
       await this.purge.purgeDue(50);
     } catch {
@@ -87,7 +90,10 @@ export class MaintenanceJobsService implements OnModuleInit, OnModuleDestroy {
     });
     for (const candidate of candidates) {
       const lock = await this.locks.acquire(candidate.repositoryId);
-      try { await this.reconcileOperation(candidate.operationId); }
+      try {
+        await this.pushJournal.assertNoUnresolved(candidate.repositoryId);
+        await this.reconcileOperation(candidate.operationId);
+      }
       catch {
         await this.db.pullRequestMergeOperation.updateMany({ where: { operationId: candidate.operationId,
           status: { in: ['PENDING', 'NEEDS_RECONCILIATION'] } },

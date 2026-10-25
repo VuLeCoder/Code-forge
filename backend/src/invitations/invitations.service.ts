@@ -2,10 +2,12 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
 import { RepositoryLockService } from '../repositories/repository-lock.service';
+import { GitPushJournalService } from '../repositories/git-push-journal.service';
 
 @Injectable()
 export class InvitationsService {
-  constructor(private readonly db: PrismaService, private readonly locks: RepositoryLockService) {}
+  constructor(private readonly db: PrismaService, private readonly locks: RepositoryLockService,
+    private readonly pushJournal: GitPushJournalService) {}
 
   private async lock(tx: Prisma.TransactionClient, userId: string, id: string) {
     const users = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM users WHERE id = ${userId}::uuid FOR UPDATE`;
@@ -62,6 +64,7 @@ export class InvitationsService {
     if (!initial) throw new NotFoundException({ error: { code: 'INVITATION_NOT_FOUND', message: 'Không tìm thấy lời mời.' } });
     const repositoryLock = await this.locks.acquire(initial.repositoryId);
     try {
+    await this.pushJournal.assertNoUnresolved(initial.repositoryId);
     const result = await this.db.$transaction(async (tx) => {
       await this.lock(tx, userId, id);
       const invitation = await tx.invitation.findFirst({
@@ -128,6 +131,7 @@ export class InvitationsService {
     if (!initial) throw new NotFoundException({ error: { code: 'INVITATION_NOT_FOUND', message: 'Không tìm thấy lời mời.' } });
     const repositoryLock = await this.locks.acquire(initial.repositoryId);
     try {
+    await this.pushJournal.assertNoUnresolved(initial.repositoryId);
     const result = await this.db.$transaction(async (tx) => {
       await this.lock(tx, userId, id);
       const invitation = await tx.invitation.findFirst({

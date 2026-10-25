@@ -55,6 +55,13 @@ enum MergeOperationStatus {
   NEEDS_RECONCILIATION
 }
 
+enum GitPushOperationStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  NEEDS_RECONCILIATION
+}
+
 model User {
   id                   String                @id @default(uuid()) @db.Uuid
   username             String                @db.VarChar(39)
@@ -100,6 +107,7 @@ model Repository {
   invitations       Invitation[]
   pullRequests      PullRequest[]
   mergeOperations   PullRequestMergeOperation[]
+  gitPushOperations GitPushOperation[]
 
   @@unique([ownerId, normalizedName])
   @@index([ownerId, status, createdAt])
@@ -221,6 +229,24 @@ model PullRequestMergeOperation {
   @@index([status, updatedAt])
   @@index([repositoryId, status])
   @@map("pull_request_merge_operations")
+}
+
+model GitPushOperation {
+  operationId       String                 @id @map("operation_id") @db.Uuid
+  repositoryId      String                 @map("repository_id") @db.Uuid
+  actorId           String                 @map("actor_id") @db.Uuid
+  status            GitPushOperationStatus @default(PENDING)
+  storageGeneration Int                    @map("storage_generation")
+  beforeRefs        Json?                  @map("before_refs") @db.JsonB
+  changedRefCount   Int?                   @map("changed_ref_count")
+  errorCode         String?                @map("error_code") @db.VarChar(80)
+  createdAt         DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
+  repository        Repository             @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@index([status, updatedAt])
+  @@index([repositoryId, status])
+  @@map("git_push_operations")
 }
 
 model Session {

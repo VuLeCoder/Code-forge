@@ -22,7 +22,8 @@ describe('AdminService account locking', () => {
     const transaction = jest.fn((callback: (client: unknown) => unknown) => Promise.resolve(callback(tx)));
     const db = { $transaction: transaction };
     const locks = { acquire: jest.fn() };
-    return { service: new AdminService(db as unknown as PrismaService, locks as unknown as RepositoryLockService), transaction, updateUser, revokeSessions, createAudit, revokedAt };
+    return { service: new AdminService(db as unknown as PrismaService, locks as unknown as RepositoryLockService,
+      { assertNoUnresolved: jest.fn().mockResolvedValue(undefined) } as never), transaction, updateUser, revokeSessions, createAudit, revokedAt };
   }
 
   it('refuses to lock the final active administrator', async () => {
@@ -65,7 +66,8 @@ describe('AdminService restore and audit privacy', () => {
     const tx = { repository: { findUnique: findRepository, update: updateRepository }, auditLog: { create: createAudit } };
     const db = { $transaction: jest.fn((callback: (client: unknown) => unknown) => Promise.resolve(callback(tx))) };
     const locks = { acquire: jest.fn().mockResolvedValue({ release }) };
-    const service = new AdminService(db as unknown as PrismaService, locks as unknown as RepositoryLockService);
+    const service = new AdminService(db as unknown as PrismaService, locks as unknown as RepositoryLockService,
+      { assertNoUnresolved: jest.fn().mockResolvedValue(undefined) } as never);
 
     await expect(service.restoreRepository(actorId, repositoryId)).rejects.toThrow(ConflictException);
 
@@ -96,7 +98,7 @@ describe('AdminService restore and audit privacy', () => {
       },
       user: { findMany: jest.fn().mockResolvedValue([]) },
     };
-    const service = new AdminService(db as unknown as PrismaService, {} as RepositoryLockService);
+    const service = new AdminService(db as unknown as PrismaService, {} as RepositoryLockService, {} as never);
 
     const result = await service.listAudit({});
 

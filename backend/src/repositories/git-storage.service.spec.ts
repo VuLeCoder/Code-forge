@@ -77,6 +77,41 @@ describe('GitStorageService with real Git', () => {
     expect(await storage.exists(key)).toBe(true);
     expect(await storage.inspect(key, 'main')).toEqual({ state: 'EMPTY', readme: null });
     expect(execFileSync('git', ['--git-dir', join(root, key), 'symbolic-ref', 'HEAD'], { encoding: 'utf8' }).trim()).toBe('refs/heads/main');
+    expect(await storage.snapshotRefs(key)).toEqual({});
+  });
+
+  it('returns a sorted complete ref snapshot and fails closed on malformed or over-limit output', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'main', true, 'Snapshot');
+    const sha = execFileSync('git', ['--git-dir', join(root, key), 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    execFileSync('git', ['--git-dir', join(root, key), 'update-ref', 'refs/heads/feature/demo', sha]);
+    expect(await storage.snapshotRefs(key)).toEqual({
+      'refs/heads/feature/demo': sha,
+      'refs/heads/main': sha,
+    });
+
+    const git = jest.spyOn(storage as unknown as { git: (...args: unknown[]) => Promise<{ stdout: string; stderr: string }> }, 'git');
+    git.mockResolvedValueOnce({ stdout: `refs/heads/bad..name\t${sha}\n`, stderr: '' });
+    await expect(storage.snapshotRefs(key)).rejects.toMatchObject({ response: { error: { code: 'GIT_REF_SNAPSHOT_UNAVAILABLE' } } });
+
+    git.mockResolvedValueOnce({ stdout: `refs/heads/main\tinvalid-sha\n`, stderr: '' });
+    await expect(storage.snapshotRefs(key)).rejects.toMatchObject({ response: { error: { code: 'GIT_REF_SNAPSHOT_UNAVAILABLE' } } });
+
+    git.mockResolvedValueOnce({ stdout: `refs/tags/release\t${sha}\n`, stderr: '' });
+    await expect(storage.snapshotRefs(key)).rejects.toMatchObject({ response: { error: { code: 'GIT_REF_SNAPSHOT_UNAVAILABLE' } } });
+
+    git.mockResolvedValueOnce({ stdout: `${Array.from({ length: 1001 }, (_, index) => `refs/heads/branch-${index.toString().padStart(4, '0')}\t${sha}`).join('\n')}\n`, stderr: '' });
+    await expect(storage.snapshotRefs(key)).rejects.toMatchObject({ response: { error: { code: 'GIT_REF_SNAPSHOT_UNAVAILABLE' } } });
+  });
+
+  it('sanitizes Git snapshot command failures', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'main', false, 'Snapshot');
+    jest.spyOn(storage as unknown as { git: (...args: unknown[]) => Promise<{ stdout: string; stderr: string }> }, 'git')
+      .mockRejectedValueOnce(new Error('sensitive Git stderr'));
+    await expect(storage.snapshotRefs(key)).rejects.toMatchObject({
+      response: { error: { code: 'GIT_REF_SNAPSHOT_UNAVAILABLE', message: 'Không thể xác minh Git refs.' } },
+    });
   });
 
   it('commits a README and can detect missing storage', async () => {

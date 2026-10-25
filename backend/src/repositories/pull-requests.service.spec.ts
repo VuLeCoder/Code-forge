@@ -52,7 +52,8 @@ describe('PullRequestsService', () => {
       compareAndSwapBranch: jest.fn(), branchSha: jest.fn().mockResolvedValue(targetSha) };
     locks = { acquire: jest.fn().mockResolvedValue({ signal: new AbortController().signal, release: jest.fn() }) };
     service = new PullRequestsService(db as unknown as PrismaService, new RepositoryPolicy(),
-      storage as unknown as GitStorageService, locks as unknown as RepositoryLockService);
+      storage as unknown as GitStorageService, locks as unknown as RepositoryLockService,
+      { assertNoUnresolved: jest.fn().mockResolvedValue(undefined) } as never);
   });
 
   it('does not reveal pull requests for a private repository to a non-member', async () => {

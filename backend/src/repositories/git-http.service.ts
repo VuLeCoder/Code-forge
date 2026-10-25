@@ -7,6 +7,7 @@ import type { Request, Response } from 'express';
 import { GitStorageService } from './git-storage.service';
 import { RepositoriesService } from './repositories.service';
 import { RepositoryLockService, type RepositoryLock } from './repository-lock.service';
+import { GitPushJournalService } from './git-push-journal.service';
 
 @Injectable()
 export class GitHttpService implements OnModuleDestroy {
@@ -55,7 +56,7 @@ export class GitHttpService implements OnModuleDestroy {
     const reject = (status: number) => { res.status(status).type('text/plain').end('Git request unavailable.\n'); };
     if (!/^[a-z0-9][a-z0-9._-]{1,37}[a-z0-9]$/i.test(owner) ||
       !/^(?!.*\.\.)(?!.*\.git\.git$)[a-z0-9](?:[a-z0-9._-]{0,98}[a-z0-9])?\.git$/i.test(repository)) return reject(404);
-    let access: { storageKey: string; defaultBranch: string; repositoryId: string; userId?: string; actorIsOwner: boolean; operation: 'read' | 'write' };
+    let access: { storageKey: string; defaultBranch: string; repositoryId: string; userId?: string; actorIsOwner: boolean; operation: 'read' | 'write'; storageGeneration: number };
     try { access = await this.repositories.prepareGit(owner, repository.slice(0, -4), req.headers.authorization, write ? 'write' : 'read'); }
     catch (error) {
       const status = (error as { getStatus?: () => number }).getStatus?.();
@@ -84,13 +85,28 @@ export class GitHttpService implements OnModuleDestroy {
     }
     if (req.aborted || res.destroyed) { await lock.release(); return; }
 
+    let pushOperationId: string | undefined;
+    if (write && !advertise) {
+      if (!access.userId) { await lock.release(); return reject(401); }
+      try {
+        const beforeRefs = await this.storage.snapshotRefs(access.storageKey);
+        const operation = await this.pushJournal.begin(access.repositoryId, access.userId, access.storageGeneration, beforeRefs);
+        pushOperationId = operation.operationId;
+      } catch {
+        await lock.release();
+        return reject(503);
+      }
+    }
+
     let child: ReturnType<GitStorageService['openPack']>;
     try { child = this.storage.openPack(access.storageKey, access.defaultBranch, service, advertise, protocol, access.actorIsOwner); }
-    catch { await lock.release(); return reject(503); }
+    catch {
+      if (pushOperationId) await this.pushJournal.fail(pushOperationId, 'GIT_PROCESS_START_FAILED').catch(() => undefined);
+      await lock.release(); return reject(503);
+    }
     let stopped = false;
     let header = Buffer.alloc(0);
     let parsed = false;
-    let exited = false;
     let drained = false;
     const inputs: Transform[] = [];
     const stop = (status = 503) => {
@@ -150,9 +166,6 @@ export class GitHttpService implements OnModuleDestroy {
       res.off('close', cancel);
       lock?.signal.removeEventListener('abort', lockLost);
     };
-    const complete = () => {
-      if (!stopped && exited && drained) { stopped = true; cleanup(); res.end(); }
-    };
     req.once('aborted', cancel);
     res.once('close', cancel);
     lock.signal.addEventListener('abort', lockLost, { once: true });
@@ -160,17 +173,32 @@ export class GitHttpService implements OnModuleDestroy {
     child.stdin.on('error', () => stop());
     child.stdout.on('error', () => stop());
     output.on('error', () => stop());
-    output.once('end', () => { drained = true; complete(); });
+    output.once('end', () => { drained = true; });
     child.stderr.resume(); // Never expose source paths or Git diagnostics to clients/logs.
     child.stdout.pipe(output).pipe(res, { end: false });
     child.once('close', (code) => {
-      if (!stopped) {
-        if (code === 0 && parsed) { gitCompleted = true; exited = true; complete(); }
-        else stop();
-      }
-      if (stopped) cleanup();
-      this.running.delete(stop);
-      void lock?.release();
+      void (async () => {
+        this.running.delete(stop);
+        let journaled = true;
+        if (pushOperationId) {
+          try {
+            const afterRefs = await this.storage.snapshotRefs(access.storageKey);
+            journaled = await this.pushJournal.finish(pushOperationId, afterRefs);
+          } catch {
+            journaled = false;
+            await this.pushJournal.markNeedsReconciliation(pushOperationId, 'REF_SNAPSHOT_UNAVAILABLE').catch(() => undefined);
+          }
+        }
+        if (!stopped) {
+          if (code === 0 && parsed && drained && journaled) {
+            gitCompleted = true;
+            stopped = true;
+            cleanup();
+            res.end();
+          } else stop();
+        } else cleanup();
+        await Promise.resolve(lock?.release()).catch(() => undefined);
+      })();
     });
     if (advertise) child.stdin.end();
     else {
@@ -190,5 +218,6 @@ export class GitHttpService implements OnModuleDestroy {
     private readonly storage: GitStorageService,
     private readonly config: ConfigService,
     private readonly locks: RepositoryLockService,
+    private readonly pushJournal: GitPushJournalService,
   ) {}
 }

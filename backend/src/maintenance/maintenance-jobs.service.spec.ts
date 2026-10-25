@@ -55,6 +55,7 @@ function makeFixture(operation?: Partial<MergeOperation>) {
     locks as unknown as RepositoryLockService,
     storage as unknown as GitStorageService,
     purge as unknown as RepositoryPurgeService,
+    { assertNoUnresolved: jest.fn().mockResolvedValue(undefined), reconcilePending: jest.fn().mockResolvedValue(undefined) } as never,
   );
   const internals = service as unknown as {
     runScheduled: () => Promise<void>;

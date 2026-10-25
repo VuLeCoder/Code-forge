@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { PrismaService } from '../database/prisma.service';
 import { GitStorageService } from './git-storage.service';
 import { RepositoryLockService } from './repository-lock.service';
+import { GitPushJournalService } from './git-push-journal.service';
 
 @Injectable()
 export class RepositoryPurgeService implements OnModuleInit, OnModuleDestroy {
@@ -9,7 +10,8 @@ export class RepositoryPurgeService implements OnModuleInit, OnModuleDestroy {
   private timer?: NodeJS.Timeout;
   private running = false;
 
-  constructor(private readonly db: PrismaService, private readonly storage: GitStorageService, private readonly locks: RepositoryLockService) {}
+  constructor(private readonly db: PrismaService, private readonly storage: GitStorageService, private readonly locks: RepositoryLockService,
+    private readonly pushJournal: GitPushJournalService) {}
 
   onModuleInit() {
     this.timer = setInterval(() => void this.runScheduled(), 60 * 60 * 1000);
@@ -37,6 +39,7 @@ export class RepositoryPurgeService implements OnModuleInit, OnModuleDestroy {
         let lock: Awaited<ReturnType<RepositoryLockService['acquire']>> | undefined;
         try {
           lock = await this.locks.acquire(candidate.id);
+          await this.pushJournal.assertNoUnresolved(candidate.id);
           const removed = await this.db.$transaction(async (tx) => {
             const rows = await tx.$queryRaw<{ id: string; storage_key: string }[]>`
               SELECT id, storage_key FROM repositories

@@ -8,6 +8,7 @@ import { RepositoryPolicy } from './repository.policy';
 import { GitStorageService } from './git-storage.service';
 import { TokensService } from '../tokens/tokens.service';
 import { RepositoryLockService } from './repository-lock.service';
+import { GitPushJournalService } from './git-push-journal.service';
 
 @Injectable()
 export class RepositoriesService {
@@ -18,6 +19,7 @@ export class RepositoriesService {
     private readonly storage: GitStorageService,
     private readonly tokens: TokensService,
     private readonly locks: RepositoryLockService,
+    private readonly pushJournal: GitPushJournalService,
   ) {}
 
   private async activeOwner(tx: Prisma.TransactionClient, userId: string) {
@@ -41,7 +43,7 @@ export class RepositoriesService {
     const repo = await this.load(this.db, owner, name);
     if (!repo) return operation();
     const lock = await this.locks.acquire(repo.id);
-    try { return await operation(); }
+    try { await this.pushJournal.assertNoUnresolved(repo.id); return await operation(); }
     finally { await lock.release(); }
   }
 
@@ -114,6 +116,7 @@ export class RepositoriesService {
       let current = await tx.repository.findUniqueOrThrow({ where: { id: repo.id }, include: { owner: { select: { username: true } }, members: { where: { userId: userId ?? '00000000-0000-0000-0000-000000000000' } } } });
       this.policy.assertRead(current, userId);
       if (!(await this.storage.exists(current.storageKey))) {
+        await this.pushJournal.assertNoUnresolved(current.id);
         await this.storage.create(current.storageKey, current.defaultBranch, false, current.name);
         current = await tx.repository.update({ where: { id: current.id }, data: { storageGeneration: { increment: 1 } }, include: { owner: { select: { username: true } }, members: { where: { userId: userId ?? '00000000-0000-0000-0000-000000000000' } } } });
       }
@@ -206,12 +209,8 @@ export class RepositoriesService {
         if (!userId && (!current || !this.policy.permissions(current).canRead)) throw new UnauthorizedException();
         this.policy.assertRead(current, userId);
       }
-      if (!(await this.storage.exists(current.storageKey))) {
-        await this.storage.create(current.storageKey, current.defaultBranch, false, current.name);
-        await tx.repository.update({ where: { id: current.id }, data: { storageGeneration: { increment: 1 } } });
-      }
       return { storageKey: current.storageKey, defaultBranch: current.defaultBranch, repositoryId: current.id,
-        userId, actorIsOwner: current.ownerId === userId, operation };
+        userId, actorIsOwner: current.ownerId === userId, operation, storageGeneration: current.storageGeneration };
     }, { timeout: 30_000 });
   }
 
@@ -226,7 +225,9 @@ export class RepositoriesService {
       } else {
         this.policy.assertRead(current, userId);
       }
+      if (operation === 'write') await this.pushJournal.assertNoUnresolved(current.id);
       if (!(await this.storage.exists(current.storageKey))) {
+        await this.pushJournal.assertNoUnresolved(current.id);
         await this.storage.create(current.storageKey, current.defaultBranch, false, current.name);
         const updated = await tx.repository.update({ where: { id: current.id }, data: { storageGeneration: { increment: 1 } } });
         return { storageKey: updated.storageKey, defaultBranch: updated.defaultBranch,

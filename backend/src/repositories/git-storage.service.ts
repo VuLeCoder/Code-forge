@@ -278,6 +278,46 @@ export class GitStorageService {
     }
   }
 
+  async snapshotRefs(key: string): Promise<Record<string, string>> {
+    let stdout: string;
+    try {
+      ({ stdout } = await this.git(['--git-dir', this.path(key), 'for-each-ref', '--sort=refname',
+        '--format=%(refname)%09%(objectname)'], undefined, 1024 * 1024));
+    } catch {
+      throw new ServiceUnavailableException({ error: { code: 'GIT_REF_SNAPSHOT_UNAVAILABLE', message: 'Không thể xác minh Git refs.' } });
+    }
+    if (!stdout) return {};
+    if (!stdout.endsWith('\n')) {
+      throw new ServiceUnavailableException({ error: { code: 'GIT_REF_SNAPSHOT_UNAVAILABLE', message: 'Không thể xác minh Git refs.' } });
+    }
+    const lines = stdout.slice(0, -1).split('\n');
+    if (lines.length > 1000) {
+      throw new ServiceUnavailableException({ error: { code: 'GIT_REF_SNAPSHOT_UNAVAILABLE', message: 'Không thể xác minh Git refs.' } });
+    }
+    const refs: Record<string, string> = {};
+    const branchPrefix = 'refs/heads/';
+    let previousRef = '';
+    for (const line of lines) {
+      const separator = line.indexOf('\t');
+      const ref = line.slice(0, separator);
+      const sha = line.slice(separator + 1);
+      try {
+        if (!ref.startsWith(branchPrefix)) throw new Error('Unexpected Git ref namespace');
+        this.validateRef(ref.slice(branchPrefix.length));
+      }
+      catch {
+        throw new ServiceUnavailableException({ error: { code: 'GIT_REF_SNAPSHOT_UNAVAILABLE', message: 'Không thể xác minh Git refs.' } });
+      }
+      if (separator < 0 || Buffer.compare(Buffer.from(ref), Buffer.from(previousRef)) <= 0 ||
+        !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(sha)) {
+        throw new ServiceUnavailableException({ error: { code: 'GIT_REF_SNAPSHOT_UNAVAILABLE', message: 'Không thể xác minh Git refs.' } });
+      }
+      refs[ref] = sha;
+      previousRef = ref;
+    }
+    return refs;
+  }
+
   async isAncestor(key: string, ancestorSha: string, descendantSha: string) {
     this.validateCommitSha(ancestorSha);
     this.validateCommitSha(descendantSha);

@@ -12,11 +12,12 @@ import { TokensModule } from '../tokens/tokens.module';
 import { PullRequestsController } from './pull-requests.controller';
 import { PullRequestsService } from './pull-requests.service';
 import { RepositoryLockService } from './repository-lock.service';
+import { GitPushJournalService } from './git-push-journal.service';
 
 @Module({
   imports: [AuthModule, TokensModule],
   controllers: [RepositoriesController, GitHttpController, PullRequestsController],
-  providers: [RepositoriesService, PullRequestsService, RepositoryPolicy, OptionalAccessTokenGuard, GitStorageService, RepositoryPurgeService, GitHttpService, RepositoryLockService],
-  exports: [RepositoriesService, OptionalAccessTokenGuard, RepositoryLockService, GitStorageService, RepositoryPurgeService],
+  providers: [RepositoriesService, PullRequestsService, RepositoryPolicy, OptionalAccessTokenGuard, GitStorageService, RepositoryPurgeService, GitHttpService, RepositoryLockService, GitPushJournalService],
+  exports: [RepositoriesService, OptionalAccessTokenGuard, RepositoryLockService, GitStorageService, RepositoryPurgeService, GitPushJournalService],
 })
 export class RepositoriesModule {}
