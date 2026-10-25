@@ -109,20 +109,25 @@ export default function AdminPage() {
 
   function restoreDialogFocus(opener = focusReturn.current) {
     focusReturn.current = null;
-    window.requestAnimationFrame(() => {
-      if (opener?.isConnected && !opener.disabled) {
-        opener.focus();
-        if (document.activeElement === opener) return;
-      }
-      adminHeading.current?.focus();
-    });
+    if (opener?.isConnected && !opener.disabled) {
+      opener.focus();
+      if (document.activeElement === opener) return;
+    }
+    adminHeading.current?.focus();
   }
 
   function closeConfirmation() {
-    const opener = focusReturn.current;
     if (confirmation.current?.open) confirmation.current.close();
+    else setPendingAction(null);
+  }
+
+  function handleConfirmationClose() {
+    if (confirmation.current?.open) return;
+    const opener = focusReturn.current;
     setPendingAction(null);
-    restoreDialogFocus(opener);
+    window.requestAnimationFrame(() => {
+      if (!confirmation.current?.open) restoreDialogFocus(opener);
+    });
   }
 
   function search(event: FormEvent) {
@@ -216,7 +221,7 @@ export default function AdminPage() {
       </>}
     </section>
 
-    <dialog ref={confirmation} className={styles.dialog} aria-labelledby="admin-confirm-title" aria-describedby="admin-confirm-description" onCancel={(event) => { event.preventDefault(); if (!busy) closeConfirmation(); }}>
+    <dialog ref={confirmation} className={styles.dialog} aria-labelledby="admin-confirm-title" aria-describedby="admin-confirm-description" onClose={handleConfirmationClose} onCancel={(event) => { event.preventDefault(); if (!busy) closeConfirmation(); }}>
       <h2 id="admin-confirm-title">{pendingAction?.title}</h2><p id="admin-confirm-description">{pendingAction?.description}</p>
       <div className={styles.dialogActions}><button className="button buttonPrimary" type="button" disabled={busy} onClick={() => void confirmMutation()}>{busy ? "Đang cập nhật…" : "Xác nhận"}</button><button className="button buttonSecondary" type="button" disabled={busy} onClick={closeConfirmation}>Hủy</button></div>
     </dialog>

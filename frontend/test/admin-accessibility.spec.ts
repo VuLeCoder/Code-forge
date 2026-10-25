@@ -45,8 +45,7 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
     await page.keyboard.press("Enter");
     const lockButton = page.getByRole("row", { name: /alice/ }).getByRole("button", { name: "Khóa tài khoản" });
     await expect(lockButton).toBeVisible();
-    await lockButton.focus();
-    await page.keyboard.press("Enter");
+    await lockButton.press("Enter");
     const dialog = page.getByRole("dialog", { name: "Khóa alice?" });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Xác nhận" })).toBeFocused();
@@ -55,8 +54,7 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
     await expect(lockButton).toBeFocused();
 
     const secondLockButton = page.getByRole("row", { name: /bob/ }).getByRole("button", { name: "Khóa tài khoản" });
-    await secondLockButton.focus();
-    await page.keyboard.press("Enter");
+    await secondLockButton.press("Enter");
     const secondDialog = page.getByRole("dialog", { name: "Khóa bob?" });
     await expect(secondDialog).toBeVisible();
     await expect(secondDialog.getByRole("button", { name: "Xác nhận" })).toBeFocused();
