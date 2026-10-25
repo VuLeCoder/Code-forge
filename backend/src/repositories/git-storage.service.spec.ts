@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import type { Dir, Dirent } from 'node:fs';
+import * as fsPromises from 'node:fs/promises';
 import { lstat, mkdir, mkdtemp, rm, symlink, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -51,13 +53,45 @@ describe('GitStorageService with real Git', () => {
     const staleStages = await Promise.all(Array.from({ length: 27 }, (_, index) =>
       makeDirectory(gitRoot, `.stage-22345678-1234-4234-9234-${String(index).padStart(12, '0')}`, stale)));
 
-    await expect(storage.cleanupOrphanedTemporaryDirectories(gitRoot, readmeRoot)).resolves.toBe(25);
-    await expect(storage.cleanupOrphanedTemporaryDirectories(gitRoot, readmeRoot)).resolves.toBe(4);
+    await expect(storage.cleanupOrphanedTemporaryDirectories(gitRoot, readmeRoot)).resolves.toBe(26);
+    await expect(storage.cleanupOrphanedTemporaryDirectories(gitRoot, readmeRoot)).resolves.toBe(3);
     await expect(storage.cleanupOrphanedTemporaryDirectories(gitRoot, readmeRoot)).resolves.toBe(0);
 
     for (const path of [staleStage, staleReadme, ...staleStages]) await expect(lstat(path)).rejects.toMatchObject({ code: 'ENOENT' });
     for (const path of [freshStage, unrecognized, unrelated, outsideSentinel]) await expect(lstat(path)).resolves.toBeDefined();
     if (symlinkSupported) expect((await lstat(linkedStage)).isSymbolicLink()).toBe(true);
+  });
+
+  it('reaches an exact-name stale candidate after more than 2000 unrelated entries', async () => {
+    const gitRoot = join(root, 'git-root-large');
+    await mkdir(gitRoot);
+    const stale = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    const candidate = join(gitRoot, '.stage-32345678-1234-4234-9234-123456789abc');
+    await mkdir(candidate);
+    await utimes(candidate, stale, stale);
+
+    const entries = Array.from({ length: 2050 }, (_, index) => ({
+      name: `unrelated-${String(index).padStart(4, '0')}`,
+      isDirectory: () => false,
+    } as unknown as Dirent));
+    entries.push({ name: '.stage-32345678-1234-4234-9234-123456789abc', isDirectory: () => true } as unknown as Dirent);
+    const streamedDirectory = {
+      async *[Symbol.asyncIterator]() {
+        yield* entries;
+      },
+    } as unknown as Dir;
+    const originalOpendir = fsPromises.opendir;
+    const opendirSpy = jest.spyOn(fsPromises, 'opendir').mockImplementation(async (path) => {
+      if (String(path) === gitRoot) return streamedDirectory;
+      return originalOpendir(path);
+    });
+
+    try {
+      await expect(storage.cleanupOrphanedTemporaryDirectories(gitRoot, join(root, 'missing-readme'))).resolves.toBe(1);
+      await expect(lstat(candidate)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      opendirSpy.mockRestore();
+    }
   });
 
   it('tolerates a temp root that disappeared before a cleanup pass', async () => {

@@ -9,8 +9,7 @@ import { ConfigService } from '@nestjs/config';
 
 const runFile = promisify(execFile);
 const ORPHAN_TEMP_MIN_AGE_MS = 24 * 60 * 60 * 1000;
-const MAX_ORPHAN_TEMP_REMOVALS_PER_RUN = 25;
-const MAX_ORPHAN_TEMP_ENTRIES_PER_ROOT = 2000;
+const MAX_ORPHAN_TEMP_REMOVALS_PER_ROOT = 25;
 const STAGE_DIRECTORY_NAME = /^\.stage-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const README_TEMP_DIRECTORY_NAME = /^code-forge-readme-[A-Za-z0-9]{6}$/;
 
@@ -579,7 +578,6 @@ export class GitStorageService {
     let removed = 0;
 
     for (const root of roots) {
-      if (removed >= MAX_ORPHAN_TEMP_REMOVALS_PER_RUN) break;
       const rootPath = resolve(root.path);
       try {
         const rootInfo = await lstat(rootPath);
@@ -595,9 +593,9 @@ export class GitStorageService {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
         throw error;
       }
-      let inspected = 0;
+      let removedFromRoot = 0;
       for await (const entry of directory) {
-        if (inspected++ >= MAX_ORPHAN_TEMP_ENTRIES_PER_ROOT || removed >= MAX_ORPHAN_TEMP_REMOVALS_PER_RUN) break;
+        if (removedFromRoot >= MAX_ORPHAN_TEMP_REMOVALS_PER_ROOT) break;
         if (!entry.isDirectory() || !root.namePattern.test(entry.name)) continue;
         const candidate = resolve(rootPath, entry.name);
         const candidateRelativePath = relative(rootPath, candidate);
@@ -608,6 +606,7 @@ export class GitStorageService {
           if (!candidateInfo.isDirectory() || candidateInfo.isSymbolicLink() || candidateInfo.mtimeMs > cutoff) continue;
           await rm(candidate, { recursive: true, force: true });
           removed++;
+          removedFromRoot++;
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
         }
