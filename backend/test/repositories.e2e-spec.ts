@@ -876,6 +876,7 @@ process.exit(result.status ?? 1);
       if (recoveryPromise) await recoveryPromise.catch(() => undefined);
       finishSpy.mockRestore();
       openPack.mockRestore();
+      await db.repository.deleteMany({ where: { id: stored.id } });
     }
   }, 60_000);
 
@@ -1032,6 +1033,7 @@ process.exit(result.status ?? 1);
       if (pushPromise) await pushPromise.catch(() => undefined);
       if (deletePromise && !deleteResponse) await deletePromise.catch(() => undefined);
       openPack.mockRestore();
+      await db.repository.deleteMany({ where: { id: stored.id } });
     }
   }, 60_000);
 

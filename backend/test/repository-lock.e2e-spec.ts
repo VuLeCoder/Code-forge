@@ -39,6 +39,10 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, descriptio
   }
 }
 
+function failCleanup(error: unknown): Promise<never> {
+  return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+}
+
 async function waitForChildReady(child: ChildProcessWithoutNullStreams): Promise<void> {
   await withTimeout(new Promise<void>((resolve, reject) => {
     let output = '';
@@ -68,10 +72,23 @@ async function waitForBlockedService(client: Client, applicationName: string): P
   return false;
 }
 
-async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  child.stdin.write('release\n');
-  child.stdin.end();
+async function stopChild(child: ChildProcessWithoutNullStreams, detachedProcessGroup = false): Promise<void> {
+  const alreadyExited = child.exitCode !== null || child.signalCode !== null;
+  if (!alreadyExited) {
+    try {
+      child.stdin.write('release\n');
+      child.stdin.end();
+    } catch { /* A closed stdin must not prevent bounded process termination. */ }
+  }
+  if (detachedProcessGroup && child.pid && process.platform !== 'win32') {
+    // The detached group may outlive its direct child (for example, a blocked Git hook).
+    // Probe the group first so an already-reused PID is never signalled after all test children exit.
+    try {
+      process.kill(-child.pid, 0);
+      process.kill(-child.pid, 'SIGKILL');
+    } catch { /* The group may already have exited; the child PID fallback below is bounded. */ }
+  }
+  if (alreadyExited) return;
   const closed = once(child, 'close').then(() => true);
   const timeout = new AbortController();
   let exited: boolean;
@@ -84,7 +101,9 @@ async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
     timeout.abort();
   }
   if (exited) return;
-  child.kill();
+  if (!child.kill('SIGKILL')) {
+    // A false return can mean the child exited between the state check and signal.
+  }
   await withTimeout(closed, 2_000, 'Child lock process shutdown');
 }
 
@@ -198,6 +217,9 @@ describe('RepositoryLockService PostgreSQL advisory lock', () => {
     let child: ChildProcessWithoutNullStreams | undefined;
     let poolEnded = false;
     let service: GitHttpService | undefined;
+    let requestStream: PassThrough | undefined;
+    let responseStream: PassThrough | undefined;
+    let childClosed: Promise<unknown> | undefined;
 
     try {
       execFileSync('git', ['init', '--bare', repositoryPath], { stdio: 'ignore' });
@@ -211,6 +233,7 @@ describe('RepositoryLockService PostgreSQL advisory lock', () => {
       const openPack = storage.openPack.bind(storage);
       jest.spyOn(storage, 'openPack').mockImplementation((...args) => {
         child = openPack(...args);
+        childClosed = once(child, 'close');
         return child;
       });
       const repositories = {
@@ -221,26 +244,31 @@ describe('RepositoryLockService PostgreSQL advisory lock', () => {
       };
       const pushJournal = {
         begin: () => Promise.resolve({ operationId: randomUUID() }),
+        recordChildSuccess: () => Promise.resolve(true),
         finish: () => Promise.resolve(true),
         fail: () => Promise.resolve(undefined),
+        markChildFailed: () => Promise.resolve(undefined),
         markNeedsReconciliation: () => Promise.resolve(undefined),
       };
       service = new GitHttpService(repositories as never, storage, config, locks, pushJournal as never);
-      const request = Object.assign(new PassThrough(), {
+      const requestInput = Object.assign(new PassThrough(), {
         query: {},
         headers: { 'content-type': 'application/x-git-receive-pack-request', 'content-length': '1' },
         aborted: false,
-      }) as unknown as Request;
-      const responseStream = new PassThrough();
+      });
+      requestStream = requestInput;
+      const request = requestInput as unknown as Request;
+      const responseOutput = new PassThrough();
+      responseStream = responseOutput;
       const responseHeaders = new Map<string, string>();
-      const response = Object.assign(responseStream, {
+      const response = Object.assign(responseOutput, {
         statusCode: 200,
         headersSent: false,
-        setHeader: (name: string, value: string) => { responseHeaders.set(name, value); return responseStream; },
-        status: (code: number) => { (responseStream as unknown as { statusCode: number }).statusCode = code; return responseStream; },
-        type: (value: string) => { responseHeaders.set('Content-Type', value); return responseStream; },
+        setHeader: (name: string, value: string) => { responseHeaders.set(name, value); return responseOutput; },
+        status: (code: number) => { (responseOutput as unknown as { statusCode: number }).statusCode = code; return responseOutput; },
+        type: (value: string) => { responseHeaders.set('Content-Type', value); return responseOutput; },
       }) as unknown as Response;
-      responseStream.resume();
+      responseOutput.resume();
       const serving = service.serve('alice', 'lock-loss.git', 'git-receive-pack', request, response);
       // Deliberately leave the request open without sending pack bytes: this covers pre-input cancellation only.
       await withTimeout(new Promise<void>((resolve, reject) => {
@@ -256,7 +284,7 @@ describe('RepositoryLockService PostgreSQL advisory lock', () => {
       await serving;
       const runningChild = child;
       if (!runningChild) throw new Error('Git push process was not captured.');
-      const childClosed = once(runningChild, 'close');
+      childClosed ??= once(runningChild, 'close');
       const lockPidResult = await monitor.query<{ pid: number }>(
         "SELECT pid FROM pg_stat_activity WHERE application_name = $1", [applicationName],
       );
@@ -296,13 +324,57 @@ describe('RepositoryLockService PostgreSQL advisory lock', () => {
       await locks.onModuleDestroy();
       poolEnded = true;
     } finally {
-      if (child && child.exitCode === null && child.signalCode === null) {
-        await stopChild(child);
+      const cleanupChildClosed = child ? childClosed ?? once(child, 'close') : undefined;
+      requestStream?.destroy();
+      responseStream?.destroy();
+      let childClosedConfirmed = !child;
+      let cleanupFailure: unknown;
+      try {
+        if (cleanupChildClosed) {
+          try {
+            await withTimeout(cleanupChildClosed, 5_000, 'Git push process cleanup');
+            childClosedConfirmed = true;
+          } catch (initialCloseError) {
+            try {
+              if (child?.pid && process.platform !== 'win32') process.kill(-child.pid, 'SIGKILL');
+              else child?.kill('SIGKILL');
+            } catch { /* Process may have exited between the check and signal. */ }
+            try {
+              await withTimeout(cleanupChildClosed, 2_000, 'Git push process forced cleanup');
+              childClosedConfirmed = true;
+            } catch (forcedCloseError) {
+              cleanupFailure = new Error(
+                `Git push process did not close; preserving test storage at ${gitRoot}.`,
+                { cause: forcedCloseError ?? initialCloseError },
+              );
+            }
+          }
+        }
+      } finally {
+        try {
+          try { service?.onModuleDestroy(); }
+          catch (error) { cleanupFailure ??= error; }
+          if (!poolEnded) {
+            try {
+              await locks.onModuleDestroy();
+              poolEnded = true;
+            } catch (error) { cleanupFailure ??= error; }
+          }
+        } finally {
+          try {
+            if (monitor) {
+              try { await monitor.end(); }
+              catch (error) { cleanupFailure ??= error; }
+            }
+          } finally {
+            if (childClosedConfirmed) {
+              try { await rm(gitRoot, { recursive: true, force: true }); }
+              catch (error) { cleanupFailure ??= error; }
+            }
+          }
+        }
       }
-      service?.onModuleDestroy();
-      if (!poolEnded) await locks.onModuleDestroy();
-      if (monitor) await monitor.end().catch(() => undefined);
-      await rm(gitRoot, { recursive: true, force: true });
+      if (cleanupFailure) await failCleanup(cleanupFailure);
     }
   }, 20_000);
 
@@ -333,6 +405,7 @@ describe('RepositoryLockService PostgreSQL advisory lock', () => {
             : key === 'MAX_PUSH_BYTES' ? 10 * 1024 * 1024 : undefined } as unknown as ConfigService;
     const locks = new RepositoryLockService(config);
     let child: ChildProcessWithoutNullStreams | undefined;
+    let childClosed: Promise<unknown> | undefined;
     let poolEnded = false;
     let service: GitHttpService | undefined;
 
@@ -408,6 +481,7 @@ process.exit(result.status ?? 1);
             ...(protocol ? { GIT_PROTOCOL: protocol } : {}),
           }, stdio: ['pipe', 'pipe', 'pipe'],
         });
+        childClosed = once(child, 'close');
         return child;
       });
       const repositories = {
@@ -418,8 +492,10 @@ process.exit(result.status ?? 1);
       };
       const pushJournal = {
         begin: () => Promise.resolve({ operationId: randomUUID() }),
+        recordChildSuccess: () => Promise.resolve(true),
         finish: () => Promise.resolve(true),
         fail: () => Promise.resolve(undefined),
+        markChildFailed: () => Promise.resolve(undefined),
         markNeedsReconciliation: () => Promise.resolve(undefined),
       };
       service = new GitHttpService(repositories as never, storage, config, locks, pushJournal as never);
@@ -444,7 +520,7 @@ process.exit(result.status ?? 1);
       await serving;
       const runningChild = child;
       if (!runningChild) throw new Error('Git push process was not captured.');
-      const childClosed = once(runningChild, 'close');
+      childClosed ??= once(runningChild, 'close');
       await withTimeout((async () => {
         while (!existsSync(hookStarted)) await delay(20);
       })(), 5_000, 'Git pre-receive hook barrier');
@@ -487,11 +563,41 @@ process.exit(result.status ?? 1);
       await locks.onModuleDestroy();
       poolEnded = true;
     } finally {
-      if (child && child.exitCode === null && child.signalCode === null) await stopChild(child);
-      service?.onModuleDestroy();
-      if (!poolEnded) await locks.onModuleDestroy();
-      await monitor.end().catch(() => undefined);
-      await rm(gitRoot, { recursive: true, force: true });
+      let childClosedConfirmed = !child;
+      let cleanupFailure: unknown;
+      if (child) {
+        try {
+          await stopChild(child, process.platform !== 'win32');
+          if (childClosed) await withTimeout(childClosed, 2_000, 'Git receive-pack process close');
+          childClosedConfirmed = true;
+        } catch (error) {
+          cleanupFailure = new Error(
+            `Git receive-pack process group did not close; preserving test storage at ${gitRoot}.`,
+            { cause: error },
+          );
+        }
+      }
+      try {
+        try { service?.onModuleDestroy(); }
+        catch (error) { cleanupFailure ??= error; }
+        if (!poolEnded) {
+          try {
+            await locks.onModuleDestroy();
+            poolEnded = true;
+          } catch (error) { cleanupFailure ??= error; }
+        }
+      } finally {
+        try {
+          try { await monitor.end(); }
+          catch (error) { cleanupFailure ??= error; }
+        } finally {
+          if (childClosedConfirmed) {
+            try { await rm(gitRoot, { recursive: true, force: true }); }
+            catch (error) { cleanupFailure ??= error; }
+          }
+        }
+      }
+      if (cleanupFailure) await failCleanup(cleanupFailure);
     }
   }, 30_000);
 });
