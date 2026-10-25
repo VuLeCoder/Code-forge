@@ -1756,11 +1756,14 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       } finally { if (requestCloseTimeout) clearTimeout(requestCloseTimeout); }
       expect(mergeResponseStatus).toBeUndefined();
       expect(mergeRequestError).toBeDefined();
+      // Confirm the killed API's database transaction has exited before releasing
+      // the trigger barrier; otherwise the blocked candidate update can commit
+      // after the child dies, before the API notices the disconnected Git client.
+      await waitForSessionsToExit(childApplicationName, 60_000);
       const unlocked = await barrier.query<{ pg_advisory_unlock: boolean }>(
         'SELECT pg_advisory_unlock(hashtextextended($1, 0))', [barrierKey]);
       expect(unlocked.rows[0]?.pg_advisory_unlock).toBe(true);
       barrierLockHeld = false;
-      await waitForSessionsToExit(childApplicationName, 60_000);
       expect(git(['--git-dir', bare, 'for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)', 'refs/']))
         .toBe(refsBeforeMerge);
       expect(await db.pullRequest.findUniqueOrThrow({ where: { id: pullRequest.id } }))
