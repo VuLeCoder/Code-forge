@@ -784,6 +784,8 @@ snapshots, not current status. Current acceptance state is in the task board.
 
 ## T-AMBIGUOUS-JOURNAL-RESOLUTION — commit 1e8736c, pushed to origin/thviet
 
+**Superseded on 2026-10-25 by revert `4b7eaed`:** this implementation is no longer present and must not be treated as current or accepted. Per the owner's choice to defer operator resolution and preserve fail-closed behavior, Issue #6 remains open. Review found that `MARK_FAILED` / `RETRY_RECONCILE` did not establish safe resolution for ambiguous evidence, the retry audit was not atomic with reconciliation, and free-text reasons could enter audit records. Revisit only after the authorization/approval policy and security contract are approved.
+
 - Source: `thviet` and `origin/thviet` point to exact SHA
   `1e8736ce3b4fe765c9b63481aa3a18a09f874287`, commit
   `feat(admin): implement audited resolution workflow for ambiguous Git journals (Issue #6)`.
@@ -803,4 +805,21 @@ snapshots, not current status. Current acceptance state is in the task board.
   - Workspace typecheck (`corepack pnpm typecheck`) passed cleanly.
   - Workspace lint (`corepack pnpm lint`) passed with 0 errors, 0 warnings.
   - `git diff --check` passed.
+  - Pushed to `origin/thviet`.
+
+## T-MAINTENANCE-PURGE-JOURNAL-RETAIN — commit 027751b, pushed to origin/thviet
+
+- Source: `thviet` and `origin/thviet` point to exact SHA `027751b`, commit `test(maintenance): assert purge retains expired storage while merge journal needs reconciliation`.
+- Scope: P4/P6 invariant in `backend/test/maintenance-cleanup.e2e-spec.ts`.
+- Behavior verified:
+  - `RepositoryPurgeService.purgeDue()` refuses to purge soft-deleted repositories that have an active or unresolved merge operation (`NEEDS_RECONCILIATION`), preserving filesystem bare Git storage and repository records.
+  - Once the blocking journal transitions to a terminal state (`FAILED`), subsequent purge invocations successfully purge the repository and delete the storage directory.
+- Verification evidence:
+  - Isolated PostgreSQL container `codeforge-merge-crash-test-20261025` on loopback port 49588 (`code_forge_test`).
+  - `jest test/maintenance-cleanup.e2e-spec.ts`: 3/3 passed in 5.92s.
+  - `jest test/pull-requests.e2e-spec.ts`: 7 passed, 1 skipped in 42.87s.
+  - Full backend unit suite: 19 suites / 132 tests passed in 44.93s.
+  - Workspace typecheck (`corepack pnpm typecheck`): 0 errors.
+  - Workspace lint (`corepack pnpm lint`): 0 errors, 0 warnings.
+  - `git diff --check`: 0 errors.
   - Pushed to `origin/thviet`.
