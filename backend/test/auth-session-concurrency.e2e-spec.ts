@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { HttpStatus } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaClient } from '@prisma/client';
 import { Client } from 'pg';
@@ -31,6 +31,7 @@ function assertLoopbackTestDatabase(connectionString: string, variableName: stri
 async function waitForBarrierWaiter(
   monitor: Client,
   applicationName: string,
+  relatedApplicationNames: string[],
   barrierPid: number,
   isSettled: () => boolean,
 ): Promise<void> {
@@ -43,7 +44,6 @@ async function waitForBarrierWaiter(
       WHERE activity.application_name = $1
         AND activity.datname = current_database()
         AND activity.pid <> pg_backend_pid()
-        AND activity.state = 'active'
         AND activity.wait_event_type = 'Lock'
         AND pg_blocking_pids(activity.pid) @> ARRAY[$2::int]
     `, [applicationName, barrierPid]);
@@ -54,7 +54,97 @@ async function waitForBarrierWaiter(
     }
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  throw new Error(`Expected one ${applicationName} connection blocked by the test user-row barrier; observed ${waiting}.`);
+  const diagnostics = await monitor.query<{
+    applicationName: string | null;
+    state: string | null;
+    waitEventType: string | null;
+    waitEvent: string | null;
+    blockers: number[];
+    querySnippet: string | null;
+  }>(`
+    SELECT activity.application_name AS "applicationName", activity.state,
+      activity.wait_event_type AS "waitEventType", activity.wait_event AS "waitEvent",
+      pg_blocking_pids(activity.pid) AS blockers, LEFT(activity.query, 240) AS "querySnippet"
+    FROM pg_stat_activity AS activity
+    WHERE activity.datname = current_database()
+      AND activity.pid <> pg_backend_pid()
+      AND (activity.application_name = ANY($1::text[])
+        OR pg_blocking_pids(activity.pid) @> ARRAY[$2::int])
+    ORDER BY activity.application_name, activity.pid
+  `, [relatedApplicationNames, barrierPid]);
+  const details = diagnostics.rows.map(({ applicationName, state, waitEventType, waitEvent, blockers, querySnippet }) =>
+    `${applicationName ?? '<unset>'}:${state ?? '<unset>'}:${waitEventType ?? '<none>'}/${waitEvent ?? '<none>'}`
+      + ` blockers=[${blockers.join(',')}], query=${querySnippet ?? '<none>'}`);
+  throw new Error(
+    `Expected one ${applicationName} connection blocked by test barrier PID ${barrierPid}; observed ${waiting}. `
+    + `Relevant pg_stat_activity rows: ${details.join(' | ') || '<none>'}`,
+  );
+}
+
+async function waitForLogoutBehindRefresh(
+  monitor: Client,
+  logoutApplicationName: string,
+  refreshApplicationName: string,
+  relatedApplicationNames: string[],
+  barrierPid: number,
+  isSettled: () => boolean,
+): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  let waiting = 0;
+  while (Date.now() < deadline) {
+    const result = await monitor.query<{ waiting: number }>(`
+      WITH refresh_waiter AS (
+        SELECT refresh.pid
+        FROM pg_stat_activity AS refresh
+        WHERE refresh.application_name = $2
+          AND refresh.datname = current_database()
+          AND refresh.pid <> pg_backend_pid()
+          AND refresh.wait_event_type = 'Lock'
+          AND pg_blocking_pids(refresh.pid) @> ARRAY[$3::int]
+      )
+      SELECT COUNT(*)::int AS waiting
+      FROM pg_stat_activity AS logout
+      WHERE logout.application_name = $1
+        AND logout.datname = current_database()
+        AND logout.pid <> pg_backend_pid()
+        AND logout.wait_event_type = 'Lock'
+        AND EXISTS (
+          SELECT 1 FROM refresh_waiter
+          WHERE pg_blocking_pids(logout.pid) @> ARRAY[refresh_waiter.pid]
+        )
+    `, [logoutApplicationName, refreshApplicationName, barrierPid]);
+    waiting = result.rows[0]?.waiting ?? 0;
+    if (waiting === 1) return;
+    if (isSettled()) {
+      throw new Error('Auth logout call settled before it queued behind the refresh request blocked by the user-row barrier.');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const diagnostics = await monitor.query<{
+    applicationName: string | null;
+    state: string | null;
+    waitEventType: string | null;
+    waitEvent: string | null;
+    blockers: number[];
+    querySnippet: string | null;
+  }>(`
+    SELECT activity.application_name AS "applicationName", activity.state,
+      activity.wait_event_type AS "waitEventType", activity.wait_event AS "waitEvent",
+      pg_blocking_pids(activity.pid) AS blockers, LEFT(activity.query, 240) AS "querySnippet"
+    FROM pg_stat_activity AS activity
+    WHERE activity.datname = current_database()
+      AND activity.pid <> pg_backend_pid()
+      AND (activity.application_name = ANY($1::text[])
+        OR pg_blocking_pids(activity.pid) @> ARRAY[$2::int])
+    ORDER BY activity.application_name, activity.pid
+  `, [relatedApplicationNames, barrierPid]);
+  const details = diagnostics.rows.map(({ applicationName, state, waitEventType, waitEvent, blockers, querySnippet }) =>
+    `${applicationName ?? '<unset>'}:${state ?? '<unset>'}:${waitEventType ?? '<none>'}/${waitEvent ?? '<none>'}`
+      + ` blockers=[${blockers.join(',')}], query=${querySnippet ?? '<none>'}`);
+  throw new Error(
+    `Expected ${logoutApplicationName} to wait behind ${refreshApplicationName}, which is blocked by barrier PID ${barrierPid}; `
+    + `observed ${waiting}. Relevant pg_stat_activity rows: ${details.join(' | ') || '<none>'}`,
+  );
 }
 
 function captureOutcome<T>(promise: Promise<T>, onSettled: () => void): Promise<Outcome<T>> {
@@ -70,6 +160,7 @@ describe('Auth session refresh/logout concurrency with PostgreSQL', () => {
   const refreshApplicationName = `auth-refresh-${suffix}`;
   const logoutApplicationName = `auth-logout-${suffix}`;
   const barrierApplicationName = `auth-barrier-${suffix}`;
+  const monitorApplicationName = `auth-monitor-${suffix}`;
   let admin: PrismaClient | undefined;
   let seedDb: PrismaClient | undefined;
   let refreshDb: PrismaClient | undefined;
@@ -78,7 +169,6 @@ describe('Auth session refresh/logout concurrency with PostgreSQL', () => {
   let schemaCreated = false;
 
   beforeAll(async () => {
-    await ConfigModule.forRoot({ envFilePath: '.env' });
     const configuredUrl = process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
     if (!configuredUrl) throw new Error('DATABASE_URL_UNPOOLED or DATABASE_URL is required for integration tests.');
     isolatedUrl = assertLoopbackTestDatabase(configuredUrl, 'database URL');
@@ -130,6 +220,17 @@ describe('Auth session refresh/logout concurrency with PostgreSQL', () => {
     refreshDb = new PrismaClient({ datasourceUrl: serviceUrl(refreshApplicationName) });
     logoutDb = new PrismaClient({ datasourceUrl: serviceUrl(logoutApplicationName) });
     await Promise.all([seedDb.$connect(), refreshDb.$connect(), logoutDb.$connect()]);
+
+    const [refreshIdentity, logoutIdentity] = await Promise.all([
+      refreshDb.$queryRaw<{ applicationName: string; schemaName: string }[]>`
+        SELECT current_setting('application_name') AS "applicationName", current_schema() AS "schemaName"
+      `,
+      logoutDb.$queryRaw<{ applicationName: string; schemaName: string }[]>`
+        SELECT current_setting('application_name') AS "applicationName", current_schema() AS "schemaName"
+      `,
+    ]);
+    expect(refreshIdentity[0]).toMatchObject({ applicationName: refreshApplicationName, schemaName: schema });
+    expect(logoutIdentity[0]).toMatchObject({ applicationName: logoutApplicationName, schemaName: schema });
   }, 60_000);
 
   afterAll(async () => {
@@ -187,7 +288,11 @@ describe('Auth session refresh/logout concurrency with PostgreSQL', () => {
     barrierUrl.searchParams.set('schema', schema);
     barrierUrl.searchParams.set('application_name', barrierApplicationName);
     const barrier = new Client({ connectionString: barrierUrl.toString() });
+    const monitorUrl = new URL(barrierUrl);
+    monitorUrl.searchParams.set('application_name', monitorApplicationName);
+    const monitor = new Client({ connectionString: monitorUrl.toString() });
     let barrierConnected = false;
+    let monitorConnected = false;
     let transactionOpen = false;
     let refreshSettled = false;
     let logoutSettled = false;
@@ -197,6 +302,8 @@ describe('Auth session refresh/logout concurrency with PostgreSQL', () => {
     try {
       await barrier.connect();
       barrierConnected = true;
+      await monitor.connect();
+      monitorConnected = true;
       await barrier.query('BEGIN');
       transactionOpen = true;
       const locked = await barrier.query(`SELECT id FROM "${schema}".users WHERE id = $1::uuid FOR UPDATE`, [user.id]);
@@ -206,10 +313,18 @@ describe('Auth session refresh/logout concurrency with PostgreSQL', () => {
       expect(Number.isInteger(barrierPid)).toBe(true);
 
       refreshOutcome = captureOutcome(refreshService.refresh(rawRefreshToken), () => { refreshSettled = true; });
-      await waitForBarrierWaiter(barrier, refreshApplicationName, barrierPid, () => refreshSettled);
+      const trackedApplications = [refreshApplicationName, logoutApplicationName, barrierApplicationName, monitorApplicationName];
+      await waitForBarrierWaiter(monitor, refreshApplicationName, trackedApplications, barrierPid, () => refreshSettled);
 
       logoutOutcome = captureOutcome(logoutService.logout(rawRefreshToken), () => { logoutSettled = true; });
-      await waitForBarrierWaiter(barrier, logoutApplicationName, barrierPid, () => logoutSettled);
+      await waitForLogoutBehindRefresh(
+        monitor,
+        logoutApplicationName,
+        refreshApplicationName,
+        trackedApplications,
+        barrierPid,
+        () => logoutSettled,
+      );
 
       await barrier.query('COMMIT');
       transactionOpen = false;
@@ -224,12 +339,18 @@ describe('Auth session refresh/logout concurrency with PostgreSQL', () => {
       await expect(refreshService.refresh(refreshResult.value.refreshToken))
         .rejects.toMatchObject({ status: HttpStatus.UNAUTHORIZED });
     } finally {
-      if (transactionOpen) await barrier.query('ROLLBACK').catch(() => undefined);
-      const pending: Promise<unknown>[] = [];
-      if (refreshOutcome) pending.push(refreshOutcome);
-      if (logoutOutcome) pending.push(logoutOutcome);
-      await Promise.all(pending);
-      if (barrierConnected) await barrier.end();
+      try {
+        if (transactionOpen) await barrier.query('ROLLBACK').catch(() => undefined);
+        const pending: Promise<unknown>[] = [];
+        if (refreshOutcome) pending.push(refreshOutcome);
+        if (logoutOutcome) pending.push(logoutOutcome);
+        await Promise.all(pending);
+      } finally {
+        const connectionsToClose: Promise<void>[] = [];
+        if (monitorConnected) connectionsToClose.push(monitor.end());
+        if (barrierConnected) connectionsToClose.push(barrier.end());
+        await Promise.allSettled(connectionsToClose);
+      }
     }
   }, 20_000);
 });
