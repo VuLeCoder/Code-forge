@@ -8,9 +8,9 @@ Tạo image và chuẩn bị hướng dẫn không chứng minh dịch vụ clou
 
 ### Bằng chứng hiện tại
 
-Commit code mới nhất trên `thviet` là `edb0ced` (durable Git push journal/audit). Hosted workflow [40147767567](https://github.com/VuLeCoder/Code-forge/actions/runs/40147767567) succeeded trên commit này qua backend unit/E2E, lint, typecheck, build, browser/full-stack E2E, Docker API/migration image checks, migration-image Prisma check/deploy và `git diff --check`.
+Commit code mới nhất trên `thviet` là `9c2eb81` (`test: cover valid receive-pack lock cancellation`). Hosted workflow [40162474987](https://github.com/VuLeCoder/Code-forge/actions/runs/40162474987) succeeded trên đúng commit này, gồm backend/frontend gates, Docker API/migration image smoke và migration checks.
 
-Local verification trên `edb0ced`: backend unit 15 suites/93 tests và PostgreSQL/Git E2E 8 suites/29 tests; Prisma validate/generate, workspace lint/typecheck/build và `git diff --check` đều đạt. API và migration Docker images đã build; migration image áp dụng đủ 7 migration vào PostgreSQL disposable không mount volume, API readiness trả HTTP 200. Các container kiểm thử đã được dừng/gỡ; không đụng container hoặc volume phát triển có sẵn. `docker compose config` đã được kiểm tra nhưng Compose runtime chưa khởi chạy.
+Current code-series verification includes the latest hosted workflow gates on `9c2eb81`; an isolated Linux test specifically proves cancellation of a valid in-flight receive-pack after lock loss. A unique-project Compose runtime smoke applied 7/7 migrations and returned API readiness 200. Cloud runtime has not been deployed.
 
 Chưa có cloud deployment hoặc smoke test: nâng cấp từ snapshot production-like, proxy/TLS, Git HTTP trực tiếp Render, cold start, mất source khi restart và quy trình phục hồi vẫn chưa được nghiệm thu. Không suy ra cloud acceptance từ CI hay local image smoke.
 
@@ -23,6 +23,14 @@ Chỉ đánh dấu cloud release đạt sau khi điền kết quả thật theo 
 - Neon giữ metadata PostgreSQL. `DATABASE_URL` dùng pooled endpoint cho API; `DATABASE_URL_UNPOOLED` dùng direct endpoint cho advisory lock và Prisma migration. Migration chạy riêng bằng `backend/Dockerfile.migrate` trước khi mở traffic phiên bản mới.
 - Public clone/fetch/push URL dùng `GIT_PUBLIC_BASE_URL` trỏ thẳng tới Render `/api/v1`; ví dụ `https://<render-host>/api/v1`. URL này tránh giới hạn payload 4,5 MB của Vercel Functions. Chỉ là cấu hình mẫu; URL thực phải được kiểm tra với `git ls-remote`, clone, fetch và push.
 - Cookie web cần TLS và domain/origin đúng. Không đặt PAT trong URL hoặc command line có thể lưu vào history.
+
+### Giới hạn cloud đã đối chiếu tài liệu chính thức (2026-10-25)
+
+- Vercel Functions giới hạn request body **và** response body ở 4.5 MB; request vượt ngưỡng trả HTTP 413. Vì vậy Git Smart HTTP phải đi thẳng Render, không qua Vercel Function. [Vercel Functions Limits](https://vercel.com/docs/functions/limitations)
+- Render Free web services spin down sau 15 phút không có traffic; lúc spin down thay đổi local filesystem bị mất. Filesystem cũng mất dữ liệu khi restart/redeploy; Free không hỗ trợ persistent disk. PostgreSQL free của Render hết hạn sau 30 ngày, nên kế hoạch demo dùng Neon cho metadata. [Render Free](https://render.com/docs/free), [Render Persistent Disks](https://render.com/docs/disks)
+- Neon hướng dẫn dùng pooled URL (`-pooler`) cho ứng dụng và direct/unpooled URL cho Prisma CLI/migrations. Repo hiện dùng Prisma 6: `DATABASE_URL` là runtime URL và `DATABASE_URL_UNPOOLED` được cấu hình qua `directUrl`; advisory lock cũng cần URL direct. [Neon Prisma guide](https://neon.com/docs/guides/prisma), [Neon connection pooling](https://neon.com/docs/connect/connection-pooling), [Prisma v6 data sources](https://www.prisma.io/docs/orm/v6/prisma-schema/overview/data-sources)
+
+Các giới hạn này là tài liệu nền tảng, không phải bằng chứng rằng cloud đã triển khai hoặc Git transport đã smoke-test thành công.
 
 ## Biến môi trường backend
 

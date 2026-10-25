@@ -1,16 +1,24 @@
 # Code Forge — verified acceptance task board
 
-State baseline: branch `thviet`, pushed commit `cdb2d1f` adds admin keyboard-
-accessibility coverage. Hosted run `40158529985` completed successfully for
-this exact commit. Parent commit `d9b728f` also passed hosted run `40158089595`
-after fixing the metadata-failure reconciliation regression. CI success is not
-cloud-release acceptance.
+State baseline: branch `thviet`, pushed commit `9c2eb81` adds valid-pack
+receive-pack lock-loss coverage. Hosted run #56
+([40162474987](https://github.com/VuLeCoder/Code-forge/actions/runs/40162474987))
+passed all workflow gates on that exact commit. Earlier runs #54
+(`40159331450`) and #55 (`40160123068`) failed at backend E2E; their exact
+failure cause remains unknown because GitHub gates logs behind sign-in. Parent
+`6ad5ad1` passed hosted run `40158875902`; earlier `d9b728f` and `cdb2d1f` also
+passed. CI success is not cloud-release acceptance.
 This board separates verified implementation from missing acceptance evidence.
 
 ## Verified now
 
-- P0 hosted regression and Docker API/migration image checks pass. Local Compose
-  configuration is valid, but the Compose stack has not been started.
+- P0 latest hosted workflow `40162474987` passed all gates on `9c2eb81`; earlier
+  backend E2E failures are retained as historical and unexplained. Docker
+  API/migration image checks pass.
+  Compose runtime smoke now passes on a unique project: 7/7 migrations applied,
+  backend healthcheck and `GET /api/v1/health/ready` returned 200. Its
+  containers/network were stopped; the two test-owned project volumes remain
+  and no existing container/volume was touched.
 - P1 auth, session, invitation, REST error contract, and OpenAPI work is present
   with unit and PostgreSQL/HTTP coverage. A further security audit found a
   locked-PAT read race; commit `a49656d` now rechecks user status on the final
@@ -29,14 +37,21 @@ This board separates verified implementation from missing acceptance evidence.
   exit. Backend unit passes 16 suites / 110 tests; backend E2E passes 9 suites /
   33 tests locally (Jest `--forceExit` required after its open-handle warning).
   Backend lint, typecheck, build, and hosted run `40158089595` pass.
-- Test-only worktrees now contain advisory-lock connection-loss and
-  child-process merge-crash E2E cases. Neither is accepted until run green
-  against isolated PostgreSQL. The crash fixture's final cleanup ordering is
-  corrected, but the post-fix focused run is pending.
+- The repository-lock connection-loss test passed on isolated PostgreSQL after
+  fixing the one-shot pg client error listener in `b538c65`. It proves only
+  cancellation while receive-pack waits for pack input; it does not prove
+  ref safety during a valid in-flight push. Commit `b51c88c` makes its Git
+  commit fixture independent of global identity. The separate valid-pack test
+  is now integrated and the latest hosted workflow is green.
+  A separate child-process merge-crash E2E passed once in its isolated worktree,
+  but the process-tree correction still fails locally: after the API process
+  tree exited, PostgreSQL retained one advisory-lock waiter for 60 seconds.
+  This remains unaccepted/unintegrated; do not force-terminate that session on
+  the success path or infer the exact cause from Windows/Docker behavior.
 - P5 PR/admin UI has browser coverage. The new admin keyboard/dialog-focus test
   passes at desktop and 375px widths (2/2); frontend lint passes. Manual
-  screen-reader and physical-device review remain outstanding; exact-head CI
-  `40158529985` passed.
+  screen-reader and physical-device review remain outstanding; latest exact
+  hosted run `40162474987` passes the frontend/browser gates.
 - P6 admin bootstrap, lock/unlock, private-source denial, audit filtering,
   restore, and database-backed maintenance batch/retention/idempotence coverage
   are present. Issue #5 remains open because permanently ambiguous journal
@@ -80,27 +95,31 @@ actually disappears between the Git ref CAS and PostgreSQL metadata commit.
 
 ```mermaid
 flowchart TD
-  A[Lock connection-loss test] --> D[Full failure-mode regression]
-  B[Real child-process crash/restart test] --> D
-  C[Ambiguous operation resolution design] --> E[Reviewed implementation + audit]
-  D --> F[Reconcile docs and CI evidence]
-  F --> G[Isolated Compose runtime smoke]
-  G --> H[Cloud resources and release smoke]
-  U[Owner selects providers, hostname, audience, accepts ephemeral source] --> H
-  H --> I[Release review and handoff]
+  A[Narrow empty receive-pack lock-loss coverage] --> D[Full failure-mode regression]
+  B[Merge process-crash/restart proof] --> D
+  E[120s grace tests accepted] --> D
+  F[Valid-pack lock-loss test] --> D
+  C[Ambiguous journal operator workflow] --> J[Cloud/release readiness]
+  D --> G[Reconcile docs and CI evidence]
+  H[Isolated Compose smoke accepted] --> J
+  G --> J
+  I[Owner selects providers, hostname, audience, accepts ephemeral source] --> J
+  J --> K[Release review and handoff]
 ```
 
 | ID | Owner | Scope and dependencies | Acceptance invariant |
 | --- | --- | --- | --- |
-| A | Backend test agent; Codex reviews | Implemented in `E:\Prj1-worktrees\lock-loss-acceptance` on `codex/lock-loss-acceptance`; only `backend/test/repository-lock.e2e-spec.ts` changed. Static setup/typecheck/lint passed, but test execution is blocked by missing `DATABASE_URL_UNPOOLED` and unreachable local test port. Test currently sends no pack bytes and only covers receive-pack waiting for input; it does not prove ref safety mid-push. Not accepted until the scoped behavior passes on isolated DB; broaden P3 proof with a real controlled pack before claiming in-flight ref protection. | Narrow claim: while a Git receive-pack child waits for pack input, terminating the lock-owning DB connection cancels the child and releases its resources; broader active-push/ref-update invariant remains unproven. |
-| B | Backend test agent; Codex integrates | Implemented in `E:\Prj1-worktrees\merge-restart-acceptance`, branch `codex/merge-restart-acceptance`. Final cleanup now terminates/waits for child sessions before barrier release. Post-fix E2E is not verified because `DATABASE_URL` was missing; preserve the worktree and do not accept until green. | Evidence proves the child process actually exited before metadata commit; target ref and durable journal remain consistent; restart reconciliation completes metadata/audit once; retry does not make a second merge; fetch sees the same two-parent commit. A DB-trigger exception alone does not satisfy this task. |
-| C | Codex lead + security reviewer | Design a protected resolution command for permanently ambiguous/cross-type operations before implementation. Keep the current fail-closed runbook until a reviewed contract exists. | Explicit operator authorization, evidence-based allowed decisions, optimistic concurrency/idempotency, immutable audit, fail-closed unknown outcomes, no manual SQL/ref repair, and tests for unauthorized/stale/ambiguous cases are specified and security-reviewed. |
-| D | Codex QA | Inventory remaining P3/P4 failure cases and run the full acceptance suite after A/B. Do not claim crash or lock-loss coverage from mocks or DB trigger failures. | Every required real Git/PostgreSQL invariant has named test/output on one commit; no unexplained hosted/local gate discrepancy; `git diff --check` passes. |
-| E | Codex lead | Reconcile `implementation-status.md`, `next-actions.md`, `remaining-work-breakdown.md`, deployment/security records, and issue drafts to local commit `a49656d` and the latest hosted run after push. Preserve existing owner-authored text and distinguish fact from estimate. | No stale “6c921e5/current run in progress”, branch-byte fix-in-progress, or missing maintenance E2E claim; open cloud/manual/operator tasks remain explicitly pending. |
-| F | Codex QA | Inspect Compose mounts and project naming first; run stack only with a unique isolated Compose project and test-owned resources. Never reset, remove, or reuse an existing volume/database. | API and database health checks pass; ports are loopback-only; teardown affects only explicitly identified test-owned containers/volumes. Stop before startup if isolation cannot be proven. |
-| G | User + Codex | User selects/creates GitHub, Vercel, Render, Neon resources, demo hostname and access audience, then provides interactive account access without sharing secrets in chat. | Resource identities and canonical origins are known; secrets remain in provider settings; source-loss warning is accepted. |
-| H | Codex release | On approved cloud resources, run direct Render Git HTTPS (including payload >4.5 MB), auth/private/public, cold start, restart/source-loss, recovery, PR/admin, TLS/proxy and backup/restore smoke. | Checklist evidence records URL, release commit and results; source reset/recovery is actually rehearsed; no CI/local result is presented as cloud evidence. |
-| I | User + Codex | Review the smoke checklist and recovery behavior before publishing the demo URL. | Owner explicitly approves release sharing after the source-loss limitations are visible and understood. |
+| A | Backend test agent; Codex reviews | Integrated as `b538c65`, fixture follow-up `b51c88c`. Focused PostgreSQL test passed 2/2 and full backend E2E passed 9 suites / 34 tests locally with Git global identity disabled. The test sends no pack bytes and does not prove ref safety during a valid push. | Narrow cancellation coverage only. Do not claim active-push/ref-update safety without the separate valid-pack test. |
+| B | Backend test agent; Codex integrates | In `E:\Prj1-worktrees\merge-restart-acceptance`, branch `codex/merge-restart-acceptance`, only `backend/test/pull-requests.e2e-spec.ts` changed. After process-tree kill no host API/ts-node process remained, but focused E2E failed after 73.4s: PostgreSQL retained one active advisory-lock waiter (`client_addr=172.17.0.1`) after 60s. This is consistent with Windows host-to-Docker teardown or harness behavior, but evidence cannot distinguish those from a product connection-lifecycle defect; unaccepted and unintegrated. | Prove process tree exit and natural DB session disappearance before metadata commit; restart reconciliation completes metadata/audit once; retry creates no second merge; fetch sees the two-parent commit. No success-path `pg_terminate_backend`. |
+| C | Codex lead + security reviewer; owner decisions required | Design a protected operator workflow for permanently ambiguous/cross-type journals. Keep current fail-closed behavior and runbook until an approved contract exists. | Explicit operator authorization, evidence-based allowed decisions, optimistic concurrency/idempotency, immutable audit, fail-closed unknown outcomes, no manual SQL/ref repair, and tests. Owner must decide ADMIN vs operator role and one vs two approvers before implementation. |
+| D | Codex QA | Run the complete P3/P4 failure matrix after A/B/F evidence is recorded; current hosted CI is green. Keep the unexplained older CI failures separate from current acceptance. Do not infer crash or active-push coverage from mocks or DB-trigger errors. | Each required real Git/PostgreSQL invariant has named test/output on one commit; current hosted/local evidence is recorded; historical failures are labeled unknown; `git diff --check` passes. |
+| E | Codex QA + `/root/pending_reconcile_grace_tests` | Both review findings are in ancestor `c944f9a`, present in `b51c88c`. Unit suite passed 15/15; maintenance PostgreSQL E2E file passed 2/2 on isolated data. | Accepted: cutoff is 119–121s; no `createdAt` filter on `NEEDS_RECONCILIATION`; a recent row is processed immediately. |
+| F | Backend test agent; Codex integrates | Integrated in `9c2eb81`, `backend/test/repository-lock.e2e-spec.ts`. It creates a feature ref using the zero old OID, generates a real PACK, and blocks in temporary `pre-receive`. Focused disposable Linux runner passed 1/1; Windows local suite passed 2/2 with the POSIX-only case skipped; independent follow-up security review found no remaining actionable issue. Hosted run #56 passed on the integrated commit. | Linux runtime proves lock loss cancels valid receive-pack with HTTP 503, leaves feature ref absent and main unchanged, releases the lock connection, and exits Git plus hook processes. Windows skip is not counted as runtime proof. |
+| G | Codex lead | Reconcile implementation/status/next-actions/deployment/security/issue-draft records to current `9c2eb81`, run #56, and verified local test evidence. Preserve owner-authored text; distinguish historic from current results. | Current CI and local evidence are accurate; process-crash acceptance, Compose state, and open cloud/operator tasks remain explicit; `git diff --check` passes. |
+| H | Codex QA | Complete: unique-project Compose runtime, loopback ports, migrations 7/7, backend health/readiness 200. Containers/network were stopped without `-v`; test-owned volumes retained, existing volumes untouched. | Local Compose runtime smoke accepted. |
+| I | User + Codex | Select/authorize GitHub, Vercel, Render, Neon resources; decide demo hostname/audience and explicitly accept ephemeral Git source storage. GitHub interactive sign-in is optional if the owner wants diagnosis of historical failed runs. Do not share credentials in chat. | Resource identities and canonical origins known; source-loss warning accepted. |
+| J | Codex release | On owner-approved cloud resources, test direct Render Git HTTPS including >4.5 MB, auth/private/public, cold start, restart/source-loss, recovery, PR/admin, TLS/proxy and backup/restore. | Checklist records URL, release commit and evidence; source reset/recovery rehearsal actually passes; no local/CI result is presented as cloud evidence. |
+| K | User + Codex | Review the smoke checklist and recovery behavior before sharing the demo URL. | Owner explicitly approves sharing after source-loss limitations are visible and understood. |
 
 ## Issue tracker
 
@@ -109,7 +128,9 @@ Live GitHub API recheck on 2026-10-25 found issues #3 (PR/Git recovery), #4
 updates as drafts unless the owner selects an issue to comment on. Do not create
 duplicates; issue #5's remaining operator-resolution gap should first be
 described as a scoped draft under that existing issue or a new issue only after
-checking whether its owner wants the extra tracking item.
+checking whether its owner wants the extra tracking item. A separate draft for
+the broader push-and-merge recovery workflow is at
+`docs/operations/issue-draft-ambiguous-git-journals.md`; it is not posted.
 
 ## Agent execution and handoff record
 

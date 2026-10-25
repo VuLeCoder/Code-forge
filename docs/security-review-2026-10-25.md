@@ -40,8 +40,8 @@ No confirmed exploitable authentication bypass, private-repository disclosure, c
 
 ### Follow-up review: session and merge journal races
 
-- **Finding 1 — P2 session lifecycle race:** Login/refresh could pass the ACTIVE check before an admin lock, then create/rotate a session after the admin had revoked current sessions. If later unlocked, that session could become usable. The working fix acquires the `users` row `FOR UPDATE` and rechecks ACTIVE inside login/refresh transactions; admin status mutations acquire the same target-row lock before updating/revoking. Final-admin locking still uses stable ordering. Auth/admin unit tests pass, and deterministic PostgreSQL E2E queues login and refresh behind an explicit row lock; the targeted suite passes. The change is not yet committed/hosted.
-- **Finding 2 — P2 repository write-fence gap:** An unresolved merge operation did not block subsequent pushes/lifecycle writes, allowing non-default target refs to move before merge reconciliation. Normal repository fences now check both push and merge journals; reconciliation uses explicit opposite-type checks and freezes cross-type ambiguous operations rather than attributing or rolling back refs. Targeted PostgreSQL/Git E2E proves a descendant push is rejected with the ref unchanged until reconciliation, then succeeds afterward. Unit tests pass; changes are not yet committed/hosted.
+- **Finding 1 — P2 session lifecycle race:** Login/refresh could pass the ACTIVE check before an admin lock, then create/rotate a session after the admin had revoked current sessions. If later unlocked, that session could become usable. Commit `298fb62` acquires the `users` row `FOR UPDATE` and rechecks ACTIVE inside login/refresh transactions; admin status mutations acquire the same target-row lock before updating/revoking. Final-admin locking still uses stable ordering. Auth/admin unit tests pass, and deterministic PostgreSQL E2E queues login and refresh behind an explicit row lock; the latest hosted workflow `40162474987` passes these gates.
+- **Finding 2 — P2 repository write-fence gap:** An unresolved merge operation did not block subsequent pushes/lifecycle writes, allowing non-default target refs to move before merge reconciliation. In `298fb62`, normal repository fences check both push and merge journals; reconciliation uses explicit opposite-type checks and freezes cross-type ambiguous operations rather than attributing or rolling back refs. Targeted PostgreSQL/Git E2E proves a descendant push is rejected with the ref unchanged until reconciliation, then succeeds afterward. Unit tests pass; latest hosted workflow `40162474987` passes all gates.
 - **Cloud boundary:** These local fixes do not establish cloud acceptance. The Vercel/Render trusted-proxy, direct Render Git and source-reset checks below remain required.
 
 - Verify Vercel/Render trusted-proxy settings against real cloud requests, including attempts to spoof forwarded-IP headers. Vercel documents that it overwrites `X-Forwarded-For` to prevent IP spoofing: [request headers](https://vercel.com/docs/headers/request-headers). This documentation is not a substitute for a smoke test of the configured deployment.
@@ -59,4 +59,28 @@ No confirmed exploitable authentication bypass, private-repository disclosure, c
 
 ## Evidence boundaries
 
-At `edb0ced`, local backend unit tests pass (15 suites/93 tests), isolated PostgreSQL/Git E2E passes (8 suites/29 tests), workspace lint/typecheck/build pass, and hosted workflow `40147767567` succeeded. The test DB was a new disposable PostgreSQL 17 container with no mounted volume; no existing container or volume was reset. A focused AGY review was retried with user-authorized MCP access in an isolated read-only worktree, but timed out at 120 seconds without usable findings; no global permission or Windows/Antigravity setting was changed. The project includes `scripts/agy.ps1` to pin local AGY CLI calls to `gemini-3.8-flash-medium`; the Codex AGY bridge does not expose a model selector.
+At `edb0ced`, local backend unit tests pass (15 suites/93 tests), isolated PostgreSQL/Git E2E passes (8 suites/29 tests), workspace lint/typecheck/build pass, and hosted workflow `40147767567` succeeded. Commit `298fb62` passes local backend unit (15 suites/100 tests), targeted PostgreSQL/Git E2E (2 suites/5 tests), workspace lint/typecheck/build, and Compose config validation; hosted run `40149241856` is running. The test DBs were disposable PostgreSQL 17 containers with no mounted volume; they were stopped/removed. AGY attempts: the collaboration bridge timed out after 300 seconds; an async run failed while loading an invalid Postman MCP schema; the final direct CLI attempt timed out after partial lint/Playwright output and made no changes. Both related worktrees are clean and preserved. No global permission or Windows/Antigravity setting was changed. The project includes `scripts/agy.ps1` to pin local AGY CLI calls to `gemini-3.8-flash-medium`; the Codex AGY bridge does not expose a model selector.
+
+### Current audit update (2026-10-25, HEAD `9c2eb81`)
+
+- Hosted workflow `40162474987` succeeded on the current pushed commit and all
+  workflow gates passed.
+- Independent Codex read-only static audit found no confirmed actionable
+  vulnerability in the reviewed auth/session, invitation, Git push/lock, PR
+  merge/reconciliation, admin, or audit paths. It did not exercise cloud proxy,
+  TLS, storage reset, or process/connection-loss behavior.
+- AGY was asked for an independent read-only review with
+  `dangerously_skip_permissions=false`; it timed out after 120 seconds without
+  usable findings. This is an incomplete review, not a pass. No permission
+  bypass or persistent permission change was made.
+- `9c2eb81` includes branch ref UTF-8 byte-limit enforcement and boundary tests;
+  the older “fix in progress” finding is resolved in current source.
+- A valid-pack receive-pack lock-loss case is now integrated in
+  `backend/test/repository-lock.e2e-spec.ts` and passed on an isolated Linux
+  runner (1/1), as well as hosted CI. It asserts HTTP 503, unchanged refs,
+  release of the lock connection, and exit of Git and its hook. The independent
+  security review found no remaining actionable issue in that test. This does
+  not prove the separate backend process-crash/restart path.
+- Still required: abrupt backend process-kill/restart acceptance, direct
+  Render Git/proxy checks, source-reset recovery, and manual accessibility
+  review. Keep these risks visible until separately verified.

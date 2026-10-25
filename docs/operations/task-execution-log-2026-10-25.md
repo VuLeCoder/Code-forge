@@ -4,11 +4,14 @@ Purpose: preserve evidence, errors, and exact next steps so another AI or a
 future `/handoff` can continue without reconstructing undocumented state.
 Never include credentials, tokens, cookies, database URLs, source code excerpts,
 or private cloud values.
+This is a chronological log: entries labeled **historical/superseded** are
+snapshots, not current status. Current acceptance state is in the task board.
 
-## T-BASE — verify current baseline and acceptance gaps
+## T-BASE — historical baseline snapshot (superseded)
 
 - Owner: Codex lead.
-- Status: complete (read-only audit).
+- Status: completed read-only audit at that earlier point; superseded by later
+  run/status entries below.
 - Branch/worktree: `thviet`, `E:\Prj1`, HEAD `9f1eb0b4d168227920465597caaf0ae846e699d0`.
 - Changed paths: none in this task.
 - Evidence: GitHub Actions run `40153297115` returned `completed/success` on the
@@ -93,10 +96,10 @@ or private cloud values.
   NEEDS_RECONCILIATION immediately where possible. Independent review found no
   actionable safety issue; exact-head CI `40158089595` passed.
 
-## T-CRASH — crash/restart acceptance
+## T-CRASH — historical crash/restart snapshot (superseded)
 
 - Owner: `/root/merge_restart_test`; Codex lead reviews/integrates.
-- Status: test implementation is not accepted yet. The final cleanup-order fix
+- Status at that earlier snapshot: test implementation was not accepted. The final cleanup-order fix
   passed backend typecheck and `git diff --check`; the focused PostgreSQL E2E
   could not be rerun because `DATABASE_URL` was unavailable in the agent shell.
   No commit or push.
@@ -158,26 +161,30 @@ or private cloud values.
   `backend test:e2e`. The process-crash E2E and advisory-lock-loss E2E are
   separate worktree tasks and are not evidence for one another.
 
-## T-LOCK-LOSS — advisory-lock connection loss during Git
+## T-LOCK-LOSS — advisory-lock connection loss during Git (historical snapshot)
+
+> Superseded status note: the later valid-pack regression is accepted and hosted
+> in `9c2eb81`; this section records the earlier narrower test and its then-
+> pending CI state only.
 
 - Owner: `/root/lock_loss_e2e`; Codex lead reviews/integrates.
-- Status: test-only implementation is present but not accepted; it has not run
-  against PostgreSQL because `DATABASE_URL_UNPOOLED` is missing and the isolated
-  local test port is unreachable. No commit or push.
+- Status: scoped behavior verified and fix pushed as `b538c65`; hosted CI pending.
 - Worktree: `E:\Prj1-worktrees\lock-loss-acceptance`, branch
-  `codex/lock-loss-acceptance`, baseline `9f1eb0b`.
-- Owned file: `backend/test/repository-lock.e2e-spec.ts` only.
+  `codex/lock-loss-acceptance`, baseline `9f1eb0b`; implementation integrated to `thviet`.
+- Changed files: `backend/src/repositories/repository-lock.service.ts`,
+  `backend/src/repositories/repository-lock.service.spec.ts`, and
+  `backend/test/repository-lock.e2e-spec.ts`.
 - Change: uses a real Git receive-pack child and terminates only the
   lock-owning PostgreSQL backend, then asserts child cancellation, unchanged
   target ref, and pool connection release. The test sends no pack bytes; its
   title/comments now narrowly claim cancellation while receive-pack is waiting
-  for input, not safety during an active push. Production code was not changed.
-- Evidence: Prisma generate, backend typecheck, targeted lint, and diff-check
-  passed. Focused E2E did not pass or fail at runtime; attempts stopped at
-  missing test database configuration and later `ENOSPC` while writing the
-  Jest cache. Independent review confirms this does not prove cancellation
-  during a valid push/ref update. Run against an isolated `*_test` database
-  before accepting even the narrower coverage.
+  for input, not safety during an active push. Production fix keeps the pg
+  client error listener active through repeated socket/connection-end errors.
+- Evidence: an isolated PostgreSQL E2E initially reproduced the unhandled
+  second `error` event; after the listener fix, focused E2E passed 2/2. Unit,
+  backend typecheck/lint, and diff-check passed on the agent branch. Root
+  `thviet` backend unit passes 17 suites / 111 tests; hosted CI for `b538c65`
+  is pending. Active valid-pack/ref-update lock-loss remains unproven.
 
 ## T-AGY — persistent Gemini 3.8 Flash preference
 
@@ -201,21 +208,20 @@ or private cloud values.
   Do not launch bridge jobs until the CLI is pinned to Flash and completes a
   short prompt; do not silently use Argon.
 
-## T-AGY-REVIEW — maintenance grace independent review
+## T-AGY-REVIEW — historical maintenance grace review (superseded)
 
 - Owner: AGY review result supplied by the user; Codex verified the findings
   against the current service and test code.
 - Scope: `maintenance-jobs.service.ts`, its unit spec, and the PostgreSQL
   cleanup E2E.
-- Findings: the exact 120-second pending cutoff and the absence of a cutoff on
-  `NEEDS_RECONCILIATION` were under-asserted. Added a bounded cutoff assertion,
-  asserted the second OR branch has no `createdAt`, and added an E2E case with a
-  fresh `NEEDS_RECONCILIATION` journal whose sentinel error must change on the
-  first maintenance run.
-- Evidence: backend unit suite passed (15 suites / 106 tests), backend
-  typecheck passed, and focused maintenance spec passed (15/15). The PostgreSQL
-  E2E addition remains unverified because the isolated test database is
-  unavailable.
+- Status: historical report before current-branch verification. No duplicate
+  changes were required; both findings were already present in `c944f9a` and
+  runtime-verified in T-MAINT-GRACE below.
+- Original report described those assertions as missing. The current branch
+  already contained the 119–121 second cutoff assertion, the no-`createdAt`
+  assertion for `NEEDS_RECONCILIATION`, and the immediate-pickup E2E. No source
+  changes were made. Current runtime evidence is recorded under
+  `T-MAINT-GRACE` below (unit 15/15; maintenance E2E 2/2).
 
 ## T-SEC — independent security audit
 
@@ -268,3 +274,166 @@ or private cloud values.
   now reflected in `acceptance-task-board-2026-10-25.md`.
 - Next: keep audit as a review input; implementation evidence still comes from
   tests, runtime checks, and current provider state.
+
+## T-CI-55 — hosted backend E2E discrepancy
+
+- Owner: Codex lead; `/root/ci_run55_triage` read-only.
+- Status: unresolved; exact hosted failure requires authenticated GitHub logs.
+- Branch/commit: `thviet`, `b51c88c` (`test: make repository lock fixture self-contained`).
+- Evidence: GitHub run `40160123068` failed at backend E2E after 3m43s. Run
+  `40159331450` for `b538c65` failed at the same visible step. GitHub shows
+  only exit code 1; the Node/Ubuntu annotations are warnings. The logs page
+  requires GitHub sign-in, which is not active in the browser session.
+- Local evidence: full backend E2E passed 9 suites / 34 tests on isolated
+  PostgreSQL 17 with global Git identity disabled; focused repository-lock
+  E2E passed 2/2. This does not identify or clear the hosted failure.
+- Changes: `b51c88c` sets explicit Git author identity in the new commit-tree
+  fixture. Hosted run #55 still failed, so do not treat that fix as root cause.
+- Next safe action: after the owner signs in interactively, inspect the exact
+  failed E2E log and reproduce that case. No credentials were entered.
+
+## T-MERGE-CRASH — actual child API crash boundary
+
+- Owner: `/root/merge_crash_acceptance`; Codex lead reviews/integrates.
+- Status: process-tree correction tried; focused E2E still fails and remains
+  unaccepted/unpushed.
+- Worktree/branch: `E:\Prj1-worktrees\merge-restart-acceptance`,
+  `codex/merge-restart-acceptance`, base `9f1eb0b`.
+- Owned file: `backend/test/pull-requests.e2e-spec.ts` only.
+- Evidence: after process-tree kill, no host API/ts-node process remained, but
+  the focused E2E failed after 73.4s because PostgreSQL retained one active
+  advisory-lock waiter (`client_addr=172.17.0.1`, test-scoped application name)
+  after a 60s natural-disappearance wait. This is consistent with Windows
+  host-to-Docker TCP/NAT teardown behavior or unresolved harness semantics; it
+  is not a passing process-crash proof.
+- Stop condition: preserve the worktree and test container until the corrected
+  Linux/CI or redesigned harness result is known. No success-path
+  `pg_terminate_backend` was used; existing exact-PID cleanup fallback ran.
+  Container `e74c3913a02b` is intentionally preserved pending the deferred
+  Docker status check.
+
+## T-COMPOSE — isolated local runtime smoke
+
+- Owner: Codex lead; `/root/compose_runtime_isolation` read-only review.
+- Status: runtime verified; test containers/network stopped; isolated volumes
+  intentionally retained.
+- Commit under test: `b51c88c`; Compose project
+  `codeforge-smoke-20261025-b51c88c`.
+- Evidence: project config bound ports only to loopback 4000/5433 and used new
+  project-specific volumes. PostgreSQL became healthy; migration image applied
+  all 7 migrations; backend Compose healthcheck was healthy and
+  `GET /api/v1/health/ready` returned HTTP 200.
+- Cleanup: `docker compose ... down` removed only that project's two
+  containers and network, without `-v`; its new `git-data` and `postgres-data`
+  volumes remain. Existing `peaceful_chaplygin` was not touched.
+
+## T-ISSUE-AMBIGUOUS — operator recovery draft
+
+- Owner: Codex lead; `/root/ambiguous_journal_design` read-only security/design
+  review.
+- Status: local draft prepared; not posted to GitHub.
+- Artifact: `docs/operations/issue-draft-ambiguous-git-journals.md`.
+- Finding: fail-closed unresolved push/merge journals can block writes
+  indefinitely, but there is no supported operator resolution endpoint/tool.
+  No confirmed vulnerability; this is a medium operational-availability gap.
+  Existing issues #3–#5 remain open; draft says to confirm with the owner
+  before opening a distinct issue and asks who may resolve/if dual approval is
+  required.
+
+## T-AGY-CI-LOCK — focused AGY read-only audit
+
+- Owner: Codex lead dispatched one `agy_ask` with
+  `dangerously_skip_permissions=false`; project wrapper pins
+  `gemini-3.8-flash-medium`.
+- Status: `timed_out` after 90 seconds; no usable output, no file changes.
+- Next: do not infer a clean audit and do not retry blindly. Codex read-only
+  review and isolated tests remain the evidence until AGY is operational.
+
+## T-MAINT-GRACE — 120-second reconciliation acceptance gaps
+
+- Owner: `/root/pending_reconcile_grace_tests`; Codex lead reviews/integrates.
+- Status: review findings confirmed fixed and runtime-verified on `b51c88c`; no
+  duplicate code changes were needed.
+- Scope: assert the unit-query cutoff is 119–121 seconds old and that the
+  `NEEDS_RECONCILIATION` OR branch has no `createdAt` constraint; add a real
+  PostgreSQL E2E proving a newly created `NEEDS_RECONCILIATION` merge is
+  processed immediately.
+- Evidence: the unit test asserts 119–121 seconds and no `createdAt` on the
+  `NEEDS_RECONCILIATION` query branch; focused unit passed 15/15. The full E2E
+  file ran against isolated PostgreSQL in test-only container
+  `codeforge-merge-crash-test-20261025` and passed 2/2: a recent
+  `NEEDS_RECONCILIATION` operation changed to `REF_OUTCOME_UNKNOWN` on the
+  first `runOnce()`, while a recent `PENDING` operation stayed pending.
+
+## T-DOCKER-DEFERRED-CHECK — post-transfer read-only health check
+
+- Owner: Codex lead.
+- Status: checked after approximately five minutes; Docker is responsive.
+- Evidence: `docker info` reports server 29.9.2, 2 containers, both running.
+  `codeforge-merge-crash-test-20261025` is up on loopback port 49588 and
+  `peaceful_chaplygin` remains running. No container was started, stopped, or
+  modified by this health check; no volume was inspected or changed.
+
+## T-VALID-PACK-LOCK-LOSS — in-flight receive-pack cancellation
+
+- Owner: `/root/valid_pack_lock_loss_e2e`; Codex lead reviews/integrates.
+- Status: integrated and verified on `thviet`; prior isolated worktree evidence
+  is retained below as the implementation record.
+- Worktree/branch: `E:\Prj1-worktrees\valid-pack-lock-loss`,
+  `codex/valid-pack-lock-loss`, base `b51c88c`.
+- Owned file: `backend/test/repository-lock.e2e-spec.ts` only.
+- Design: generate a valid protocol-v0 receive-pack payload creating
+  `refs/heads/feature/lock-loss` with the zero old OID; pause in a test-local
+  `pre-receive` hook after pack unpack but before ref movement; terminate the
+  exact lock-owning DB backend and assert cancellation/ref/session invariants.
+- Evidence: disposable Linux runner on the isolated `code_forge_test` database
+  reported `PASS` for the focused case (1/1, 3.233s); GitHttpService logged
+  HTTP 503. The case passed hook PID exit, Git child SIGKILL, pool-session
+  release, unchanged `main`, and absent feature-ref assertions. Backend
+  typecheck, targeted ESLint and diff-check passed. Windows skips this
+  POSIX-process-group case, so that skip is not treated as evidence.
+- Security: independent read-only follow-up confirmed the prior protected-main
+  issue is fixed and found no remaining actionable issue for the Linux target.
+  AGY review timed out separately and is not counted as a pass.
+- Integration: commit `c2b451f` was cherry-picked into `thviet` as
+  `9c2eb81` (`test: cover valid receive-pack lock cancellation`) and pushed.
+  Hosted workflow `40162474987` completed successfully on that exact SHA; the
+  focused Windows E2E passed 2/2 with the POSIX-only test skipped, and backend
+  typecheck/targeted ESLint passed locally. The focused Linux runner evidence
+  above is the execution proof for the process-specific case.
+
+## T-CI-9C2 — final hosted acceptance
+
+- Owner: Codex lead.
+- Status: passed and pushed.
+- Branch/commit: `thviet`, `9c2eb8159cf110467f9e1562e16c5c4d75c68ebc`.
+- Evidence: GitHub Actions run `40162474987` completed with `conclusion=success`.
+  Backend unit, backend E2E, lint, typecheck, build, frontend E2E, full-stack,
+  Docker API image smoke, migration image smoke, all 7 migrations, and diff
+  whitespace steps passed.
+- Historical note: runs `40159331450` and `40160123068` failed at backend E2E;
+  their exact cause remains unknown. The later green run does not explain or
+  retroactively change those results.
+
+## T-AGY-VALID-PACK-REVIEW — independent AGY static audit
+
+- Owner: Codex lead; AGY used Gemini 3.8 Flash Medium through the configured
+  bridge, with `dangerously_skip_permissions=false`.
+- Scope/worktree: read-only review of the one-file diff in
+  `E:\Prj1-worktrees\valid-pack-lock-loss`.
+- Status: timed out after 120 seconds with no usable review. Post-call
+  `git status`, changed-path list and `git diff --check` show only the expected
+  agent-owned test diff; AGY made no additional changes. Do not infer a pass or
+  retry blindly; independent security review and Linux E2E evidence are
+  recorded separately.
+
+## T-SEC-VALID-PACK-REVIEW — independent test/security review
+
+- Owner: `/root/valid_pack_test_security_review`; read-only.
+- Status: complete read-only follow-up; prior finding resolved.
+- Finding/resolution: the first diff targeted protected default branch `main`.
+  The implementation now creates `refs/heads/feature/lock-loss` using the
+  zero old OID, asserts main stays unchanged and the feature ref remains absent,
+  and checks the hook process exits. Follow-up review found no remaining
+  actionable issue for the Linux target. The reviewer did not run the Linux
+  test; see the agent-reported runtime evidence above.
