@@ -52,5 +52,12 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
     await page.keyboard.press("Escape");
     await expect(dialog).not.toBeVisible();
     await expect(lockButton).toBeFocused();
+
+    await lockButton.press("Enter");
+    await expect(dialog).toBeVisible();
+    await lockButton.evaluate((button) => button.remove());
+    await page.keyboard.press("Escape");
+    await expect(dialog).not.toBeVisible();
+    await expect(page.getByRole("heading", { name: "Điều hành Code Forge" })).toBeFocused();
   });
 }
