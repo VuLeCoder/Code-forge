@@ -8,7 +8,7 @@ import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerStorage } from '@nestjs/throttler';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
 import { Client } from 'pg';
@@ -86,7 +86,11 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
 
     const { AppModule } = await import('../src/app.module');
     const module = await Test.createTestingModule({ imports: [AppModule] })
-      .overrideProvider(APP_GUARD).useValue({ canActivate: () => true }).compile();
+      // Keep the real guard installed; this workflow suite does not test
+      // throttling, which has dedicated acceptance coverage in auth.e2e-spec.
+      .overrideProvider(ThrottlerStorage).useValue({ increment: async (_key: string, ttl: number) => ({
+        totalHits: 1, timeToExpire: ttl, isBlocked: false, timeToBlockExpire: 0,
+      }) }).compile();
     app = module.createNestApplication();
     app.use(cookieParser());
     app.setGlobalPrefix('api/v1');
