@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 const admin = { id: "admin-1", username: "site-admin", email: "admin@example.test", systemRole: "ADMIN", status: "ACTIVE", createdAt: "2026-10-01T00:00:00.000Z" };
 const user = { id: "user-1", username: "alice", email: "alice@example.test", systemRole: "USER", status: "ACTIVE", lockedAt: null, createdAt: "2026-10-02T00:00:00.000Z" };
+const secondUser = { id: "user-2", username: "bob", email: "bob@example.test", systemRole: "USER", status: "ACTIVE", lockedAt: null, createdAt: "2026-10-03T00:00:00.000Z" };
 
 for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "narrow", width: 375, height: 812 }]) {
   test(`admin controls support keyboard navigation and dialog focus return at ${viewport.name} width`, async ({ page }) => {
@@ -14,7 +15,7 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
         pullRequests: { total: 0, open: 0, pendingMerges: 0 },
       } });
       if (pathname.endsWith("/users")) return route.fulfill({ json: {
-        users: [user], page: 1, pageSize: 20, total: 1, hasMore: false,
+        users: [user, secondUser], page: 1, pageSize: 20, total: 2, hasMore: false,
       } });
       if (pathname.endsWith("/repositories")) return route.fulfill({ json: {
         repositories: [], page: 1, pageSize: 20, total: 0, hasMore: false,
@@ -52,6 +53,19 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
     await page.keyboard.press("Escape");
     await expect(dialog).not.toBeVisible();
     await expect(lockButton).toBeFocused();
+
+    const secondLockButton = page.getByRole("row", { name: /bob/ }).getByRole("button", { name: "Khóa tài khoản" });
+    await secondLockButton.focus();
+    await page.keyboard.press("Enter");
+    const secondDialog = page.getByRole("dialog", { name: "Khóa bob?" });
+    await expect(secondDialog).toBeVisible();
+    await expect(secondDialog.getByRole("button", { name: "Xác nhận" })).toBeFocused();
+    await secondDialog.evaluate((element) => element.dispatchEvent(new Event("close")));
+    await expect(secondDialog.getByRole("heading", { name: "Khóa bob?" })).toBeVisible();
+    await expect(secondDialog.getByRole("button", { name: "Xác nhận" })).toBeFocused();
+    await secondDialog.getByRole("button", { name: "Hủy" }).click();
+    await expect(secondDialog).not.toBeVisible();
+    await expect(secondLockButton).toBeFocused();
 
     await lockButton.press("Enter");
     await expect(dialog).toBeVisible();
