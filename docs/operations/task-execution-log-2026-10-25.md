@@ -331,14 +331,15 @@ snapshots, not current status. Current acceptance state is in the task board.
 
 - Owner: Codex lead; `/root/ambiguous_journal_design` read-only security/design
   review.
-- Status: local draft prepared; not posted to GitHub.
+- Status: published as open GitHub issue #6; API recheck on 2026-10-25 confirmed
+  the issue is open.
 - Artifact: `docs/operations/issue-draft-ambiguous-git-journals.md`.
 - Finding: fail-closed unresolved push/merge journals can block writes
   indefinitely, but there is no supported operator resolution endpoint/tool.
   No confirmed vulnerability; this is a medium operational-availability gap.
-  Existing issues #3–#5 remain open; draft says to confirm with the owner
-  before opening a distinct issue and asks who may resolve/if dual approval is
-  required.
+  Issue #6 is [tracked here](https://github.com/VuLeCoder/Code-forge/issues/6);
+  its authorization and approval design remains subject to the owner decisions
+  recorded in `docs/next-actions.md`.
 
 ## T-AGY-CI-LOCK — focused AGY read-only audit
 
@@ -346,8 +347,9 @@ snapshots, not current status. Current acceptance state is in the task board.
   `dangerously_skip_permissions=false`; project wrapper pins
   `gemini-3.8-flash-medium`.
 - Status: `timed_out` after 90 seconds; no usable output, no file changes.
-- Next: do not infer a clean audit and do not retry blindly. Codex read-only
-  review and isolated tests remain the evidence until AGY is operational.
+- Next: do not infer a clean audit from this timed-out Gemini attempt. A later
+  separate AGY read-only review using `claude-sonnet-5-5-medium` completed with
+  no blocking finding; see the alternative-model follow-up below.
 
 ## T-MAINT-GRACE — 120-second reconciliation acceptance gaps
 
@@ -447,8 +449,17 @@ snapshots, not current status. Current acceptance state is in the task board.
 
 - Owner: Codex lead with bounded test implementation and independent static
   review agents; leader owns integration.
-- Status: implemented, typechecked, diff-checked, and pushed; Linux E2E result
-  is pending inspection and the test is not yet accepted.
+- Status: run `40166811302` completed with failure on exact SHA
+  `1209bca8cde9e3f594c6dc44036426a9e73f7ea6`. Its backend unit/E2E, lint,
+  typecheck, and build steps passed. Frontend Playwright had 51 passed / 1
+  failed: `frontend/test/admin-accessibility.spec.ts:7`, desktop case; Escape
+  closed the dialog but focus was not restored to the opener button
+  “Khóa tài khoản” (assertion line 54). Later full-stack, Docker image,
+  migration, and diff-whitespace steps were skipped. The full hosted workflow
+  was unaccepted at that time. The local frontend fix passed the full frontend
+  E2E and focused spec, then was committed/pushed as `45cb1f4`. Replacement
+  hosted run `40167861108` succeeded in 5m32s on exact SHA
+  `24e6abc69cb947d575306134c362491bc96c93ad`.
 - Branch/commits: `thviet`, `e5eda1a` (`test: verify merge recovery after API
   restart`) plus `250ffdc` (`test: allow crash recovery E2E runtime margin`).
 - Owned file: `backend/test/pull-requests.e2e-spec.ts` only.
@@ -458,30 +469,89 @@ snapshots, not current status. Current acceptance state is in the task board.
   prove its startup maintenance completes PR/journal metadata and one audit;
   retry the same operation without duplicate merge; verify fetch retains the
   two-parent commit.
-- Verification performed: `corepack pnpm --filter backend typecheck` passed;
-  `git diff --check` still passes after the timeout follow-up. Targeted ESLint
-  reports only the existing
-  `await-thenable` at line 507, unchanged from the base. The test is Linux-only
-  because it uses PostgreSQL's client-connection check setting to observe the
-  killed process socket. No local E2E, database, or Docker operation was run.
-- Additional local regression evidence at HEAD `250ffdc`: `corepack pnpm
-  --filter backend test` passed 17 suites / 111 tests. This is the backend unit
-  suite only; it does not execute the new crash/restart E2E.
+- Verification performed: authenticated runs `40164718122` on `e5eda1a`,
+  `40164867636` on `250ffdc`, `40165071044` on `c98f548`, and `40165266658` on
+  `f1fb835` all showed
+  the child API transaction session still `active`, waiting on the test-owned
+  advisory barrier after the 60-second wait. The test released that barrier
+  only after waiting for the session, creating a circular wait; independent
+  static triage and security review both localized the evidence to the test
+  barrier, not the production lock pool. `b191165` releases the barrier before
+  checking for natural session exit. Run `40166209913` then passed that
+  crash/restart test but failed later in the same suite because the long PR
+  fixture exhausted the registration endpoint's five-per-minute limit. A
+  follow-up override of `APP_GUARD` did not take effect because Nest rewrites
+  that enhancer token; run `40166484359` failed at the same later `429`.
+  Commit `1209bca` replaces only the PR suite's throttler storage with a
+  non-blocking test fixture while preserving the real guard; the separate
+  `auth.e2e-spec.ts` rate-limit acceptance remains unchanged. Latest local
+  backend typecheck passed; backend unit tests passed 17 suites / 113 tests.
+  A separate PR-specific E2E was refused by its `_test` safety guard because
+  `backend/.env` points to a non-test DB; do not count this as a test failure or
+  integration result. The Linux-only crash case is skipped on Windows. Targeted ESLint
+  still reports the pre-existing
+  `await-thenable` at line 507, outside this edit. Docker Desktop responded;
+  no container or volume was modified.
 - Follow-up: `250ffdc` increases the Jest timeout from 119 seconds to 180
   seconds to provide runtime margin for the natural PostgreSQL-session exit and
   replacement startup. This changes no production behavior.
 - Review: independent static review found and the implementation fixed a
   startup-failure child-process leak; follow-up review found no actionable
   process cleanup race. This is static evidence only, not runtime acceptance.
-- CI: run `40164718122` for `e5eda1a` completed failure at the aggregate step
-  `Run corepack pnpm --filter backend test:e2e:failure`. The exact failing test
-  and cause are unknown until authenticated logs are inspected. Run
-  `40164867636` for `250ffdc` is currently in progress. The latest verified
-  green hosted run remains `40162474987` on ancestor `9c2eb81`.
-- Next safe action: after the current run completes and authenticated logs are
-  available, inspect the exact failing test and correct only from reproducible
-  evidence. Do not infer a cause from the aggregate step name and do not
-  force-terminate PostgreSQL sessions on the test's success path.
+- CI: `40166209913` on `b191165` explicitly showed the crash/restart test
+  passing, then failed at the next PR test with HTTP 429; `40166484359` on
+  `75e9ec0` failed at the same later 429. On `1209bca`, run `40166811302`
+  passed the complete backend E2E command, as well as backend unit, lint,
+  typecheck, and build; frontend Playwright had 51 passed / 1 failed. The sole
+  failure was the desktop Escape case in
+  `frontend/test/admin-accessibility.spec.ts:7`: closing the dialog did not
+  restore focus to “Khóa tài khoản” (assertion line 54). Later full-stack,
+  Docker, migration, and diff-whitespace steps were skipped in this historical
+  run. It was superseded by successful hosted run `40167861108` in 5m32s on
+  exact SHA `24e6abc69cb947d575306134c362491bc96c93ad`.
+- Local verification (latest): backend unit tests passed 17 suites / 113 tests;
+  workspace typecheck, lint, and build passed; focused backend lock spec passed
+  3/3; frontend Playwright passed 52/52; full-stack Playwright passed 3/3.
+  Full-stack used the dedicated existing `codeforge-merge-crash-test` database
+  `code_forge_test` on loopback port 49588; only the harness random schema and
+  temp Git root were created/cleaned, with no Docker volume reset/deletion. The
+  separate PR-specific E2E was refused by its `_test` safety guard because
+  `backend/.env` points to a non-test DB; it is not a test failure or integration
+  result. Frontend/repository-lock code fixes are committed and pushed as
+  `45cb1f4` and `896575c`; Markdown consolidation/status edits remain local,
+  uncommitted, and unpushed.
+- AGY review: Gemini 3.8 Flash timed out at 180 seconds and is not counted as a
+  successful audit. AGY model listing showed Gemini 4 Argon, Gemini 3.8 Flash,
+  Claude Opus/Sonnet 5.5, and GPT-OSS 120B. A separate read-only
+  `claude-sonnet-5-5-medium` review completed in 75 seconds with no blocking
+  finding; Nemotron Ultra also found no blocker. These reviews do not replace
+  hosted CI.
+- Hosted CI disposition: run `40167861108` succeeded in 5m32s on pushed SHA
+  `24e6abc69cb947d575306134c362491bc96c93ad`. Keep P3/P4 remaining matrix
+  work open. Never use
+  `pg_terminate_backend` as success-path evidence.
+
+## T-LOCK-SERVICE-FOLLOWUP — reproduced local regression and fix
+
+- Owner: Codex lead.
+- Status: a repository-lock service finding was reproduced RED, fixed, and
+  committed/pushed as `896575c`; it was independently reviewed by Codex
+  security reviewer, Nemotron Ultra via Continue CLI, and AGY
+  `claude-sonnet-5-5-medium`, with no blocking finding.
+- Local acceptance evidence: backend unit tests passed 17 suites / 113 tests;
+  workspace typecheck, lint, and build passed; focused backend lock spec passed
+  3/3; frontend Playwright 52/52 and full-stack Playwright 3/3 passed. Full-stack
+  used the dedicated existing test DB and only a random schema/temp Git root;
+  no Docker volume was reset or deleted. The PR-specific E2E was refused by the
+  `_test` guard because `backend/.env` points to a non-test database; no failure
+  or integration result is claimed. These are local results, not hosted CI.
+- Review: Gemini 3.8 Flash timed out and is not counted. One AGY read-only
+  `claude-sonnet-5-5-medium` review completed in 75 seconds with no blocking
+  finding; Nemotron Ultra and Codex security reviewer also found no blocker.
+- Hosted follow-up: run `40167861108` succeeded in 5m32s on pushed SHA
+  `24e6abc69cb947d575306134c362491bc96c93ad`. Keep remaining P3/P4
+  failure-matrix cases open. Markdown consolidation/status edits remain local
+  and were not included in that run.
 
 ## T-AGY-CRASH-SECURITY-REVIEW — bounded read-only audit attempt
 
@@ -493,23 +563,244 @@ snapshots, not current status. Current acceptance state is in the task board.
   resulted. This is not a successful audit and does not add security-review
   acceptance evidence.
 - Next: do not retry this AGY task. Preserve the timeout as an unresolved
-  review attempt; rely only on the separately recorded static review evidence
-  and pending Linux runtime CI until new direction is given.
+  review attempt; rely only on separately recorded static review evidence and
+  hosted backend E2E results. Run `40166811302` passed the backend E2E gate but
+  failed later at frontend E2E; neither result is an AGY audit.
 
-## T-AGY-MODEL-LOW — verify and pin a responsive local AGY model
+- Follow-up: after the exact CI failure was identified, one smaller
+  plan-mode review on Gemini 3.8 Flash Medium was attempted with a 180-second
+  print timeout. It returned no usable output. This remains `timed_out`, not a
+  successful audit; it was not retried. Independent Codex static triage and
+  security review found no confirmed exploitable vulnerability; neither review
+  substitutes for hosted runtime evidence. Run `40166811302` passed backend
+  E2E but failed later at frontend Playwright; overall workflow acceptance
+  remains incomplete.
+
+- Later bounded AGY review: Gemini 3.8 Flash timed out at 180 seconds with no
+  usable output and is not counted as an audit pass. A separate repository-lock
+  fix was independently reviewed by Codex security reviewer and Nemotron Ultra
+  via Continue CLI; both found no blocking issue. This does not change the
+  failed status of hosted run `40166811302` on old SHA `1209bca`.
+
+- Alternative-model follow-up: the AGY CLI model list included Gemini 4 Argon,
+  Gemini 3.8 Flash, Claude Opus 5.5, Claude Sonnet 5.5, and GPT-OSS 120B. A
+  single read-only `claude-sonnet-5-5-medium` review completed in 75 seconds
+  with no blocking finding on the repository-lock change. This makes AGY usable
+  through that alternative model for this bounded review; it does not convert
+  the Gemini timeout into a pass or change hosted CI status.
+
+## T-AGY-MODEL-TIERS — verify and select local AGY model effort
 
 - Owner: Codex lead; model check requested by user.
-- Status: local model listing and wrapper smoke passed; no global AGY/MCP
-  configuration or credentials changed.
+- Status: local model listing plus low/medium/high smoke prompts passed both
+  directly and through the project wrapper. Wrapper default is Medium, with
+  explicit low/medium/high effort for task-specific selection. No global
+  AGY/MCP configuration or credentials changed.
 - Evidence: `agy.exe models` listed Gemini 4 Argon, Gemini 3.8 Flash, Claude
-  Opus 5.5, Claude Sonnet 5.5, and GPT-OSS 120B variants. A no-tools prompt
-  with `gemini-3.8-flash-low` returned `AGY_MODEL_SMOKE_OK`; the project wrapper
-  then returned `AGY_WRAPPER_READY` with its pinned model. Each invocation
-  completed within the 30-second timeout.
-- Change: `scripts/agy.ps1` now pins `gemini-3.8-flash-low`, and
-  `docs/agy-plans/README.md` records the available model list and smoke result.
-  The earlier Medium audit timeout remains classified as inconclusive; this
-  smoke does not prove a full repository audit or MCP access.
-- Next: use the wrapper only for bounded tasks; keep permission bypass off and
-  do not retry the timed-out audit unless separately authorized with a new
-  bounded scope.
+  Opus 5.5, Claude Sonnet 5.5, and GPT-OSS 120B variants. No-tools prompts for
+  Gemini 3.8 Flash low/medium/high each returned `AGY_MODEL_SMOKE_OK` within
+  their 30-second limits. Wrapper default Medium, `-Effort high`, and
+  `-Effort low` each returned their expected response within 30 seconds.
+- Historical state at this entry: `scripts/agy.ps1` selected only Gemini 3.8 Flash tiers, defaulting to
+  Medium, and accepts `-Tier low|medium|high`. AGY rejects a mismatched CLI
+  `--effort` (for example, model High with effort Low); the wrapper now rejects
+  that combination clearly, accepts matching values, and rejects arbitrary
+  `--model` overrides. `docs/agy-plans/README.md` records the available model
+  list and task-specific tier guidance. The earlier 120-second Medium audit
+  timeout remains inconclusive; prompt smoke does not prove full repository
+  audit or MCP access.
+- Next: use the wrapper only for bounded tasks; use `-Tier high` for complex
+  review or architecture, Medium for normal implementation, and `-Tier low`
+  for quick checks.
+  Keep permission bypass off. The timed-out audit itself remains incomplete.
+
+## T-LOCAL-IMAGE-SMOKE — candidate Docker image runtime contents
+
+- Owner: Codex lead; local smoke only.
+- Status: candidate images built with unique local tags
+  `code-forge-api:codex-local-20261025` and
+  `code-forge-migrate:codex-local-20261025`.
+- API image checks: verified Git 2.39.5, executable `pre-receive` hook, and
+  Prisma client availability inside the container.
+- Migration image checks: verified Prisma 6.19.3 and Prisma client resolution.
+  No database migration was applied. No Docker volumes were reset or deleted.
+- Scope: this is local image/content smoke, not the skipped hosted Docker or
+  migration gates in failed run `40166811302`, and not release acceptance.
+
+## T-AGY-GEMINI4-SMOKE — one-off model responsiveness
+
+- Owner: Codex lead; bounded direct CLI smoke.
+- Evidence: direct `gemini-4-argon-medium` prompt returned
+  `AGY_GEMINI4_OK` within 30 seconds.
+- Interpretation: confirms the model responds to a short prompt only; it is
+  not a code review or security audit. At the time of this smoke, the project
+  wrapper remained pinned to Gemini 3.8 Flash Medium. The prior Gemini 3.8 Flash review timeout remains
+  uncounted; the separate successful Claude Sonnet Medium review is recorded
+  above.
+
+## T-PR-LIFECYCLE-AND-NO-MERGE-BASE — isolated regression evidence
+
+- Owner: Codex lead; test execution and independent bounded review.
+- Evidence: PostgreSQL HTTP E2E for “PR author and repository owner update
+  lifecycle state while denying other WRITE members” passed 1/1 in a newly
+  created tmpfs-only PostgreSQL test container. Container removal was verified;
+  no volumes were used or removed. Backend full typecheck passed.
+- Evidence: real-Git storage suite passed 20/20, including unrelated branch
+  histories returning `NO_MERGE_BASE` without moving refs. `git diff --check`
+  passed for the tested changes.
+- Review scope: an earlier AGY `gemini-4-argon-medium` Medium read-only review
+  covered the PR lifecycle test plus the then-current Git compare test and
+  reported no actionable findings. It did not cover the later storage-reset
+  E2E; AGY did not execute tests. This is separate from the later Gemini 3.8/
+  Gemini 4 PR-slice timeouts recorded in the latest verification entry.
+- Scope: these are local targeted test results, not evidence of cloud release
+  or completion of the remaining P3/P4 matrix. The Markdown documentation
+  updates are uncommitted/unpushed and are not part of hosted run `40167861108`.
+
+## T-AGY-DEFAULT-MODEL — current wrapper selection
+
+- Current decision: default to Gemini 3.8 Flash Medium. The user reports its
+  quota resets hourly, while Gemini 4 Argon resets weekly; prioritize the more
+  frequently replenished quota. Use Gemini 4 Argon Medium only as a bounded
+  fallback after a scoped Gemini 3.8 call times out. The earlier broad Gemini
+  3.8 review timeout does not imply every scoped task should skip 3.8.
+- The wrapper accepts Gemini 3.8 Flash, Gemini 4 Argon, Claude Sonnet 5.5, and
+  Claude Opus 5.5 families; default is Gemini 3.8 Flash Medium. Claude selection
+  is intentional via `-Family claude-sonnet-5-5` or `-Family claude-opus-5-5`.
+  Gemini 4 is the explicit fallback via `-Family gemini-4-argon`; user preference
+  is 3.8 first, Claude only when intentionally selected/available, and Gemini 4
+  after an observed Claude quota error. There is no quota-balance field to
+  pre-check. Tier selection remains `-Tier low|medium|high`; arbitrary model
+  overrides remain rejected.
+- Review evidence remains distinct: the bounded `gemini-4-argon-medium`
+  review of the PR lifecycle test plus then-current Git compare test completed
+  in about 40 seconds with no actionable findings; it did not cover the later
+  storage-reset E2E, and AGY did not run those tests. Gemini 3.8 broad-review
+  attempts timed out and are not counted as audits.
+- The earlier default-family smoke returned `AGY_GEMINI4_WRAPPER_OK` before
+  the latest default was changed back to Gemini 3.8. A later bounded review
+  invoked the current wrapper default (`gemini-3.8-flash-medium`) and returned
+  `NO_ACTIONABLE_FINDING`; this verifies the default invocation, though it is
+  not a standalone no-tools smoke.
+- Scope: current wrapper/docs changes are local and not included in pushed
+  code SHA `24e6abc` or hosted run `40167861108`.
+
+## T-PR-E2E-AND-AGY-3.8 — latest bounded verification
+
+- Backend unit: 17 suites / 114 tests passed.
+- PR E2E: full suite passed 6/6 using isolated tmpfs-only PostgreSQL. The
+  Linux crash/restart test was skipped on Windows and is not counted as a
+  local pass. This supersedes the earlier safe refusal by the `_test` guard
+  when `.env` targeted a non-test database.
+- AGY current-default review: `gemini-3.8-flash-medium` with
+  `--disable-slash-commands` reviewed only `git-storage.service.spec.ts` and
+  returned exact output `NO_ACTIONABLE_FINDING` (successful narrow review).
+- Larger PR review status is terminal: the two-test slice of
+  `pull-requests.e2e-spec.ts` timed out at 45s on Gemini 3.8 Medium; one exact
+  bounded Gemini 4 Medium fallback timed out at 60s. Neither returned usable
+  findings; there were no further retries and neither is an audit pass.
+- Separate earlier evidence: Gemini 4 Argon Medium's read-only review of the
+  PR lifecycle test plus then-current Git compare test completed with no
+  actionable findings. It did not cover the later storage-reset E2E. Prior
+  broad Gemini 3.8 review timeouts remain unsuccessful attempts.
+- Scope: targeted local acceptance only; cloud release and remaining P3/P4
+  matrix remain open. These documentation changes are not committed/pushed.
+
+## T-PUSHED-TESTS-A71 — historical snapshot (superseded by be99b55)
+
+- Source: branch `thviet` and `origin/thviet` point to exact SHA
+  `a71a2f021c1d6ef2a3bad7983a1805dcd4f2b75e`, commit
+  `test: cover PR lifecycle and storage reset`. It contains the PR lifecycle
+  and storage-reset backend test additions plus `scripts/agy.ps1` routing and
+  default changes.
+- Hosted status: workflow `40169100366` (MVP verification #67) is currently
+  `In progress`. It has no terminal result yet. The last terminal green run,
+  `40167861108`, succeeded on predecessor SHA
+  `24e6abc69cb947d575306134c362491bc96c93ad`; do not attribute that pass to
+  `a71a2f0`.
+- Local verification after test additions: backend unit 17 suites / 114 tests;
+  Git storage suite 20/20; full PR PostgreSQL/Git E2E 6/6, with the Linux
+  crash/restart test skipped on Windows; backend typecheck; PowerShell parser
+  and invalid-family guard; `git diff --check` all passed.
+- The documentation consolidation/status edits remain local and were not part
+  of SHA `a71a2f0`. Hosted CI remains pending; cloud release remains
+  unverified.
+
+## T-PR-COMPARE-BOUNDS — commit be99b55, CI newly triggered
+
+- Source: `thviet` and `origin/thviet` point to exact SHA
+  `be99b5509b760258a7b391b3b2f91dd972fcba32`, commit
+  `feat: bound pull request diffs per file`.
+- Behavior: PR compare reports per-file `TEXT`, `BINARY`, `TRUNCATED`, or
+  `UNAVAILABLE`; maximum 128 KiB per file, 1 MiB aggregate, and 15 seconds
+  overall.
+- Local verification on this change: backend unit 17 suites / 115 tests;
+  backend typecheck; frontend lint/typecheck; Git-storage real tests 21/21.
+- Hosted workflow for this SHA was just triggered; its terminal result has not
+  been verified. Previous green/in-progress runs belong to earlier SHAs.
+- The documentation updates remain local/uncommitted and are not part of
+  `be99b55`. Cloud release remains unverified.
+
+## T-PR-COMPARE-LOCK-POOL — commit 94ceb6f, hosted status unchecked
+
+- Source: `thviet` and `origin/thviet` point to exact SHA
+  `94ceb6fdb090c1632c53de0ec96e8a975f9a265d`.
+- Change: compare requests are capped at two concurrent operations per
+  process and endpoint rate-limited to 10 requests/IP/minute. A regression
+  test verifies that a third concurrent request is rejected before lock
+  acquisition.
+- Local gates: backend unit 17 suites / 116 tests; backend lint/typecheck;
+  frontend lint/typecheck; Git-storage real tests 21/21.
+- Hosted history: workflow #68 / `40169475724` failed on predecessor SHA
+  `be99b5509b760258a7b391b3b2f91dd972fcba32` at backend lint in
+  `git-storage.service.spec.ts:260` (`no-unsafe-assignment`). The lint issue
+  was corrected in `045f5c1`; CI for `94ceb6f` has not been checked and is not
+  assumed green.
+- Review evidence: Gemini 3.8 audit timed out after 90 seconds with no usable
+  result. Gemini4 fallback invocation used unsupported flags and produced no
+  completed review. Neither counts as an audit pass. A human security
+  subagent identified moderate denial-of-service risk; the concurrency and
+  rate-limit mitigation is committed.
+- Documentation updates remain local/outside the pushed SHA. Cloud release
+  remains unverified.
+
+## T-PR-PAGINATION — commit 41c23ec, hosted CI failed
+
+- Source: `thviet` and `origin/thviet` point to exact SHA
+  `41c23eca31823b9f12dc93924699d873120b0788`.
+- Local gates passed: backend PR E2E 6/6 (Linux-only crash test skipped on
+  Windows), GitStorage real-Git 21/21, frontend pulls/proxy Playwright 15/15,
+  backend/frontend lint and typecheck, and `git diff --check`.
+- Hosted run #70 / `40170763221` failed on this SHA: frontend Playwright 53/55;
+  desktop and narrow admin accessibility tests failed the Escape focus-return
+  assertion at `frontend/test/admin-accessibility.spec.ts:54`. `[WebServer]`
+  also logged `Không thể tải hồ sơ lúc này`. Full-stack, Docker, migration,
+  and diff-whitespace stages were skipped after that failure.
+- Distinction: run #69 / `40170013908` was on predecessor `94ceb6f` and failed
+  the same admin flow at a different dialog-visibility assertion. The current
+  admin fix agent is reproducing in an isolated worktree; no fix is verified.
+  These local results do not complete P4 acceptance or cloud release
+  acceptance. Documentation edits remain local/outside the pushed SHA.
+
+## T-AMBIGUOUS-JOURNAL-RESOLUTION — commit 1e8736c, pushed to origin/thviet
+
+- Source: `thviet` and `origin/thviet` point to exact SHA
+  `1e8736ce3b4fe765c9b63481aa3a18a09f874287`, commit
+  `feat(admin): implement audited resolution workflow for ambiguous Git journals (Issue #6)`.
+- Implemented behavior:
+  - Added `AdminUnresolvedQueryDto` and `AdminResolveOperationDto` to `backend/src/admin/admin.dto.ts`.
+  - Added routes in `AdminController`:
+    - `GET /admin/operations/unresolved` to list unresolved operations across repositories with pagination, filtering, non-sensitive projection.
+    - `GET /admin/operations/:id` to inspect safe metadata (excluding private refs, commit messages, secrets).
+    - `POST /admin/operations/:id/resolve` with `@UseGuards(OriginGuard)` to resolve PUSH or MERGE operations via `MARK_FAILED` or `RETRY_RECONCILE`.
+  - Resolution executes under `RepositoryLockService.acquire(repositoryId)` exclusive advisory lock.
+  - Fail-closed rules enforced: operations are never deleted; Git refs are never rolled back; atomic transaction writes `AdminAuditLog` (`action: ADMIN_OPERATION_RESOLVED`).
+  - Made `reconcileOne` in `GitPushJournalService` and `reconcileOperation` in `MaintenanceJobsService` public.
+  - Exported `MaintenanceJobsService` from `MaintenanceModule` and imported into `AdminModule`.
+- Verification evidence:
+  - Backend unit test suite: 19 suites / 133 tests passed in 41.6s.
+  - Focused spec `admin.service.spec.ts`: 8/8 passed.
+  - Workspace typecheck (`corepack pnpm typecheck`) passed cleanly.
+  - Workspace lint (`corepack pnpm lint`) passed with 0 errors, 0 warnings.
+  - `git diff --check` passed.
+  - Pushed to `origin/thviet`.

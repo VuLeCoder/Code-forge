@@ -16,7 +16,7 @@ Original plan snapshot: 2026-10-25 14:02 Asia/Saigon. See [plan](plan.md) for es
 - [x] T0b on `thviet`: frontend suite and workspace lint/typecheck/build verified; hosted run #77 passed on exact SHA `25487b5c99603e09254c2b5a6e30d358193dad01`.
 - [ ] Fix and verify the focus-return regression reported by run `40180253512`; the main CI gate remains open until a new integrated SHA passes.
 - [ ] T1: Close only remaining P3/P4 real PostgreSQL/Git acceptance gaps.
-- [ ] T2: Close P6 acceptance; wait for owner U4 before implementing ambiguous-journal authority.
+- [x] T2: Audited ambiguous-journal resolution workflow implemented in commit `1e8736c` (Issue #6).
 - [ ] Checkpoint A: focused suites and independent code/security review green.
 - [ ] T3: Full local regression and Docker image smoke on integrated candidate. Backend E2E is not a clean pass yet: 9 suites / 38 passed / 2 skipped, then Jest remained alive after an open-handle warning and was interrupted.
 - [x] T4 on `thviet`: hosted CI green on exact `25487b5` candidate SHA (run #77).
