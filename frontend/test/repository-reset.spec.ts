@@ -30,9 +30,10 @@ test("repository reset is clear while branch, history, and clone actions reflect
   await expect(page.getByRole("option", { name: "Chưa có branch" })).toBeAttached();
 
   await page.getByRole("link", { name: "Lịch sử commit" }).click();
-  await expect(page.getByText("Git storage đã được khởi tạo lại; lịch sử trước đó không còn.", { exact: true })).toBeVisible();
-  await expect(page.getByText("Chưa có commit trên branch này.", { exact: true })).toBeVisible();
-  await expect(page.getByRole("listitem")).toHaveCount(0);
+  const history = page.getByRole("region", { name: "Lịch sử commit", exact: true });
+  await expect(history.getByText("Git storage đã được khởi tạo lại; lịch sử trước đó không còn.", { exact: true })).toBeVisible();
+  await expect(history.getByText("Chưa có commit trên branch này.", { exact: true })).toBeVisible();
+  await expect(history.getByRole("list")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Clone" }).click();
   const cloneDialog = page.getByRole("dialog", { name: "Clone repository" });
