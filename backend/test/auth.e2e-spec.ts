@@ -144,6 +144,7 @@ describe('Milestone 1 HTTP + PostgreSQL', () => {
     const logout = await call('auth/logout', {}, first);
     expect(logout.status).toBe(204);
     expect(logout.headers.getSetCookie()).toHaveLength(2);
+    expect((await call('auth/me', undefined, first)).status).toBe(401);
     expect((await call('auth/refresh', {}, first)).status).toBe(401);
     expect((await call('auth/logout', {})).status).toBe(204);
     const active = cookie(await login());
