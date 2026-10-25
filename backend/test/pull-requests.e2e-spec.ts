@@ -1623,11 +1623,19 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       let sessions: Array<{ pid: number }> = [];
       while (Date.now() < deadline) {
         sessions = (await barrier.query<{ pid: number }>(`SELECT pid FROM pg_stat_activity
-          WHERE application_name = $1 AND pid <> pg_backend_pid()`, [applicationName])).rows;
+          WHERE application_name = $1 AND datname = current_database() AND pid <> pg_backend_pid()`, [applicationName])).rows;
         if (sessions.length === 0) return;
         await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
       }
-      throw new Error(`PostgreSQL sessions for ${applicationName} did not exit naturally.`);
+      throw new Error(`PostgreSQL sessions for ${applicationName} did not exit after cleanup.`);
+    };
+    const terminateApiSessions = async (applicationName: string) => {
+      if (!barrier) throw new Error('Crash-recovery barrier client is not connected.');
+      const sessions = await barrier.query<{ pid: number }>(`SELECT pid FROM pg_stat_activity
+        WHERE application_name = $1 AND datname = current_database() AND pid <> pg_backend_pid()`, [applicationName]);
+      for (const session of sessions.rows) {
+        await barrier.query('SELECT pg_terminate_backend($1)', [session.pid]);
+      }
     };
     const waitForMergeReconciliationScan = async (applicationName: string, timeoutMs: number) => {
       if (!barrier) throw new Error('Crash-recovery barrier client is not connected.');
@@ -1756,10 +1764,12 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       } finally { if (requestCloseTimeout) clearTimeout(requestCloseTimeout); }
       expect(mergeResponseStatus).toBeUndefined();
       expect(mergeRequestError).toBeDefined();
-      // Confirm the killed API's database transaction has exited before releasing
-      // the trigger barrier; otherwise the blocked candidate update can commit
-      // after the child dies, before the API notices the disconnected Git client.
-      await waitForSessionsToExit(childApplicationName, 60_000);
+      // The trigger is still blocking the pre-CAS transaction, so its backend
+      // cannot exit until the barrier is released. Terminate only sessions from
+      // this child app in this isolated test database; that rolls back the
+      // uncommitted candidate_sha update and preserves the durable PENDING row.
+      await terminateApiSessions(childApplicationName);
+      await waitForSessionsToExit(childApplicationName, 5_000);
       const unlocked = await barrier.query<{ pg_advisory_unlock: boolean }>(
         'SELECT pg_advisory_unlock(hashtextextended($1, 0))', [barrierKey]);
       expect(unlocked.rows[0]?.pg_advisory_unlock).toBe(true);
@@ -1831,6 +1841,16 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
           mergeJournalTableLockHeld = false;
         });
       }
+      let childSessionsConfirmed = true;
+      for (const { applicationName } of startedApiProcesses) {
+        try {
+          await terminateApiSessions(applicationName);
+          await waitForSessionsToExit(applicationName, 5_000);
+        } catch (error) {
+          childSessionsConfirmed = false;
+          cleanupErrors.push(error);
+        }
+      }
       if (barrierLockHeld && barrier) {
         await attemptCleanup(async () => {
           const unlocked = await barrier!.query<{ pg_advisory_unlock: boolean }>(
@@ -1838,14 +1858,6 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
           if (!unlocked.rows[0]?.pg_advisory_unlock) throw new Error('Crash-recovery advisory lock was not released.');
           barrierLockHeld = false;
         });
-      }
-      let childSessionsConfirmed = true;
-      for (const { applicationName } of startedApiProcesses) {
-        try { await waitForSessionsToExit(applicationName, 60_000); }
-        catch (error) {
-          childSessionsConfirmed = false;
-          cleanupErrors.push(error);
-        }
       }
       let barrierClosed = !barrier;
       if (barrier) {

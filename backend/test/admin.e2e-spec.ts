@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ThrottlerStorage } from '@nestjs/throttler';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
 import { Client } from 'pg';
@@ -67,7 +68,12 @@ describe('Admin HTTP + isolated PostgreSQL + Git', () => {
     db = new PrismaClient({ datasourceUrl: isolatedUrl.toString() });
 
     const { AppModule } = await import('../src/app.module');
-    const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const module = await Test.createTestingModule({ imports: [AppModule] })
+      // Admin acceptance covers account-lock behavior, not rate limiting;
+      // auth.e2e-spec exercises the real throttling behavior separately.
+      .overrideProvider(ThrottlerStorage).useValue({ increment: async (_key: string, ttl: number) => ({
+        totalHits: 1, timeToExpire: ttl, isBlocked: false, timeToBlockExpire: 0,
+      }) }).compile();
     app = module.createNestApplication();
     app.use(cookieParser());
     app.setGlobalPrefix('api/v1');

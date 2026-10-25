@@ -1,9 +1,24 @@
 import { ConfigService } from '@nestjs/config';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PrismaService } from '../database/prisma.service';
 import { HealthService } from './health.service';
+
+jest.mock('node:child_process', () => {
+  const actual = jest.requireActual<typeof import('node:child_process')>('node:child_process');
+  return {
+    ...actual,
+    execFile: jest.fn(
+      (
+        _command: string,
+        _args: string[],
+        _options: unknown,
+        callback: (error: Error | null, result: { stdout: string; stderr: string }) => void,
+      ) => callback(null, { stdout: 'git version test\n', stderr: '' }),
+    ),
+  };
+});
 
 describe('HealthService', () => {
   let storagePath: string;
@@ -34,5 +49,20 @@ describe('HealthService', () => {
 
     expect(result.status).toBe('error');
     expect(result.checks.database.status).toBe('down');
+  });
+
+  it('is not ready and does not expose the storage path when storage is a file', async () => {
+    const unwritableStoragePath = join(storagePath, 'storage-is-a-file');
+    await writeFile(unwritableStoragePath, 'not a directory');
+    const config = { getOrThrow: jest.fn().mockReturnValue(unwritableStoragePath) } as unknown as ConfigService;
+    const prisma = { $queryRaw: jest.fn().mockResolvedValue([{ '?column?': 1 }]) } as unknown as PrismaService;
+
+    const result = await new HealthService(config, prisma).checkReadiness();
+
+    expect(result.status).toBe('error');
+    expect(result.checks.database.status).toBe('up');
+    expect(result.checks.git.status).toBe('up');
+    expect(result.checks.storage.status).toBe('down');
+    expect(JSON.stringify(result)).not.toContain(unwritableStoragePath);
   });
 });
