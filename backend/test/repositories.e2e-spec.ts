@@ -880,6 +880,149 @@ process.exit(result.status ?? 1);
     }
   }, 60_000);
 
+  it('allows an authorized receive-pack to finish after account lock', async () => {
+    const created = await call('POST', 'repositories', ownerCookie, { name: 'PushUserLockRace', initializeReadme: true });
+    expect(created.status).toBe(201);
+    const { repository } = await created.json() as { repository: { id: string } };
+    const stored = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
+    const bare = join(storageRoot, stored.storageKey);
+    const tokenResponse = await call('POST', 'tokens', ownerCookie, {
+      name: 'Push user-lock race', scopes: ['repo:read', 'repo:write'],
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    expect(tokenResponse.status).toBe(201);
+    const { secret, token } = await tokenResponse.json() as { secret: string; token: { id: string } };
+    const work = join(storageRoot, 'push-user-lock-race-clone');
+    const hookRoot = join(storageRoot, 'push-user-lock-race-hooks');
+    const hookStarted = join(storageRoot, 'push-user-lock-race-hook-started');
+    const hookRelease = join(storageRoot, 'push-user-lock-race-hook-release');
+    const askpass = join(storageRoot, process.platform === 'win32' ? 'push-user-lock-askpass.cmd' : 'push-user-lock-askpass.sh');
+    const run = promisify(execFile);
+    await writeFile(askpass, process.platform === 'win32'
+      ? '@echo off\r\necho %TEST_GIT_PAT%\r\n'
+      : '#!/bin/sh\nprintf "%s\\n" "$TEST_GIT_PAT"\n', { mode: 0o700 });
+    const git = (args: string[]) => run('git', ['-c', 'credential.helper=', ...args], {
+      timeout: 20_000,
+      env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(storageRoot, 'empty-user-lock-git-config'),
+        GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: askpass, TEST_GIT_PAT: secret },
+    });
+    const repoUrl = `${base.replace('http://', 'http://Owner@')}/git/Owner/PushUserLockRace.git`;
+    await git(['clone', repoUrl, work]);
+    await git(['-C', work, 'config', 'user.name', 'Push User Lock Tester']);
+    await git(['-C', work, 'config', 'user.email', 'push-user-lock@example.test']);
+    await git(['-C', work, 'switch', '-c', 'feature/push-before-user-lock']);
+    await writeFile(join(work, 'race.txt'), 'authorized push completes after actor lock\n');
+    await git(['-C', work, 'add', 'race.txt']);
+    await git(['-C', work, 'commit', '-m', 'Push before account lock']);
+    const pushedSha = (await git(['-C', work, 'rev-parse', 'HEAD'])).stdout.trim();
+
+    await mkdir(hookRoot, { recursive: true });
+    const realHook = resolve(__dirname, '../src/repositories/pre-receive-hook.cjs');
+    const barrierHook = `#!/usr/bin/env node
+const fs = require('node:fs');
+const { spawnSync } = require('node:child_process');
+const refs = fs.readFileSync(0);
+fs.writeFileSync(process.env.CODE_FORGE_TEST_HOOK_STARTED, 'started');
+const deadline = Date.now() + 20_000;
+while (!fs.existsSync(process.env.CODE_FORGE_TEST_HOOK_RELEASE)) {
+  if (Date.now() >= deadline) process.exit(99);
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+}
+const result = spawnSync(process.execPath, [process.env.CODE_FORGE_TEST_REAL_HOOK], {
+  input: refs, stdio: ['pipe', 'inherit', 'inherit'], env: process.env,
+});
+process.exit(result.status ?? 1);
+`;
+    await writeFile(join(hookRoot, 'pre-receive'), barrierHook, { mode: 0o755 });
+    const storage = app.get(GitStorageService);
+    const openPack = jest.spyOn(storage, 'openPack').mockImplementation((key, defaultBranch, service, advertise,
+      protocol, actorIsOwner) => spawn('git', [
+      ...(process.platform === 'win32' ? ['-c', 'core.longpaths=true'] : []),
+      '-c', `http.receivepack=${service === 'git-receive-pack'}`,
+      '-c', 'http.getanyfile=false',
+      '-c', `http.uploadpack=${service !== 'git-receive-pack'}`,
+      '-c', 'http.maxRequestBuffer=1048576',
+      ...(service === 'git-receive-pack' ? ['-c', `core.hooksPath=${hookRoot}`, '-c', 'receive.denyNonFastForwards=true'] : []),
+      'http-backend',
+    ], {
+      detached: process.platform !== 'win32',
+      env: { PATH: process.env.PATH, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_PROJECT_ROOT: storageRoot, GIT_HTTP_EXPORT_ALL: '1',
+        PATH_INFO: `/${key}/${advertise ? 'info/refs' : service}`,
+        REQUEST_METHOD: advertise ? 'GET' : 'POST', QUERY_STRING: advertise ? `service=${service}` : '',
+        CONTENT_TYPE: advertise ? '' : `application/x-${service}-request`,
+        ...(service === 'git-receive-pack' ? {
+          CODE_FORGE_DEFAULT_BRANCH: defaultBranch,
+          CODE_FORGE_ALLOW_DEFAULT_BRANCH_INITIALIZATION: String(actorIsOwner),
+          CODE_FORGE_MAX_FILE_BYTES: String(Number(process.env.MAX_FILE_BYTES ?? 1024)),
+          CODE_FORGE_MAX_REPOSITORY_BYTES: String(Number(process.env.MAX_REPOSITORY_BYTES ?? 32 * 1024)),
+          CODE_FORGE_TEST_HOOK_STARTED: hookStarted,
+          CODE_FORGE_TEST_HOOK_RELEASE: hookRelease,
+          CODE_FORGE_TEST_REAL_HOOK: realHook,
+        } : {}),
+        ...(protocol ? { GIT_PROTOCOL: protocol } : {}),
+      }, stdio: ['pipe', 'pipe', 'pipe'],
+    }));
+
+    const waitFor = async (predicate: () => boolean | Promise<boolean>, description: string) => {
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline) {
+        if (await predicate()) return;
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 20));
+      }
+      throw new Error(`Timed out waiting for ${description}.`);
+    };
+    let pushResult: Awaited<ReturnType<typeof git>> | undefined;
+    let pushError: unknown;
+    let pushPromise: Promise<void> | undefined;
+    try {
+      pushPromise = git(['-C', work, 'push', '--set-upstream', 'origin', 'feature/push-before-user-lock'])
+        .then((result) => { pushResult = result; }, (error) => { pushError = error; });
+      await waitFor(() => existsSync(hookStarted), 'authorized receive-pack to enter pre-receive');
+
+      await db.user.update({ where: { id: ownerId }, data: { status: 'LOCKED', lockedAt: new Date() } });
+      expect(await db.user.findUniqueOrThrow({ where: { id: ownerId }, select: { status: true } })).toMatchObject({ status: 'LOCKED' });
+
+      await writeFile(hookRelease, 'release');
+      await pushPromise;
+      expect(pushError).toBeUndefined();
+      expect(pushResult).toBeDefined();
+      expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/feature/push-before-user-lock'], { encoding: 'utf8' }).trim())
+        .toBe(pushedSha);
+
+      const operations = await db.gitPushOperation.findMany({ where: { repositoryId: stored.id, actorId: ownerId } });
+      expect(operations).toHaveLength(1);
+      expect(operations[0]).toMatchObject({ status: 'COMPLETED', changedRefCount: 1, errorCode: null });
+      const pushAudits = await db.auditLog.findMany({ where: { targetId: stored.id, action: 'GIT_PUSH_COMPLETED' } });
+      expect(pushAudits).toHaveLength(1);
+      expect(pushAudits[0]).toMatchObject({ actorId: ownerId, details: {
+        operationId: operations[0]!.operationId, repositoryId: stored.id, storageGeneration: stored.storageGeneration, changedRefCount: 1,
+      } });
+      expect(JSON.stringify(pushAudits[0]?.details)).not.toContain(secret);
+
+      const refsAfterFirstPush = execFileSync('git', ['--git-dir', bare, 'for-each-ref', '--format=%(refname)%09%(objectname)', 'refs/'], { encoding: 'utf8' });
+      const rejectedAdvertisement = await fetch(`${base}/git/Owner/PushUserLockRace.git/info/refs?service=git-receive-pack`, {
+        headers: { Authorization: `Basic ${Buffer.from(`Owner:${secret}`).toString('base64')}` },
+      });
+      expect(rejectedAdvertisement.status).toBe(401);
+      await writeFile(join(work, 'after-lock.txt'), 'must remain local\n');
+      await git(['-C', work, 'add', 'after-lock.txt']);
+      await git(['-C', work, 'commit', '-m', 'Attempt push after account lock']);
+      await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/feature/after-user-lock'])).rejects.toBeDefined();
+      expect(execFileSync('git', ['--git-dir', bare, 'for-each-ref', '--format=%(refname)%09%(objectname)', 'refs/'], { encoding: 'utf8' }))
+        .toBe(refsAfterFirstPush);
+      expect(await db.gitPushOperation.count({ where: { repositoryId: stored.id, actorId: ownerId } })).toBe(1);
+      expect(await db.auditLog.count({ where: { targetId: stored.id, action: 'GIT_PUSH_COMPLETED' } })).toBe(1);
+    } finally {
+      if (!existsSync(hookRelease)) await writeFile(hookRelease, 'release').catch(() => undefined);
+      if (pushPromise) await pushPromise.catch(() => undefined);
+      openPack.mockRestore();
+      await db.personalAccessToken.deleteMany({ where: { id: token.id, userId: ownerId } });
+      await db.user.update({ where: { id: ownerId }, data: { status: 'ACTIVE', lockedAt: null } });
+      await db.repository.deleteMany({ where: { id: stored.id } });
+    }
+  }, 60_000);
+
   it('serializes a valid Git push before repository soft-delete and rejects later writes', async () => {
     const created = await call('POST', 'repositories', ownerCookie, { name: 'PushDeleteRace', initializeReadme: true });
     expect(created.status).toBe(201);
