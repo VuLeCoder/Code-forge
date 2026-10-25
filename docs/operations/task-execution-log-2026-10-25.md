@@ -823,3 +823,24 @@ snapshots, not current status. Current acceptance state is in the task board.
   - Workspace lint (`corepack pnpm lint`): 0 errors, 0 warnings.
   - `git diff --check`: 0 errors.
   - Pushed to `origin/thviet`.
+
+## T-GIT-HTTP-TIMER-OPEN-HANDLE — commit 1b0901b, pushed to origin/thviet
+
+- Source: `thviet` and `origin/thviet` point to exact SHA `1b0901b`, commit `fix(git-http): unref process timer and clear on stop to prevent open handles`.
+- Scope: Backend Git HTTP streaming handler in `backend/src/repositories/git-http.service.ts`.
+- Root cause diagnosis:
+  - When Git push operations fail or trigger reconciliation in E2E tests (e.g. `push-audit.e2e-spec.ts`), `git-http.service.ts` calls `stop()`.
+  - Previously, `stop()` set `stopped = true` but did not invoke `cleanup()`, leaving the 60,000 ms process timeout active in the Node.js event loop without `.unref()`.
+  - This caused Jest to hang with `Jest did not exit one second after the test run has completed` after running `push-audit.e2e-spec.ts`.
+- Fix applied:
+  - Invoked `cleanup()` inside `stop()` to immediately cancel the timer and detach abort listeners.
+  - Called `timer.unref()` on timer creation so the timer never prevents the process from cleanly exiting.
+- Verification evidence:
+  - `push-audit.e2e-spec.ts` executed without `--forceExit` and exited cleanly in 11.29s (exit code 0).
+  - All 9 backend E2E suites verified against isolated PostgreSQL container on loopback port 49588: 39 passed, 2 skipped (Windows process harness).
+  - `git-http.service.spec.ts`: 8/8 passed.
+  - Full backend unit suite: 19 suites / 132 tests passed in 38.11s.
+  - `corepack pnpm typecheck`: 0 errors.
+  - `corepack pnpm lint`: 0 errors, 0 warnings.
+  - `git diff --check`: 0 errors.
+  - Pushed to `origin/thviet`.

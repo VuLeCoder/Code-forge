@@ -18,7 +18,7 @@ Original plan snapshot: 2026-10-25 14:02 Asia/Saigon. See [plan](plan.md) for es
 - [x] T1: P3/P4 real PostgreSQL/Git acceptance expanded: commit `027751b` verified purge retains expired storage while merge journal needs reconciliation (3/3 passed on loopback test DB).
 - [ ] T2: Issue #6 ambiguous-journal admin/operator resolution deferred per owner choice; keep current fail-closed behavior and runbook. Commit `1e8736c` was reverted as `4b7eaed` after review identified unverified mark-failed/retry paths, non-atomic resolution audit, and free-text reason risk. Revisit only after the authorization/approval policy and security contract are approved.
 - [ ] Checkpoint A: focused suites and independent code/security review green.
-- [ ] T3: Full local regression and Docker image smoke on integrated candidate. Backend E2E is not a clean pass yet: 9 suites / 38 passed / 2 skipped, then Jest remained alive after an open-handle warning and was interrupted.
+- [x] T3: Open-handle root cause diagnosed and resolved in commit `1b0901b` (`git-http` streaming process timer unref and stop-cleanup). Backend E2E clean pass: 9 suites / 39 passed / 2 skipped with 0 open handles and clean command exit.
 - [x] T4 on `thviet`: hosted CI green on exact `25487b5` candidate SHA (run #77).
 - [ ] T5: Cloud P2/P8 smoke, backup/rollback/recovery; Render P1001 remains unresolved and Vercel Git access is owner-dependent.
 - [ ] T6: Reconcile docs and hand off runbooks/evidence.
