@@ -127,15 +127,18 @@ export class GitStorageService {
   }
 
   async compare(key: string, sourceBranch: string, targetBranch: string, signal?: AbortSignal) {
+    const compareSignal = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(15_000)])
+      : AbortSignal.timeout(15_000);
     this.validateRef(sourceBranch);
     this.validateRef(targetBranch);
-    const branches = await this.branches(key, targetBranch, undefined, signal);
+    const branches = await this.branches(key, targetBranch, undefined, compareSignal);
     const source = branches.branches.find((branch) => branch.name === sourceBranch);
     const target = branches.branches.find((branch) => branch.name === targetBranch);
     if (!source || !target) throw new NotFoundException({ error: { code: 'REF_NOT_FOUND', message: 'Branch nguồn hoặc đích không tồn tại.' } });
     const args = ['--git-dir', this.path(key)];
     let mergeBase: string;
-    try { mergeBase = (await this.git([...args, 'merge-base', target.commitSha, source.commitSha], undefined, 128 * 1024, signal)).stdout.trim(); }
+    try { mergeBase = (await this.git([...args, 'merge-base', target.commitSha, source.commitSha], undefined, 128 * 1024, compareSignal)).stdout.trim(); }
     catch (error) {
       if ([1, 128].includes((error as { code: number }).code)) {
         return { state: 'NO_MERGE_BASE' as const, sourceSha: source.commitSha, targetSha: target.commitSha,
@@ -146,11 +149,11 @@ export class GitStorageService {
     if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(mergeBase)) throw this.commitUnavailable();
     try {
       const commitOutput = (await this.git([...args, 'log', '--topo-order', '--no-notes', '-z',
-        `--format=format:${this.commitFormat}`, '--max-count=201', `${target.commitSha}..${source.commitSha}`, '--'], undefined, 128 * 1024, signal)).stdout;
+        `--format=format:${this.commitFormat}`, '--max-count=201', `${target.commitSha}..${source.commitSha}`, '--'], undefined, 128 * 1024, compareSignal)).stdout;
       const commits = this.parseCommits(commitOutput);
-      const rawFiles = (await this.git([...args, 'diff', '--name-status', '-z', '--find-renames', mergeBase, source.commitSha], undefined, 128 * 1024, signal)).stdout;
+      const rawFiles = (await this.git([...args, 'diff', '--name-status', '-z', '--find-renames', mergeBase, source.commitSha], undefined, 128 * 1024, compareSignal)).stdout;
       const tokens = rawFiles.split('\0').filter(Boolean);
-      const files: { status: string; path: string; previousPath?: string }[] = [];
+      const files: { status: string; path: string; previousPath?: string; diffStatus?: 'TEXT' | 'BINARY' | 'TRUNCATED' | 'UNAVAILABLE'; diff?: string }[] = [];
       for (let i = 0; i < tokens.length;) {
         const status = tokens[i++]!;
         if (/^R\d+$/.test(status) || /^C\d+$/.test(status)) {
@@ -164,20 +167,49 @@ export class GitStorageService {
         }
       }
       if (commits.length > 200 || files.length > 200) throw new ServiceUnavailableException({ error: { code: 'GIT_COMPARE_LIMIT_EXCEEDED', message: 'So sánh vượt giới hạn 200 commit hoặc 200 file.' } });
-      const { stdout: rawDiff } = await this.git([...args, 'diff', '--no-ext-diff', '--no-color', '--no-textconv', '--unified=3', mergeBase, source.commitSha], undefined, 1024 * 1024 + 1, signal);
-      const sections = rawDiff.split(/(?=^diff --git )/m);
       const kept: string[] = [];
       let usedBytes = 0;
       let diffTruncated = false;
-      for (const section of sections) {
-        const bytes = Buffer.from(section);
-        if (usedBytes >= 1024 * 1024) { diffTruncated = true; break; }
-        const fileLimit = Math.min(bytes.length, 128 * 1024, 1024 * 1024 - usedBytes);
-        if (fileLimit < bytes.length) diffTruncated = true;
-        kept.push(bytes.subarray(0, fileLimit).toString('utf8'));
-        usedBytes += fileLimit;
+      for (const file of files) {
+        if (usedBytes >= 1024 * 1024) {
+          file.diffStatus = 'UNAVAILABLE';
+          diffTruncated = true;
+          continue;
+        }
+        const paths = [file.previousPath, file.path].filter((value): value is string => Boolean(value));
+        const pathspecs = [...new Set(paths)].map((path) => `:(literal)${path}`);
+        let fileDiff: string;
+        try {
+          fileDiff = (await this.git([...args, 'diff', '--no-ext-diff', '--no-color', '--no-textconv', '--unified=3',
+            '--find-renames', mergeBase, source.commitSha, '--', ...pathspecs], undefined, 128 * 1024 + 8192, compareSignal)).stdout;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+            file.diffStatus = 'TRUNCATED';
+            fileDiff = '';
+            diffTruncated = true;
+          } else throw error;
+        }
+        if (/^(?:Binary files .* differ|GIT binary patch)$/m.test(fileDiff)) {
+          file.diffStatus = 'BINARY';
+          continue;
+        }
+        const fileBytes = Buffer.byteLength(fileDiff, 'utf8');
+        if (file.diffStatus !== 'TRUNCATED' && fileBytes > 128 * 1024) {
+          file.diffStatus = 'TRUNCATED';
+          diffTruncated = true;
+          continue;
+        }
+        if (file.diffStatus === 'TRUNCATED') continue;
+        if (usedBytes + fileBytes > 1024 * 1024) {
+          file.diffStatus = 'TRUNCATED';
+          diffTruncated = true;
+          continue;
+        }
+        file.diffStatus = 'TEXT';
+        file.diff = fileDiff;
+        kept.push(fileDiff);
+        usedBytes += fileBytes;
       }
-      if (sections.length > kept.length) diffTruncated = true;
       const diff = kept.join('');
       return { state: commits.length ? 'READY' as const : 'ALREADY_MERGED' as const,
         sourceSha: source.commitSha, targetSha: target.commitSha, mergeBase, commits, files,

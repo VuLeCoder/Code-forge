@@ -231,8 +231,39 @@ describe('GitStorageService with real Git', () => {
     const result = await storage.compare(key, 'feature/compare', 'main');
     expect(result).toMatchObject({ state: 'READY', sourceSha: source, targetSha: base, mergeBase: base, diffTruncated: false });
     expect(result.commits.map((commit) => commit.sha)).toEqual([source]);
-    expect(result.files).toEqual(expect.arrayContaining([{ status: 'M', path: 'README.md' }, { status: 'A', path: 'feature.txt' }]));
+    expect(result.files).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: 'M', path: 'README.md' }),
+      expect.objectContaining({ status: 'A', path: 'feature.txt' }),
+    ]));
     expect(result.diff).toContain('+added line');
+  });
+
+  it('returns per-file compare states for text, binary, and diffs above the file limit', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'main', true, 'Compare file states');
+    const git = (args: string[], input?: Buffer | string) => execFileSync('git', ['--git-dir', join(root, key), ...args], { encoding: 'utf8', input }).trim();
+    const base = git(['rev-parse', 'refs/heads/main']);
+    const textBlob = git(['hash-object', '-w', '--stdin'], 'small text\n');
+    const binaryBlob = git(['hash-object', '-w', '--stdin'], Buffer.from([0, 1, 2, 255]));
+    const largeBlob = git(['hash-object', '-w', '--stdin'], 'x'.repeat(140 * 1024));
+    const tree = git(['mktree', '-z'], [
+      `100644 blob ${textBlob}\ttext.txt\0`,
+      `100644 blob ${binaryBlob}\tbinary.dat\0`,
+      `100644 blob ${largeBlob}\tlarge.txt\0`,
+    ].join(''));
+    const source = git(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', tree, '-p', base, '-m', 'File states']);
+    git(['update-ref', 'refs/heads/feature/file-states', source]);
+
+    const result = await storage.compare(key, 'feature/file-states', 'main');
+
+    expect(result.files).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'text.txt', diffStatus: 'TEXT', diff: expect.stringContaining('+small text') }),
+      expect.objectContaining({ path: 'binary.dat', diffStatus: 'BINARY' }),
+      expect.objectContaining({ path: 'large.txt', diffStatus: 'TRUNCATED' }),
+    ]));
+    expect(result.diff).toContain('+small text');
+    expect(result.diff).not.toContain('x'.repeat(140 * 1024));
+    expect(result.diffTruncated).toBe(true);
   });
 
   it('returns NO_MERGE_BASE for unrelated branch histories without changing refs', async () => {

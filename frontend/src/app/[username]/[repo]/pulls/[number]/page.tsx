@@ -15,7 +15,14 @@ type Permissions = { canCreate: boolean; canEdit: boolean; canMerge: boolean };
 type MergeOperation = { operationId: string; status: "PENDING" | "NEEDS_RECONCILIATION" | "COMPLETED" | "FAILED"; errorCode: string | null } | null;
 type DetailResult = { pullRequest: PullRequest; permissions: Permissions; mergeOperation?: MergeOperation };
 type Commit = { sha: string; subject: string; author: { name: string; email: string }; authoredAt: string };
-type ChangedFile = { status: string; path: string; previousPath?: string };
+type ChangedFile = {
+  status: string;
+  path: string;
+  previousPath?: string;
+  diffStatus?: "TEXT" | "BINARY" | "TRUNCATED" | "UNAVAILABLE";
+  diff?: string;
+  diffTruncated?: boolean;
+};
 type CompareResult = { state: "READY" | "ALREADY_MERGED" | "NO_MERGE_BASE" | "STORAGE_RESET"; sourceSha: string; targetSha: string; mergeBase: string | null; commits: Commit[]; files: ChangedFile[]; diff: string; diffTruncated: boolean; storageGeneration: number; stale?: boolean };
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -152,6 +159,7 @@ export default function PullRequestDetailPage() {
   const pull = result.pullRequest;
   const canEdit = result.permissions.canEdit && pull.status !== "MERGED";
   const canMerge = result.permissions.canMerge && pull.status === "OPEN" && compare.state === "READY" && !compare.stale && !reconciling;
+  const hasPerFileDiff = compare.files.some((file) => file.diffStatus !== undefined || typeof file.diff === "string");
   return <main className={`container ${styles.page}`} aria-busy={loading || busy}>
     <nav className={styles.breadcrumb} aria-label="Điều hướng"><Link href={`/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`}>{owner}/{repo}</Link><span aria-hidden="true">/</span><Link href={`/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`}>Pull requests</Link><span aria-hidden="true">/</span><strong>#{number}</strong></nav>
     <header className={styles.header}>
@@ -179,12 +187,29 @@ export default function PullRequestDetailPage() {
     {compare.state === "NO_MERGE_BASE" && <p className={styles.warning} role="status">Hai branch không còn merge-base chung. Hãy đóng PR và tạo PR mới từ lịch sử phù hợp.</p>}
     {compare.state === "ALREADY_MERGED" && <p className={styles.success} role="status">Các commit nguồn đã có trong branch đích.</p>}
     {compare.stale && <p className={styles.warning} role="status">Branch đã thay đổi kể từ lúc tạo PR. Hãy kiểm tra snapshot mới bên dưới trước khi merge.</p>}
-    {compare.diffTruncated && <p className={styles.warning} role="status">Diff đã được rút gọn theo giới hạn hiển thị. Tải clone để xem toàn bộ nội dung.</p>}
+    {!hasPerFileDiff && compare.diffTruncated && <p className={styles.warning} role="status">Diff đã được rút gọn theo giới hạn hiển thị. Tải clone để xem toàn bộ nội dung.</p>}
 
     <section className={styles.panel} aria-labelledby="description-title"><h2 id="description-title">Mô tả</h2>{pull.description ? <p className={styles.description}>{pull.description}</p> : <p className={styles.muted}>Chưa có mô tả.</p>}</section>
     <section className={styles.panel} aria-labelledby="commits-title"><h2 id="commits-title">Commits <span className={styles.count}>{compare.commits.length}</span></h2>{compare.commits.length ? <ol className={styles.commitList}>{compare.commits.map((commit) => <li key={commit.sha}><code>{commit.sha.slice(0, 12)}</code><span>{commit.subject || "(không có tiêu đề)"}</span><small>{commit.author.name} · {new Date(commit.authoredAt).toLocaleString("vi-VN")}</small></li>)}</ol> : <p className={styles.muted}>Không có commit mới trong snapshot này.</p>}</section>
     <section className={styles.panel} aria-labelledby="files-title"><h2 id="files-title">Files changed <span className={styles.count}>{compare.files.length}</span></h2>{compare.files.length ? <ul className={styles.fileList}>{compare.files.map((file, index) => <li key={`${file.path}-${index}`}><span className={styles.fileStatus} aria-label={`Trạng thái ${file.status}`}>{file.status}</span><code>{file.previousPath ? `${file.previousPath} → ` : ""}{file.path}</code></li>)}</ul> : <p className={styles.muted}>Không có file thay đổi.</p>}</section>
-    <section className={styles.panel} aria-labelledby="diff-title"><h2 id="diff-title">Diff</h2>{compare.diff ? <pre className={styles.diff} tabIndex={0} aria-label="Nội dung diff dạng văn bản">{compare.diff}</pre> : <p className={styles.muted}>Diff trống.</p>}</section>
+    <section className={styles.panel} aria-labelledby="diff-title"><h2 id="diff-title">Diff</h2>{hasPerFileDiff ? <div className={styles.fileDiffList}>
+      {compare.files.map((file, index) => {
+        const diffStatus = file.diffStatus ?? (typeof file.diff === "string" ? "TEXT" : "UNAVAILABLE");
+        const label = diffStatus === "TEXT" ? "Văn bản" : diffStatus === "BINARY" ? "File nhị phân" : diffStatus === "TRUNCATED" ? "Đã rút gọn" : "Không khả dụng";
+        return <article className={styles.fileDiff} key={`${file.path}-${index}`}>
+          <h3><code>{file.previousPath ? `${file.previousPath} → ` : ""}{file.path}</code><span className={styles.diffState} role="status">{label}</span></h3>
+          {diffStatus === "TEXT" && typeof file.diff === "string" && file.diff.length > 0
+            ? <pre className={styles.diff} tabIndex={0} aria-label={`Diff của ${file.path}`}>{file.diff}</pre>
+            : diffStatus === "TEXT" && typeof file.diff === "string"
+              ? <p className={styles.muted}>Không có dòng diff để hiển thị.</p>
+              : diffStatus === "BINARY"
+                ? <p className={styles.muted}>Không thể hiển thị diff dạng văn bản cho file nhị phân.</p>
+                : diffStatus === "TRUNCATED"
+                  ? <p className={styles.warning} role="status">Diff của file này đã vượt giới hạn hiển thị. Clone repository để xem đầy đủ.</p>
+                  : <p className={styles.muted}>Diff của file này hiện không khả dụng.</p>}
+        </article>;
+      })}
+    </div> : compare.diff ? <pre className={styles.diff} tabIndex={0} aria-label="Nội dung diff dạng văn bản">{compare.diff}</pre> : <p className={styles.muted}>Diff trống.</p>}</section>
     <div className={styles.bottom}><Link href={`/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`}>Quay lại danh sách</Link><button className={styles.refresh} disabled={busy} onClick={() => { setLoading(true); void load(); }}>Tải lại dữ liệu</button></div>
   </main>;
 }

@@ -59,6 +59,13 @@
 .fileList li:first-child { border-top: 0; }
 .fileList code { min-width: 0; overflow-wrap: anywhere; font-size: .84rem; }
 .fileStatus { display: inline-grid; place-items: center; flex: 0 0 25px; height: 25px; border: 1px solid var(--border); border-radius: 6px; color: var(--brand-700); background: var(--brand-50); font-size: .72rem; font-weight: 800; }
+.fileDiffList { display: grid; gap: 14px; }
+.fileDiff { min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.fileDiff h3 { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 14px; min-width: 0; padding: 11px 13px; border-bottom: 1px solid var(--border); background: var(--surface); font-size: .84rem; }
+.fileDiff h3 code { min-width: 0; overflow-wrap: anywhere; font: inherit; }
+.diffState { flex: 0 0 auto; color: var(--muted); font-size: .76rem; font-weight: 650; }
+.fileDiff > p { margin: 12px; }
+.fileDiff .warning { margin: 12px; }
 .diff { max-width: 100%; max-height: 70vh; overflow: auto; padding: 15px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: #26364a; background: #f8fafc; font: .8rem/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre; tab-size: 4; }
 .empty { display: grid; justify-items: center; gap: 12px; padding: 56px 22px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); text-align: center; }
 .empty > span { display: grid; place-items: center; width: 54px; height: 54px; border-radius: 16px; color: var(--brand-700); background: var(--brand-50); font-size: 1.8rem; font-weight: 800; }
