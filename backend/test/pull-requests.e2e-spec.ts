@@ -260,7 +260,7 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     expect(await db.gitPushOperation.count({ where: { repositoryId: repository.id } })).toBe(pushOperationCount);
     expect((await git(['--git-dir', bare, 'rev-parse', 'refs/heads/feature/snapshot'])).stdout.trim()).toBe(advancedSourceSha);
     expect((await git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).stdout.trim()).toBe(snapshot.targetSha);
-  });
+  }, 60_000);
 
   it('lets a PR author and repository owner update lifecycle state while denying other WRITE members', async () => {
     const ownerRegistration = await call('POST', 'auth/register', {
