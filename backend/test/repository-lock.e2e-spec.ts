@@ -179,7 +179,8 @@ describe('RepositoryLockService PostgreSQL advisory lock', () => {
     try {
       execFileSync('git', ['init', '--bare', repositoryPath], { stdio: 'ignore' });
       const tree = execFileSync('git', ['--git-dir', repositoryPath, 'mktree'], { input: '', encoding: 'utf8' }).trim();
-      const oldSha = execFileSync('git', ['--git-dir', repositoryPath, 'commit-tree', tree, '-m', 'old'], { encoding: 'utf8' }).trim();
+      const oldSha = execFileSync('git', ['-c', 'user.name=Repository Lock Test', '-c', 'user.email=repository-lock@example.test',
+        '--git-dir', repositoryPath, 'commit-tree', tree, '-m', 'old'], { encoding: 'utf8' }).trim();
       execFileSync('git', ['--git-dir', repositoryPath, 'update-ref', 'refs/heads/main', oldSha]);
 
       await monitor.connect();
