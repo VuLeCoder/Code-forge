@@ -60,16 +60,19 @@ describe('Admin bootstrap CLI + PostgreSQL', () => {
   it('creates an active admin with the password supplied only on stdin', async () => {
     const password = 'Admin-Password-123!';
     const result = runBootstrap(`RootAdmin\nroot-admin@example.test\n${password}\n${password}\n`);
+    const safeStdout = (result.stdout ?? '').replaceAll(password, '[REDACTED]');
+    const safeStderr = (result.stderr ?? '').replaceAll(password, '[REDACTED]');
 
-    expect(result.error).toBeUndefined();
+    expect(result.error === undefined).toBe(true);
+    expect(result.error?.message.includes(password) ?? false).toBe(false);
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('Đã tạo tài khoản ADMIN RootAdmin.');
-    expect(result.stderr).toBe('');
-    expect(result.args.join('\0')).not.toContain(password);
-    expect(result.stdout).not.toContain(password);
+    expect(safeStdout).toContain('Đã tạo tài khoản ADMIN RootAdmin.');
+    expect(safeStderr).toBe('');
+    expect(result.args.join('\0').includes(password)).toBe(false);
+    expect((result.stdout ?? '').includes(password)).toBe(false);
     const user = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'rootadmin' } });
     expect(user).toMatchObject({ systemRole: 'ADMIN', status: 'ACTIVE', lockedAt: null });
-    expect(user.passwordHash).not.toBe(password);
+    expect(user.passwordHash === password).toBe(false);
     expect(await argon2.verify(user.passwordHash, password)).toBe(true);
     await expect(db.auditLog.findMany({ where: { targetId: user.id } })).resolves.toEqual([
       expect.objectContaining({ actorId: null, action: 'SYSTEM_ADMIN_CREATED', details: { channel: 'bootstrap_cli' } }),
