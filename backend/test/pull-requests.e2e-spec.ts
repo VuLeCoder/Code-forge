@@ -976,12 +976,14 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       } finally { if (requestCloseTimeout) clearTimeout(requestCloseTimeout); }
       expect(mergeResponseStatus).toBeUndefined();
       expect(mergeRequestError).toBeDefined();
-      const childSessions = await waitForApiSessionsToExit(childApplicationName, 60_000);
-      expect(childSessions).toHaveLength(0);
       const barrierReleased = await barrier.query<{ pg_advisory_unlock: boolean }>(
         'SELECT pg_advisory_unlock(hashtextextended($1, 0))', [barrierKey]);
       expect(barrierReleased.rows[0]?.pg_advisory_unlock).toBe(true);
       barrierLockHeld = false;
+      // Let PostgreSQL leave the test barrier and observe that the killed API
+      // client is gone; waiting before releasing this lock deadlocks the proof.
+      const childSessions = await waitForApiSessionsToExit(childApplicationName, 60_000);
+      expect(childSessions).toHaveLength(0);
       expect(await db.pullRequest.findUniqueOrThrow({ where: { id: pullRequest.id } }))
         .toMatchObject({ status: 'OPEN', mergeCommitSha: null });
       expect(await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId } }))
