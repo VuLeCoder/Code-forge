@@ -373,6 +373,11 @@ snapshots, not current status. Current acceptance state is in the task board.
   `codeforge-merge-crash-test-20261025` is up on loopback port 49588 and
   `peaceful_chaplygin` remains running. No container was started, stopped, or
   modified by this health check; no volume was inspected or changed.
+- Follow-up after this continuation's requested delay: `docker info` again
+  reported server 29.9.2 and 2/2 running containers. `docker ps` showed the
+  isolated test PostgreSQL up for 43 minutes on `127.0.0.1:49588->5432/tcp`
+  and `peaceful_chaplygin` up for 2 hours. This was read-only; no container or
+  volume was started, stopped, inspected, reset, or modified.
 
 ## T-VALID-PACK-LOCK-LOSS — in-flight receive-pack cancellation
 
