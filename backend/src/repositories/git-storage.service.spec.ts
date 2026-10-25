@@ -235,6 +235,26 @@ describe('GitStorageService with real Git', () => {
     expect(result.diff).toContain('+added line');
   });
 
+  it('returns NO_MERGE_BASE for unrelated branch histories without changing refs', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'main', true, 'Unrelated histories');
+    const git = (args: string[], input?: string) => execFileSync('git', ['--git-dir', join(root, key), ...args], {
+      encoding: 'utf8', input,
+    }).trim();
+    const targetSha = git(['rev-parse', 'refs/heads/main']);
+    const emptyTree = git(['mktree'], '');
+    const sourceSha = git(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', emptyTree,
+      '-m', 'Unrelated root']);
+    git(['update-ref', 'refs/heads/feature/unrelated-root', sourceSha]);
+    const beforeRefs = await storage.snapshotRefs(key);
+
+    const result = await storage.compare(key, 'feature/unrelated-root', 'main');
+
+    expect(result).toEqual({ state: 'NO_MERGE_BASE', sourceSha, targetSha, mergeBase: null,
+      commits: [], files: [], diff: '', diffTruncated: false });
+    expect(await storage.snapshotRefs(key)).toEqual(beforeRefs);
+  });
+
   it('rejects a merge candidate containing a file above the configured file quota', async () => {
     const key = `${randomUUID()}.git`;
     await storage.create(key, 'main', true, 'Quota');

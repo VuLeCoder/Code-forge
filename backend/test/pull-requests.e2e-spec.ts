@@ -118,6 +118,165 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     }
   }, 30_000);
 
+  it('lets a PR author and repository owner update lifecycle state while denying other WRITE members', async () => {
+    const ownerRegistration = await call('POST', 'auth/register', {
+      username: 'LifecycleOwner', email: 'lifecycle-owner@example.test', password: 'test-password-123',
+    }, '');
+    expect(ownerRegistration.status).toBe(201);
+    const lifecycleOwnerCookie = cookie(ownerRegistration);
+
+    const authorRegistration = await call('POST', 'auth/register', {
+      username: 'LifecycleAuthor', email: 'lifecycle-author@example.test', password: 'test-password-123',
+    }, '');
+    expect(authorRegistration.status).toBe(201);
+    const authorCookie = cookie(authorRegistration);
+
+    const otherWriterRegistration = await call('POST', 'auth/register', {
+      username: 'LifecycleOther', email: 'lifecycle-other@example.test', password: 'test-password-123',
+    }, '');
+    expect(otherWriterRegistration.status).toBe(201);
+    const otherWriterCookie = cookie(otherWriterRegistration);
+
+    const repositoryResponse = await call('POST', 'repositories', {
+      name: 'LifecycleDemo', visibility: 'PRIVATE', initializeReadme: true,
+    }, lifecycleOwnerCookie);
+    expect(repositoryResponse.status).toBe(201);
+    const { repository } = await responseJson<{ repository: { id: string } }>(repositoryResponse);
+    const storedRepository = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
+    const author = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'lifecycleauthor' } });
+
+    for (const username of ['LifecycleAuthor', 'LifecycleOther']) {
+      const invitationResponse = await call('POST', 'repos/lifecycleowner/lifecycledemo/invitations', {
+        username, role: 'WRITE',
+      }, lifecycleOwnerCookie);
+      expect(invitationResponse.status).toBe(201);
+      const invitation = await responseJson<{ invitation: { id: string } }>(invitationResponse);
+      const accepted = await call('POST', `invitations/${invitation.invitation.id}/accept`, undefined,
+        username === 'LifecycleAuthor' ? authorCookie : otherWriterCookie);
+      expect(accepted.status).toBe(201);
+    }
+
+    const pullRequest = await db.pullRequest.create({ data: {
+      repositoryId: storedRepository.id,
+      number: 1,
+      authorId: author.id,
+      title: 'Original title',
+      description: 'Original description',
+      sourceBranch: 'feature/lifecycle',
+      targetBranch: 'main',
+      storageGeneration: storedRepository.storageGeneration,
+      sourceSha: 'a'.repeat(40),
+      targetSha: 'b'.repeat(40),
+    } });
+    const detailPath = 'repos/lifecycleowner/lifecycledemo/pulls/1';
+
+    const authorDetailResponse = await call('GET', detailPath, undefined, authorCookie);
+    expect(authorDetailResponse.status).toBe(200);
+    expect(await responseJson<{ permissions: { canEdit: boolean; canMerge: boolean } }>(authorDetailResponse))
+      .toMatchObject({ permissions: { canEdit: true, canMerge: false } });
+
+    const otherWriterDetailResponse = await call('GET', detailPath, undefined, otherWriterCookie);
+    expect(otherWriterDetailResponse.status).toBe(200);
+    expect(await responseJson<{ permissions: { canEdit: boolean; canMerge: boolean } }>(otherWriterDetailResponse))
+      .toMatchObject({ permissions: { canEdit: false, canMerge: false } });
+
+    const deniedEdit = await call('PATCH', detailPath, { title: 'Unauthorized title' }, otherWriterCookie);
+    expect(deniedEdit.status).toBe(403);
+    const deniedClose = await call('PATCH', detailPath, { state: 'CLOSED' }, otherWriterCookie);
+    expect(deniedClose.status).toBe(403);
+    const unchanged = await call('GET', detailPath, undefined, lifecycleOwnerCookie);
+    expect(await responseJson<{ pullRequest: { title: string; status: string; version: number } }>(unchanged))
+      .toMatchObject({ pullRequest: { title: 'Original title', status: 'OPEN', version: 1 } });
+
+    const authorEdit = await call('PATCH', detailPath, {
+      title: 'Author title', description: 'Edited by the PR author',
+    }, authorCookie);
+    expect(authorEdit.status).toBe(200);
+    expect(await responseJson<{ pullRequest: { title: string; description: string; status: string; version: number } }>(authorEdit))
+      .toMatchObject({ pullRequest: { title: 'Author title', description: 'Edited by the PR author', status: 'OPEN', version: 2 } });
+
+    const ownerEdit = await call('PATCH', detailPath, { title: 'Owner title' }, lifecycleOwnerCookie);
+    expect(ownerEdit.status).toBe(200);
+    expect(await responseJson<{ pullRequest: { title: string; version: number }; permissions: { canEdit: boolean; canMerge: boolean } }>(ownerEdit))
+      .toMatchObject({ pullRequest: { title: 'Owner title', version: 3 }, permissions: { canEdit: true, canMerge: true } });
+
+    const close = await call('PATCH', detailPath, { state: 'CLOSED' }, authorCookie);
+    expect(close.status).toBe(200);
+    expect(await responseJson<{ pullRequest: { status: string; version: number } }>(close))
+      .toMatchObject({ pullRequest: { status: 'CLOSED', version: 4 } });
+
+    const reopen = await call('PATCH', detailPath, { state: 'OPEN' }, authorCookie);
+    expect(reopen.status).toBe(200);
+    expect(await responseJson<{ pullRequest: { status: string; version: number } }>(reopen))
+      .toMatchObject({ pullRequest: { status: 'OPEN', version: 5 } });
+    expect(await db.auditLog.count({ where: { targetId: pullRequest.id, action: 'PULL_REQUEST_UPDATED' } })).toBe(4);
+  }, 60_000);
+
+  it('retains PR history and rejects a pre-reset merge after normal Git storage recovery', async () => {
+    const registration = await call('POST', 'auth/register', {
+      username: 'StorageResetOwner', email: 'storage-reset-owner@example.test', password: 'test-password-123',
+    }, '');
+    expect(registration.status).toBe(201);
+    const resetOwnerCookie = cookie(registration);
+
+    const repositoryResponse = await call('POST', 'repositories', {
+      name: 'StorageLoss', visibility: 'PRIVATE', initializeReadme: true,
+    }, resetOwnerCookie);
+    expect(repositoryResponse.status).toBe(201);
+    const { repository } = await responseJson<{ repository: { id: string } }>(repositoryResponse);
+    const storedRepository = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
+    const bare = join(storageRoot, storedRepository.storageKey);
+    const git = (args: string[], input?: string) => execFileSync('git', ['--git-dir', bare, ...args], {
+      encoding: 'utf8', input,
+    }).trim();
+    const targetSha = git(['rev-parse', 'refs/heads/main']);
+    const blobSha = git(['hash-object', '-w', '--stdin'], 'source content\n');
+    const treeSha = git(['mktree', '-z'], `100644 blob ${blobSha}\tnew-file.txt\0`);
+    const sourceSha = git(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', treeSha,
+      '-p', targetSha, '-m', 'Create source branch']);
+    git(['update-ref', 'refs/heads/feature/storage-loss', sourceSha]);
+
+    const pullsPath = 'repos/storageresetowner/storageloss/pulls';
+    const createResponse = await call('POST', pullsPath, {
+      title: 'PR survives source storage loss', sourceBranch: 'feature/storage-loss', targetBranch: 'main',
+    }, resetOwnerCookie);
+    expect(createResponse.status).toBe(201);
+    const created = await responseJson<{ pullRequest: { id: string; number: number; version: number; status: string } }>(createResponse);
+    const pullRequestId = created.pullRequest.id;
+
+    const initialCompareResponse = await call('GET', `${pullsPath}/${created.pullRequest.number}/compare`, undefined, resetOwnerCookie);
+    expect(initialCompareResponse.status).toBe(200);
+    const initialCompare = await responseJson<{ state: string; sourceSha: string; targetSha: string; storageGeneration: number }>(initialCompareResponse);
+    expect(initialCompare).toMatchObject({ state: 'READY', sourceSha, targetSha, storageGeneration: storedRepository.storageGeneration });
+
+    // This is the one bare repository created by this test under its beforeAll-owned temp root.
+    expect(resolve(bare)).toBe(resolve(storageRoot, storedRepository.storageKey));
+    await rm(bare, { recursive: true, force: true });
+
+    const recoveryRead = await call('GET', 'repos/storageresetowner/storageloss/branches', undefined, resetOwnerCookie);
+    expect(recoveryRead.status).toBe(200);
+    const recoveredStorage = await responseJson<{ branches: unknown[]; storageState: string; storageGeneration: number }>(recoveryRead);
+    expect(recoveredStorage).toMatchObject({ branches: [], storageState: 'RESET', storageGeneration: storedRepository.storageGeneration + 1 });
+
+    const compareAfterResetResponse = await call('GET', `${pullsPath}/${created.pullRequest.number}/compare`, undefined, resetOwnerCookie);
+    expect(compareAfterResetResponse.status).toBe(200);
+    expect(await responseJson<{ state: string; sourceSha: string; targetSha: string; storageGeneration: number }>(compareAfterResetResponse))
+      .toMatchObject({ state: 'STORAGE_RESET', sourceSha, targetSha, storageGeneration: recoveredStorage.storageGeneration });
+
+    const retained = await db.pullRequest.findUniqueOrThrow({ where: { id: pullRequestId } });
+    expect(retained).toMatchObject({ id: pullRequestId, status: 'OPEN', storageGeneration: storedRepository.storageGeneration });
+    const preMergeRefs = git(['for-each-ref', '--format=%(refname)%09%(objectname)', 'refs/heads/']);
+    const mergeResponse = await call('POST', `${pullsPath}/${created.pullRequest.number}/merge`, {
+      operationId: randomUUID(), expectedSourceSha: initialCompare.sourceSha, expectedTargetSha: initialCompare.targetSha,
+      storageGeneration: initialCompare.storageGeneration, version: created.pullRequest.version,
+    }, resetOwnerCookie);
+    expect(mergeResponse.status).toBe(409);
+    expect(await responseJson<{ error: { code: string } }>(mergeResponse)).toMatchObject({ error: { code: 'STALE_COMPARE' } });
+    expect(git(['for-each-ref', '--format=%(refname)%09%(objectname)', 'refs/heads/'])).toBe(preMergeRefs);
+    expect(await db.pullRequest.findUniqueOrThrow({ where: { id: pullRequestId } })).toMatchObject({ status: 'OPEN', mergeCommitSha: null });
+    expect(await db.pullRequestMergeOperation.count({ where: { pullRequestId } })).toBe(0);
+  }, 60_000);
+
   it('creates, compares, and owner-merges a PR while preserving both Git parents', async () => {
     const registered = await call('POST', 'auth/register', {
       username: 'PullOwner', email: 'pull-owner@example.test', password: 'test-password-123',
