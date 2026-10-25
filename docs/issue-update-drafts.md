@@ -1,16 +1,49 @@
 # GitHub issue update drafts
 
-Prepared for the existing public issues below. Issues #3/#4 were rechecked Open before the earlier draft; drafts remain unposted. **Historical comments below are stale and must not be posted as written.** Current pushed code is `9c2eb81`; hosted run `40162474987` passed all workflow gates. Earlier runs `40159331450` and `40160123068` failed at backend E2E, with exact causes still unknown. Local backend E2E and isolated Compose runtime smoke pass. Refresh these drafts before posting; no issue comment has been sent.
+**All text in this file is a draft only. No issue comment was posted by this update.** Recheck live issue state and refresh evidence immediately before posting; prior open-state checks are dated 2026-10-25 and are not proof of current state.
 
-## Current verified delta (2026-10-25)
+## Current evidence baseline (2026-10-25, branch `thviet`)
 
-- Do not post the historical #3/#4 comments below as written: their run IDs and acceptance status predate the latest green CI.
-- Run `40162474987` is the latest hosted gate on `9c2eb81` and passed. Earlier runs `40160123068` and `40159331450` failed in backend E2E; their exact cause remains unknown. No issue comment has been sent.
-- Local E2E on an isolated PostgreSQL 17 instance passed 9 suites / 34 tests with global Git identity disabled. This does not explain the hosted-only failure.
-- Compose runtime was checked using unique project `codeforge-smoke-20261025-b51c88c`; migrations 7/7 and API readiness passed. Its containers/network were stopped without deleting its two test-owned volumes or touching existing containers/volumes.
-- The child-process merge-crash E2E is still under correction; do not count it as accepted until process-tree exit and reconciliation assertions pass without success-path database session termination.
-- The valid-pack lock-loss test is integrated in `9c2eb81`; it passed 1/1 on the isolated Linux runner and hosted CI. Static/type/lint/security review also passed. Windows skips this POSIX-only process test.
-- No GitHub issue comments have been posted.
+- Current pushed commit: `250ffdc`. It adjusts the timeout to 180 seconds for the Linux-only backend E2E that kills a separate API process after the Git target ref moves and lets replacement startup maintenance reconcile.
+- Backend typecheck and `git diff --check` passed before the commit was pushed. Targeted ESLint reports only a pre-existing `await-thenable` at `backend/test/pull-requests.e2e-spec.ts:507`.
+- Public Actions metadata: run `40164718122` on `e5eda1a` failed at `Run corepack pnpm --filter backend test:e2e:failure`; exact logs are not available, so cause remains unknown. Run `40164867636` on `250ffdc` is `in_progress`; no result is claimed. The new E2E has not been run locally. Do not claim the process-crash/restart scenario passes until the `250ffdc` Linux run completes and verifies it.
+- Latest verified hosted green run remains `40162474987` on `9c2eb81`; it does not include the crash/restart test added in `250ffdc`.
+- Local Compose runtime smoke and earlier backend E2E evidence are recorded in the acceptance board; neither is cloud-release evidence. Vercel/Render/Neon deployment, direct Render Git, backup/restore, source-loss recovery, and manual screen-reader/device review remain unverified.
+- Issue #5's durable push audit is implemented, but a supported operator workflow for permanently ambiguous journals remains a gap. Keep the system fail-closed; do not suggest manual database/ref repair.
+- The earlier exact logs for `40160123068` and `40159331450` remain unexplained. Historical drafts below are obsolete; do not post them as written.
+
+## Current short drafts (refresh run IDs and issue state before use)
+
+### Issue #3 — PR/Git recovery
+
+```markdown
+### Status update — 2026-10-25
+
+- `thviet` is at `250ffdc`. This commit sets a 180-second timeout for the Linux-only process-crash/restart E2E covering the window after a merge target ref moves but before PR metadata commits. Run `40164867636` is currently `in_progress`.
+- Static acceptance so far: backend typecheck and `git diff --check` pass. Targeted ESLint still has a pre-existing `await-thenable` at `backend/test/pull-requests.e2e-spec.ts:507`.
+- Run `40164718122` for `e5eda1a` failed at `Run corepack pnpm --filter backend test:e2e:failure`, but that step name alone does not establish the cause; exact log diagnosis awaits user GitHub sign-in. Do not count crash/restart recovery as accepted until run `40164867636` for this exact commit proves natural process/session exit, replacement-startup reconciliation, one audit, idempotent retry, and the resulting two-parent commit.
+- The previous verified hosted run is `40162474987` on `9c2eb81`; earlier E2E failures remain historical and unexplained.
+- Permanently ambiguous/cross-type journals still have no supported operator resolution workflow and remain fail-closed. No manual SQL or Git ref repair is supported.
+- Cloud Git transport and source-loss recovery remain untested.
+```
+
+### Issue #4 — CI, Docker, and cloud release
+
+```markdown
+### Status update — 2026-10-25
+
+- `thviet` is at `250ffdc`; run `40164867636` is `in_progress`, and its result has not been inspected. Run `40164718122` on `e5eda1a` failed at the backend E2E step; its cause is unknown pending detailed logs. The latest verified green run remains `40162474987` on `9c2eb81`.
+- Earlier isolated Compose runtime smoke applied migrations 7/7 and returned backend readiness 200. This is local evidence only, not cloud acceptance.
+- Vercel/Render/Neon, direct Render Git HTTPS (including payloads above 4.5 MB), cold start, TLS/proxy behavior, backup/restore, and source-loss/recovery have not been verified.
+- Free Render Git storage may be ephemeral while PostgreSQL metadata persists. Do not describe the demo source as durable; require a visible warning and a tested restore from a local clone before release.
+- Cloud setup requires owner-selected provider resources, canonical hostname/audience, and explicit acceptance of ephemeral source storage.
+```
+
+### Issue #5 — durable push audit / ambiguous recovery
+
+Keep the existing issue open until the owner reviews the remaining gap. Before commenting, recheck the issue's live state and decide whether to keep the operator-resolution follow-up scoped under #5 or track it separately. Current draft issue `docs/operations/issue-draft-ambiguous-git-journals.md` is unpublished; it records the unresolved questions about `ADMIN` versus a separate operator role and single versus dual approval. No duplicate issue has been created by this task.
+
+## Historical drafts — obsolete, do not post
 
 ## Issue #3 — [P3/P4/P7] Kiểm thử full-stack PR, merge an toàn và phục hồi cạnh tranh
 

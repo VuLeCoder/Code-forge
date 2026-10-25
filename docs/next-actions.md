@@ -1,48 +1,56 @@
 # Code Forge — remaining task plan
 
-Baseline: branch `thviet`, latest pushed code commit `9c2eb81`. Hosted run `40162474987` passed all gates on that commit. Earlier runs `40160123068` and `40159331450` failed at backend E2E; exact causes remain unknown and GitHub sign-in is needed only to investigate those historical failures. Local backend E2E passed on isolated PostgreSQL. Maintenance grace unit/E2E and unique-project Compose runtime smoke also passed. This is a task register, not a completion claim. P0–P8 acceptance remains governed by `implementation-status.md`, `remaining-work-breakdown.md`, and `deployment/cloud-smoke-checklist.md`.
+**Evidence baseline:** branch `thviet`, pushed commit `250ffdc`. This commit adjusts the Linux-only backend crash/restart E2E timeout to 180 seconds; the test targets a merge interrupted after the Git ref moves and before PR metadata commits. Backend typecheck and `git diff --check` passed before push; targeted ESLint still reports the pre-existing `await-thenable` at `backend/test/pull-requests.e2e-spec.ts:507`. The new E2E was not run locally. Public Actions metadata shows run `40164718122` for `e5eda1a` failed at `Run corepack pnpm --filter backend test:e2e:failure`; exact logs are not available yet, so the cause is unknown. Run `40164867636` for `250ffdc` is `in_progress`; no result is claimed. Crash/restart acceptance remains **pending**. The latest verified hosted green run remains `40162474987` on `9c2eb81`; that does not cover the new test or cloud release.
 
-## Tasks for the owner
+This is an execution register, not a completion claim. P0–P8 acceptance remains governed by `docs/implementation-status.md`, `docs/remaining-work-breakdown.md`, and `docs/deployment/cloud-smoke-checklist.md`.
 
-These are the few items that require your machine, account, or product decision. Do not paste credentials or secret values into chat.
+## Owner-only decisions and actions
 
-| ID | Priority | Owner | Action | Done when |
+Do not paste credentials or secret values into chat. Codex can continue local work while these choices are pending, but cloud release and ambiguous-journal resolution cannot be finalized without the relevant decisions.
+
+| ID | Priority | Owner action | Done when |
+| --- | --- | --- | --- |
+| U1 | CI failure diagnosis | Sign in to GitHub interactively and tell Codex to inspect detailed logs for failed run `40164718122` (and optionally historical runs `40160123068` / `40159331450`). Do not send a password, OTP, or token in chat. | The exact backend E2E failure is classified from its job log; until then, cause remains unknown and no speculative fix is made. |
+| U2 | Required for cloud | Select or create the GitHub/Vercel/Render/Neon projects and authorize the relevant account sessions. Keep credentials only in provider dashboards/Codex secret storage. | Resource identifiers and authorized sessions are available without exposing secrets in chat or repository. |
+| U3 | Required for cloud | Choose the canonical demo hostname and intended audience; explicitly accept that free Render Git storage can lose source on sleep, restart, or redeploy while database metadata remains. | Hostname/audience and source-loss acceptance are recorded; product warning and restore procedure are reviewed. |
+| U4 | Required before operator-resolution design | Decide whether the existing `ADMIN` role may resolve ambiguous journals or a distinct operator role is required; decide whether one operator or two-person approval is required. | Security contract is explicit before schema/API/UI implementation. Until then, keep ambiguous journals fail-closed and do not perform manual repair. |
+| U5 | Release review | Review the cloud smoke checklist, source reset/recovery behavior, and rollback instructions before sharing any demo URL. | Owner confirms the limitations and release evidence are understood. |
+| U6 | Optional issue updates | After current evidence is verified, select issue #3, #4, #5, or none for an update. | Live issue state is rechecked and only explicitly selected comments are posted. All drafts remain unpublished until then. |
+
+## Codex-led tasks
+
+| ID | Priority | Owner | Work and dependency | Acceptance evidence |
 | --- | --- | --- | --- | --- |
-| U0 | Optional historical CI diagnosis | You | If you want the earlier CI failures explained, sign in to GitHub interactively and tell Codex to continue; do not send a password, OTP, or token in chat. | Codex can inspect runs `40160123068` / `40159331450`; this is not a blocker for the latest green workflow. |
-| U1 | Local runtime smoke | Complete | Docker Engine responded after the requested wait. Unique-project Compose migration and readiness checks passed; a separate isolated PostgreSQL test container remains running. No existing container/volume was touched by the status check. | Local image/migration and Compose runtime smoke pass. |
-| U2 | Required for cloud | You | Confirm which GitHub/Vercel/Render/Neon accounts and project should host the demo. Create or select the three cloud resources, but keep secrets in provider dashboards/Codex secret storage. | We have the project/resource identifiers and authorized account sessions, not secret values in chat. |
-| U3 | Required for cloud | You + Codex | Agree the public demo hostname and who may access it. The agreed demo uses ephemeral Git storage: source may disappear on service restart/redeploy/sleep, while metadata persists. | Hostname/access decision recorded; the source-loss warning is visible and accepted before public release. |
-| U4 | Release review | You | Review the final smoke checklist and recovery instructions before sharing the demo URL. | Checklist and reset/recovery behavior are understood. |
-| U5 | Optional issue updates | You | After CI diagnosis, choose whether to post refreshed updates to issue #3, #4, both, or neither. Do not paste tokens or secrets into chat. | Only the issues you explicitly select receive a comment after their live open state is rechecked. |
-
-## Tasks Codex and agents will execute
-
-| ID | Priority | Owner | Work | Acceptance |
-| --- | --- | --- | --- | --- |
-| C1 | P0/P1/P6 | Codex + backend agent | `edb0ced` adds durable Git push journal/audit; `298fb62` fences unresolved merge journals and serializes login/refresh with admin account locks; `9f1eb0b` includes maintenance shutdown/test stabilization and branch byte-limit coverage. A conservative ambiguous-operation triage runbook is at `docs/operations/git-operation-recovery.md`. | Latest hosted run `40162474987` passes on `9c2eb81`; earlier backend E2E failures are historical and unexplained. Issue #5 stays open pending owner review and a supported resolution tool for permanently ambiguous rows. |
-| C2 | P3/P4/P7 | Codex + backend test agent | Fixed double body consumption/API assertion defects in `0403bda`; same-operation concurrent merge replay has real PostgreSQL/Git coverage in `2955e36`; `2305390` adds a conflict/no-ref-movement scenario. Continue stale/quota/lifecycle cases. | Hosted `40145289400` verifies conflict returns 409 with unchanged target ref, OPEN PR, FAILED operation and no merge audit. |
-| C3 | P5/P7 | Codex + UI reviewer | `6c921e5` adds a Playwright regression for background reconciliation announcement and merge SHA. | Latest hosted run `40162474987` passes frontend/browser gates. Screen-reader and physical-device review remain open. |
-| C4 | P0/P8 | Codex | API/migration image and unique-project Compose runtime smoke pass; all 7 migrations applied and readiness returned 200. Hosted run `40162474987` passes all gates. | Local/hosted acceptance passes. Cloud release, backups and source recovery remain open; do not reset existing volumes. |
-| C5 | P2/P8 | Codex + you | Configure Vercel/Render/Neon, run direct Render Git HTTPS tests and release smoke. | Clone/fetch/push (including >4.5 MB payload), auth, proxy-aware rate limits from distinct clients, spoofed-header rejection, cold start, restart/reset, PR, admin, and recovery checklist have evidence. |
-| C6 | P7/P8 | Codex | Reconcile ledger and task cards to current evidence; push verified batches to `thviet`. Draft updates for #3/#4 remain unpublished pending exact historical CI logs and explicit owner selection. | Current pushed commit `9c2eb81`; hosted run `40162474987` passes all gates. Cloud release/reset recovery remains open; current documentation updates are uncommitted. |
-| C7 | Before release | Security reviewer + Codex | Re-audit auth, repo permissions, Git protocol, PR merge/reconciliation, admin/audit controls and proxy-aware rate limits. Enforce and test `COOKIE_SECURE=true` in production config. | Static read-only audit found no confirmed actionable issue in reviewed code paths; the valid-pack lock-loss case passes on Linux and latest hosted CI. True backend process-crash/restart, ambiguous-journal resolution, cloud TLS/proxy-IP and direct Render Git remain unverified. See `security-review-2026-10-25.md` and `operations/acceptance-task-board-2026-10-25.md`. |
+| C1 | P3/P4/P7 | Codex + Linux CI | Run `40164718122` on `e5eda1a` failed at `Run corepack pnpm --filter backend test:e2e:failure`. Run `40164867636` on `250ffdc` is `in_progress`. Await its terminal result, then inspect the exact job logs. | Record terminal result for exact SHA `250ffdc` and classify the failed E2E from logs. Current cause is unknown; do not infer it from the step name. |
+| C2 | P3/P4 | Codex + backend test agent | Detailed diagnosis of `40164718122` awaits U1/sign-in. After obtaining logs, reproduce or isolate the concrete failure before making a scoped correction in a separate task/worktree. Do not use `pg_terminate_backend` as success-path proof. | Focused Linux E2E proves child API death after ref CAS, natural exit of its database sessions, replacement startup reconciliation, one audit, idempotent retry, and fetched two-parent merge. Typecheck, lint delta, and diff checks are recorded. |
+| C3 | P3/P4/P7 | Codex QA + security reviewer | After C1 passes, reconcile the remaining failure matrix and security review against real PostgreSQL/Git evidence. Keep historical CI failures distinct from current failures. | Each required test is mapped to output on an identified commit; no mock or database-trigger-only test is described as a process crash. |
+| C4 | P6 | Codex + security reviewer | After U4, define and implement a bounded, audited workflow for permanently ambiguous/cross-type journals. Until then preserve the current runbook and fail-closed behavior. | Authorization, evidence rules, concurrency/revision checks, immutable/idempotent audit, unknown-state fencing, and negative/positive PostgreSQL tests meet the approved contract. No manual SQL/ref repair. |
+| C5 | P0/P7 | Codex lead + doc agent | Reconcile acceptance board, implementation ledger, task log, issue drafts, and release docs only after CI evidence for `250ffdc` is known. | Every claim names commit, environment, command/run, and observed result; cloud, screen-reader/manual review, and owner decisions remain visibly open where unverified. |
+| C6 | P5/P7 | Codex QA | Perform remaining manual accessibility checks that are available locally; record screen-reader/device work that needs a human or physical device. | Keyboard/focus and responsive browser results are recorded; no screen-reader or physical-device claim without direct observation. |
+| C7 | P2/P8 | Codex release + owner | After U2/U3 and local/hosted acceptance, configure Vercel/Render/Neon, rehearse metadata backup/restore and additive migration, then run the cloud checklist. | Evidence covers direct Render Git HTTPS (including >4.5 MB), auth/private/public, cold start, source loss and restoration from local clone, PR/admin journeys, TLS/proxy behavior, backup/restore, and rollback on the release commit. |
 
 ## Dependency order
 
 ```mermaid
 flowchart TD
-  C1[C1: hosted isolated PostgreSQL acceptance] --> C2[C2: PR and Git end-to-end]
-  U1[U1: Docker engine ready] --> localSmoke[Local image smoke]
-  C2 --> C6[C6: full regression and ledger]
-  C4[C4: image + hosted CI] --> C6
-  C3[C3: UI accessibility] --> C6
-  C7[C7: security audit and cookie guard] --> C6
-  U2[U2: select cloud resources] --> C5[C5: cloud smoke]
-  U3[U3: hostname and source-loss approval] --> C5
-  C6 --> C5
-  C5 --> U4[U4: release review]
+  C1[Wait for run 40164867636 and inspect exact CI result] --> C2[Diagnose run 40164718122 after sign-in; fix only evidence-based failures]
+  C2 --> C3[Complete P3/P4 regression and security evidence]
+  C1 --> C5[Reconcile docs after evidence]
+  U4[Owner chooses operator authority and approvals] --> C4[Implement audited ambiguity resolution]
+  C3 --> C7[Cloud release and recovery smoke]
+  U2[Owner selects cloud resources] --> C7
+  U3[Owner selects hostname/audience and accepts ephemeral source] --> C7
+  C5 --> C7
+  C6[Manual accessibility review] --> C5
+  C7 --> U5[Owner release review]
+  U6[Owner selects issue updates] --> C5
 ```
 
-## Current stop condition
+## Current stop conditions
 
-Latest hosted run `40162474987` passed all workflow gates on `9c2eb81`; earlier backend E2E failures (`40160123068`, `40159331450`) remain unexplained but do not block current CI acceptance. Durable push audit, maintenance cleanup/idempotence, branch-byte boundaries, 120-second grace cases, and valid-pack lock-loss coverage are present. Remaining work includes true process-crash/restart acceptance, ambiguous-journal operator resolution, manual accessibility, and cloud deployment/recovery evidence. Local Compose runtime smoke passed. User-only choices remain cloud resources, hostname/audience, and explicit acceptance of ephemeral Git source storage; GitHub interactive login is optional if investigating historical logs. See `docs/operations/acceptance-task-board-2026-10-25.md`, `docs/implementation-status.md`, `docs/issue-update-drafts.md`, and `docs/operations/git-operation-recovery.md`.
+- Do not infer the cause of run `40164718122` from its failed step name; detailed logs await user sign-in.
+- Do not call the crash/restart test accepted until run `40164867636` is complete and its hosted Linux evidence on `250ffdc` is inspected.
+- Do not resolve ambiguous journals or weaken write fencing before U4 and the security contract are approved.
+- Do not deploy, publish a demo URL, or claim source durability before U2/U3, the cloud smoke checklist, and owner review.
+- Do not post issue comments without U6; first recheck issue state and refresh these drafts against current evidence.
+- Never reset or migrate existing development/cloud databases or delete existing Docker volumes as a shortcut.

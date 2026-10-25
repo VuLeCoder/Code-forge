@@ -442,3 +442,56 @@ snapshots, not current status. Current acceptance state is in the task board.
   and checks the hook process exits. Follow-up review found no remaining
   actionable issue for the Linux target. The reviewer did not run the Linux
   test; see the agent-reported runtime evidence above.
+
+## T-MERGE-RESTART-E5 — replacement API startup reconciliation
+
+- Owner: Codex lead with bounded test implementation and independent static
+  review agents; leader owns integration.
+- Status: implemented, typechecked, diff-checked, and pushed; Linux E2E result
+  is pending inspection and the test is not yet accepted.
+- Branch/commits: `thviet`, `e5eda1a` (`test: verify merge recovery after API
+  restart`) plus `250ffdc` (`test: allow crash recovery E2E runtime margin`).
+- Owned file: `backend/test/pull-requests.e2e-spec.ts` only.
+- Acceptance target: kill a separate API process after Git moves the target ref
+  but before PR metadata commits; prove its database sessions exit naturally;
+  pause the surviving test process's scheduler; start a replacement API and
+  prove its startup maintenance completes PR/journal metadata and one audit;
+  retry the same operation without duplicate merge; verify fetch retains the
+  two-parent commit.
+- Verification performed: `corepack pnpm --filter backend typecheck` passed;
+  `git diff --check` still passes after the timeout follow-up. Targeted ESLint
+  reports only the existing
+  `await-thenable` at line 507, unchanged from the base. The test is Linux-only
+  because it uses PostgreSQL's client-connection check setting to observe the
+  killed process socket. No local E2E, database, or Docker operation was run.
+- Additional local regression evidence at HEAD `250ffdc`: `corepack pnpm
+  --filter backend test` passed 17 suites / 111 tests. This is the backend unit
+  suite only; it does not execute the new crash/restart E2E.
+- Follow-up: `250ffdc` increases the Jest timeout from 119 seconds to 180
+  seconds to provide runtime margin for the natural PostgreSQL-session exit and
+  replacement startup. This changes no production behavior.
+- Review: independent static review found and the implementation fixed a
+  startup-failure child-process leak; follow-up review found no actionable
+  process cleanup race. This is static evidence only, not runtime acceptance.
+- CI: run `40164718122` for `e5eda1a` completed failure at the aggregate step
+  `Run corepack pnpm --filter backend test:e2e:failure`. The exact failing test
+  and cause are unknown until authenticated logs are inspected. Run
+  `40164867636` for `250ffdc` is currently in progress. The latest verified
+  green hosted run remains `40162474987` on ancestor `9c2eb81`.
+- Next safe action: after the current run completes and authenticated logs are
+  available, inspect the exact failing test and correct only from reproducible
+  evidence. Do not infer a cause from the aggregate step name and do not
+  force-terminate PostgreSQL sessions on the test's success path.
+
+## T-AGY-CRASH-SECURITY-REVIEW — bounded read-only audit attempt
+
+- Owner: Codex lead requested a bounded AGY review; AGY model is pinned by
+  `scripts/agy.ps1` to `gemini-3.8-flash-medium`.
+- Scope: read-only, plan-mode security review of the current merge
+  crash/restart test; permission bypass was not enabled.
+- Status: `timed_out` after 120 seconds with no usable output. No file changes
+  resulted. This is not a successful audit and does not add security-review
+  acceptance evidence.
+- Next: do not retry this AGY task. Preserve the timeout as an unresolved
+  review attempt; rely only on the separately recorded static review evidence
+  and pending Linux runtime CI until new direction is given.
