@@ -50,6 +50,7 @@ function makeFixture(operation?: Partial<MergeOperation>) {
     branchSha: jest.fn().mockResolvedValue('merge-sha'),
     isAncestor: jest.fn().mockResolvedValue(true),
     commit: jest.fn().mockResolvedValue({ parentShas: ['target-old', 'source-sha'] }),
+    cleanupOrphanedTemporaryDirectories: jest.fn().mockResolvedValue(0),
   };
   const purge = { purgeDue: jest.fn().mockResolvedValue(undefined) };
   const pushJournal = {
@@ -123,6 +124,7 @@ describe('MaintenanceJobsService', () => {
     expect(fixture.locks.acquire).toHaveBeenCalledTimes(2);
     expect(fixture.db.$executeRaw).toHaveBeenCalledTimes(6);
     expect(fixture.purge.purgeDue).toHaveBeenCalledTimes(2);
+    expect(fixture.storage.cleanupOrphanedTemporaryDirectories).toHaveBeenCalledTimes(2);
     expect(fixture.lock.release).toHaveBeenCalledTimes(2);
   });
 

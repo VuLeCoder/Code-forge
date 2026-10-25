@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, rm, symlink, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigService } from '@nestjs/config';
@@ -17,6 +17,52 @@ describe('GitStorageService with real Git', () => {
       : key === 'MAX_FILE_BYTES' ? 25 * 1024 * 1024 : 500 * 1024 * 1024 } as unknown as ConfigService);
   });
   afterEach(async () => { await rm(root, { recursive: true, force: true }); });
+
+  it('removes only old app-owned staging and README directories, safely and in bounded idempotent batches', async () => {
+    const gitRoot = join(root, 'git-root');
+    const readmeRoot = join(root, 'readme-root');
+    const outside = join(root, 'outside');
+    await Promise.all([mkdir(gitRoot), mkdir(readmeRoot), mkdir(outside)]);
+    const stale = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    const makeDirectory = async (parent: string, name: string, modifiedAt?: Date) => {
+      const path = join(parent, name);
+      await mkdir(path);
+      if (modifiedAt) await utimes(path, modifiedAt, modifiedAt);
+      return path;
+    };
+
+    const staleStage = await makeDirectory(gitRoot, '.stage-12345678-1234-4234-9234-123456789abc', stale);
+    const staleReadme = await makeDirectory(readmeRoot, 'code-forge-readme-a1B2c3', stale);
+    const freshStage = await makeDirectory(gitRoot, '.stage-12345678-1234-4234-9234-123456789abd');
+    const unrecognized = await makeDirectory(gitRoot, '.stage-not-a-uuid', stale);
+    const unrelated = await makeDirectory(readmeRoot, 'code-forge-readme-too-long', stale);
+    const outsideSentinel = await makeDirectory(outside, 'preserve-me');
+    const linkedStage = join(gitRoot, '.stage-12345678-1234-4234-9234-123456789abe');
+    let symlinkSupported = true;
+    try {
+      await symlink(outsideSentinel, linkedStage, process.platform === 'win32' ? 'junction' : 'dir');
+    } catch (error) {
+      if (process.platform === 'win32' && ['EPERM', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) {
+        symlinkSupported = false;
+      } else {
+        throw error;
+      }
+    }
+    const staleStages = await Promise.all(Array.from({ length: 27 }, (_, index) =>
+      makeDirectory(gitRoot, `.stage-22345678-1234-4234-9234-${String(index).padStart(12, '0')}`, stale)));
+
+    await expect(storage.cleanupOrphanedTemporaryDirectories(gitRoot, readmeRoot)).resolves.toBe(25);
+    await expect(storage.cleanupOrphanedTemporaryDirectories(gitRoot, readmeRoot)).resolves.toBe(4);
+    await expect(storage.cleanupOrphanedTemporaryDirectories(gitRoot, readmeRoot)).resolves.toBe(0);
+
+    for (const path of [staleStage, staleReadme, ...staleStages]) await expect(lstat(path)).rejects.toMatchObject({ code: 'ENOENT' });
+    for (const path of [freshStage, unrecognized, unrelated, outsideSentinel]) await expect(lstat(path)).resolves.toBeDefined();
+    if (symlinkSupported) expect((await lstat(linkedStage)).isSymbolicLink()).toBe(true);
+  });
+
+  it('tolerates a temp root that disappeared before a cleanup pass', async () => {
+    await expect(storage.cleanupOrphanedTemporaryDirectories(join(root, 'missing-git'), join(root, 'missing-readme'))).resolves.toBe(0);
+  });
 
   it('paginates a pinned history, reads merge parents and isolates reachable commits', async () => {
     const key = `${randomUUID()}.git`;

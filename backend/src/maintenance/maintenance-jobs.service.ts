@@ -50,6 +50,7 @@ export class MaintenanceJobsService implements OnModuleInit, OnModuleDestroy {
       await this.pushJournal.reconcilePending();
       await this.reconcileMerges();
       await this.purge.purgeDue(50);
+      await this.storage.cleanupOrphanedTemporaryDirectories();
     } catch {
       // Logs identify only the job and never include database URLs or row data.
       this.logger.warn('Maintenance batch failed; it will retry on the next run.');

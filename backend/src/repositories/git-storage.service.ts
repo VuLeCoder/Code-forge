@@ -1,13 +1,18 @@
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, mkdir, opendir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 const runFile = promisify(execFile);
+const ORPHAN_TEMP_MIN_AGE_MS = 24 * 60 * 60 * 1000;
+const MAX_ORPHAN_TEMP_REMOVALS_PER_RUN = 25;
+const MAX_ORPHAN_TEMP_ENTRIES_PER_ROOT = 2000;
+const STAGE_DIRECTORY_NAME = /^\.stage-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const README_TEMP_DIRECTORY_NAME = /^code-forge-readme-[A-Za-z0-9]{6}$/;
 
 @Injectable()
 export class GitStorageService {
@@ -563,6 +568,53 @@ export class GitStorageService {
   }
 
   async remove(key: string) { await rm(this.path(key), { recursive: true, force: true }); }
+
+  /** Removes only old, exact-name temporary directories abandoned by a terminated create operation. */
+  async cleanupOrphanedTemporaryDirectories(gitRoot = this.root(), readmeRoot = tmpdir()) {
+    const roots = [
+      { path: gitRoot, namePattern: STAGE_DIRECTORY_NAME },
+      { path: readmeRoot, namePattern: README_TEMP_DIRECTORY_NAME },
+    ];
+    const cutoff = Date.now() - ORPHAN_TEMP_MIN_AGE_MS;
+    let removed = 0;
+
+    for (const root of roots) {
+      if (removed >= MAX_ORPHAN_TEMP_REMOVALS_PER_RUN) break;
+      const rootPath = resolve(root.path);
+      try {
+        const rootInfo = await lstat(rootPath);
+        if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) continue;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw error;
+      }
+
+      let directory;
+      try { directory = await opendir(rootPath); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw error;
+      }
+      let inspected = 0;
+      for await (const entry of directory) {
+        if (inspected++ >= MAX_ORPHAN_TEMP_ENTRIES_PER_ROOT || removed >= MAX_ORPHAN_TEMP_REMOVALS_PER_RUN) break;
+        if (!entry.isDirectory() || !root.namePattern.test(entry.name)) continue;
+        const candidate = resolve(rootPath, entry.name);
+        const candidateRelativePath = relative(rootPath, candidate);
+        if (!candidateRelativePath || candidateRelativePath === '..' || candidateRelativePath.startsWith(`..${sep}`) || isAbsolute(candidateRelativePath)) continue;
+
+        try {
+          const candidateInfo = await lstat(candidate);
+          if (!candidateInfo.isDirectory() || candidateInfo.isSymbolicLink() || candidateInfo.mtimeMs > cutoff) continue;
+          await rm(candidate, { recursive: true, force: true });
+          removed++;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+      }
+    }
+    return removed;
+  }
 
   async inspect(key: string, branch: string): Promise<{ state: 'READY' | 'EMPTY'; readme: string | null }> {
     const path = this.path(key);
