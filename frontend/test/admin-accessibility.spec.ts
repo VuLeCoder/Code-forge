@@ -52,8 +52,11 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
       if (index < tabButtons.length - 1) await page.keyboard.press("Tab");
     }
 
+    // --- Tab: Người dùng ---
     await tabButtons[1].focus();
     await page.keyboard.press("Enter");
+
+    // Accessible column headers verification (Users table)
     const userHeaders = page.getByRole("columnheader");
     await expect(userHeaders).toHaveCount(5);
     await expect(userHeaders).toHaveText(["Tài khoản", "Vai trò", "Trạng thái", "Ngày tạo", "Thao tác"]);
@@ -61,6 +64,7 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
     const aliceRow = page.getByRole("row", { name: /alice/ });
     const lockButton = aliceRow.getByRole("button", { name: "Khóa tài khoản" });
     await expect(lockButton).toBeVisible();
+
     if (viewport.name === "narrow") {
       const aliceCells = aliceRow.getByRole("cell");
       await expect(aliceCells).toHaveCount(5);
@@ -73,6 +77,7 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
         expect(buttonBox.x + buttonBox.width).toBeLessThanOrEqual(viewport.width);
       }
     }
+
     await lockButton.press("Enter");
     const dialog = page.getByRole("dialog", { name: "Khóa alice?" });
     await expect(dialog).toBeVisible();
@@ -100,10 +105,14 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
     await expect(dialog).not.toBeVisible();
     await expect(page.getByRole("heading", { name: "Điều hành Code Forge" })).toBeFocused();
 
+    // --- Tab: Repositories ---
     await tabButtons[2].click();
+
+    // Accessible column headers verification (Repositories table)
     const repoHeaders = page.getByRole("columnheader");
     await expect(repoHeaders).toHaveCount(5);
     await expect(repoHeaders).toHaveText(["Repository", "Quyền riêng tư", "Trạng thái", "PR · Thành viên", "Thao tác"]);
+
     const repoRow = page.getByRole("row", { name: new RegExp(repo.name) });
     await expect(repoRow).toBeVisible();
     if (viewport.name === "narrow") {
@@ -121,10 +130,14 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
       }
     }
 
+    // --- Tab: Nhật ký (Audit) ---
     await tabButtons[3].click();
+
+    // Accessible column headers verification (Audit table)
     const auditHeaders = page.getByRole("columnheader");
     await expect(auditHeaders).toHaveCount(5);
     await expect(auditHeaders).toHaveText(["Thời điểm", "Người thực hiện", "Hành động", "Target", "Chi tiết an toàn"]);
+
     const auditRow = page.getByRole("row", { name: /ADMIN_USER_LOCKED/ });
     await expect(auditRow).toBeVisible();
     if (viewport.name === "narrow") {
@@ -134,6 +147,7 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
         await expect(auditCells.nth(i)).toHaveAttribute("data-label");
       }
     }
+
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });
 }
