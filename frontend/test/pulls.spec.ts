@@ -260,3 +260,29 @@ test("owner cannot submit another merge while the previous operation is reconcil
   await expect(page.getByRole("status").filter({ hasText: "đang đối soát" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Merge pull request" })).toBeDisabled();
 });
+
+test("background reconciliation announces the completed merge", async ({ page }) => {
+  await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { user: owner } }));
+  let detailCalls = 0;
+  await page.route("**/api/v1/repos/alice/project/pulls/1", (route) => {
+    detailCalls += 1;
+    return route.fulfill({ json: {
+      pullRequest: detailCalls === 1 ? pullRequest : {
+        ...pullRequest, status: "MERGED", mergedBy: { id: owner.id, username: "alice" },
+        mergedAt: "2026-10-25T00:00:00.000Z", mergeCommitSha: "d".repeat(40),
+      },
+      permissions: { canCreate: true, canEdit: detailCalls !== 1, canMerge: detailCalls === 1 },
+      mergeOperation: detailCalls === 1
+        ? { operationId: "merge-op", status: "NEEDS_RECONCILIATION", errorCode: null }
+        : { operationId: "merge-op", status: "COMPLETED", errorCode: null },
+    } });
+  });
+  await page.route("**/api/v1/repos/alice/project/pulls/1/compare", (route) => route.fulfill({ json: compare }));
+
+  await page.goto("/alice/project/pulls/1");
+  await expect(page.getByRole("status").filter({ hasText: "đang đối soát" })).toBeVisible();
+  const completed = page.getByRole("status").filter({ hasText: "Đã merge bởi alice" });
+  await expect(completed).toBeVisible({ timeout: 6_000 });
+  await expect(completed).toContainText("dddddddddddd");
+  expect(detailCalls).toBe(2);
+});
