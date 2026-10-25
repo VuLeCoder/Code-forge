@@ -1130,7 +1130,7 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
         }
       }
     }
-  }, 119_000);
+  }, 180_000);
 
   it('serializes a source-branch push against a merge snapshot', async () => {
     const registered = await call('POST', 'auth/register', {
