@@ -35,10 +35,15 @@ export class RepositoryLockService implements OnModuleDestroy {
     return { client, signal: abort.signal, release: async () => {
       if (released) return;
       released = true;
-      client.removeListener('error', onError);
-      if (abort.signal.aborted) { client.release(true); return; }
+      if (abort.signal.aborted) { client.removeListener('error', onError); client.release(true); return; }
       try { await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [repositoryId]); }
-      finally { client.release(); }
+      catch (error) {
+        client.removeListener('error', onError);
+        client.release(true);
+        throw error;
+      }
+      client.removeListener('error', onError);
+      client.release(abort.signal.aborted);
     } };
   }
 
