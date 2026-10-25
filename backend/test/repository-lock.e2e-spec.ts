@@ -1,10 +1,17 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import { ConfigService } from '@nestjs/config';
 import { Client } from 'pg';
+import type { Request, Response } from 'express';
+import { GitHttpService } from '../src/repositories/git-http.service';
+import { GitStorageService } from '../src/repositories/git-storage.service';
 import { RepositoryLockService, type RepositoryLock } from '../src/repositories/repository-lock.service';
 
 const requireFromBackend = createRequire(__filename);
@@ -144,6 +151,134 @@ describe('RepositoryLockService PostgreSQL advisory lock', () => {
       await parentLock?.release();
       await locks.onModuleDestroy();
       await monitor.end();
+    }
+  }, 20_000);
+
+  it('cancels receive-pack waiting for pack input when only its lock connection is terminated', async () => {
+    const connectionString = process.env.DATABASE_URL_UNPOOLED;
+    if (!connectionString) throw new Error('DATABASE_URL_UNPOOLED is required for repository lock E2E tests.');
+    assertIsolatedDatabase(connectionString);
+
+    const lockKey = randomUUID();
+    const applicationName = `repo-lock-loss-${lockKey}`;
+    const lockConnection = new URL(connectionString);
+    lockConnection.searchParams.set('application_name', applicationName);
+    const monitor = new Client({ connectionString });
+    const gitRoot = await mkdtemp(join(tmpdir(), 'code-forge-lock-loss-'));
+    const repositoryPath = join(gitRoot, `${lockKey}.git`);
+    const config = { getOrThrow: (key: string) => key === 'DATABASE_URL_UNPOOLED'
+      ? lockConnection.toString()
+      : key === 'GIT_STORAGE_PATH' ? gitRoot
+        : key === 'MAX_FILE_BYTES' ? 1024 * 1024
+          : key === 'MAX_REPOSITORY_BYTES' ? 10 * 1024 * 1024 : undefined } as unknown as ConfigService;
+    const locks = new RepositoryLockService(config);
+    let child: ChildProcessWithoutNullStreams | undefined;
+    let poolEnded = false;
+    let service: GitHttpService | undefined;
+
+    try {
+      execFileSync('git', ['init', '--bare', repositoryPath], { stdio: 'ignore' });
+      const tree = execFileSync('git', ['--git-dir', repositoryPath, 'mktree'], { input: '', encoding: 'utf8' }).trim();
+      const oldSha = execFileSync('git', ['--git-dir', repositoryPath, 'commit-tree', tree, '-m', 'old'], { encoding: 'utf8' }).trim();
+      execFileSync('git', ['--git-dir', repositoryPath, 'update-ref', 'refs/heads/main', oldSha]);
+
+      await monitor.connect();
+      const storage = new GitStorageService(config);
+      const openPack = storage.openPack.bind(storage);
+      jest.spyOn(storage, 'openPack').mockImplementation((...args) => {
+        child = openPack(...args);
+        return child;
+      });
+      const repositories = {
+        prepareGit: () => Promise.resolve({ storageKey: `${lockKey}.git`, defaultBranch: 'main', repositoryId: lockKey,
+          actorIsOwner: true, operation: 'write' as const, storageGeneration: 1, userId: randomUUID() }),
+        recheckGit: () => Promise.resolve({ storageKey: `${lockKey}.git`, defaultBranch: 'main', repositoryId: lockKey,
+          actorIsOwner: true, operation: 'write' as const, storageGeneration: 1, userId: randomUUID() }),
+      };
+      const pushJournal = {
+        begin: () => Promise.resolve({ operationId: randomUUID() }),
+        finish: () => Promise.resolve(true),
+        fail: () => Promise.resolve(undefined),
+        markNeedsReconciliation: () => Promise.resolve(undefined),
+      };
+      service = new GitHttpService(repositories as never, storage, config, locks, pushJournal as never);
+      const request = Object.assign(new PassThrough(), {
+        query: {},
+        headers: { 'content-type': 'application/x-git-receive-pack-request', 'content-length': '1' },
+        aborted: false,
+      }) as unknown as Request;
+      const responseStream = new PassThrough();
+      const responseHeaders = new Map<string, string>();
+      const response = Object.assign(responseStream, {
+        statusCode: 200,
+        headersSent: false,
+        setHeader: (name: string, value: string) => { responseHeaders.set(name, value); return responseStream; },
+        status: (code: number) => { (responseStream as unknown as { statusCode: number }).statusCode = code; return responseStream; },
+        type: (value: string) => { responseHeaders.set('Content-Type', value); return responseStream; },
+      }) as unknown as Response;
+      responseStream.resume();
+      const serving = service.serve('alice', 'lock-loss.git', 'git-receive-pack', request, response);
+      // Deliberately leave the request open without sending pack bytes: this covers pre-input cancellation only.
+      await withTimeout(new Promise<void>((resolve, reject) => {
+        const deadline = Date.now() + 5_000;
+        const check = () => {
+          if (child?.pid && child.exitCode === null && child.signalCode === null) return resolve();
+          if (child && (child.exitCode !== null || child.signalCode !== null)) return reject(new Error('Git push process exited before lock loss.'));
+          if (Date.now() >= deadline) return reject(new Error('Git push process did not start.'));
+          setTimeout(check, 10);
+        };
+        check();
+      }), 5_000, 'Git push process startup');
+      await serving;
+      const runningChild = child;
+      if (!runningChild) throw new Error('Git push process was not captured.');
+      const childClosed = once(runningChild, 'close');
+      const lockPidResult = await monitor.query<{ pid: number }>(
+        "SELECT pid FROM pg_stat_activity WHERE application_name = $1", [applicationName],
+      );
+      const lockPid = lockPidResult.rows[0]?.pid;
+      if (!lockPid) throw new Error('The lock-owning PostgreSQL connection did not expose its backend PID.');
+
+      // This terminates exactly the backend connection that owns the advisory lock.
+      const terminated = await monitor.query<{ terminated: boolean }>(
+        'SELECT pg_terminate_backend($1) AS terminated', [lockPid],
+      );
+      expect(terminated.rows[0]?.terminated).toBe(true);
+      await withTimeout(childClosed, 5_000, 'Git ref update cancellation');
+      expect(runningChild.signalCode).toBe('SIGKILL');
+      expect(response.statusCode).toBe(503);
+
+      // No pack bytes were sent, so this only checks pre-input cancellation and unchanged repository state.
+      // It does not prove cancellation/ref safety once receive-pack is processing a valid push.
+      const actualSha = execFileSync('git', ['--git-dir', repositoryPath, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim();
+      expect(actualSha).toBe(oldSha);
+
+      await withTimeout(new Promise<void>((resolve, reject) => {
+        const deadline = Date.now() + 5_000;
+        const check = async () => {
+          try {
+            const result = await monitor.query<{ count: string }>(
+              'SELECT count(*)::text AS count FROM pg_stat_activity WHERE application_name = $1', [applicationName],
+            );
+            if (result.rows[0]?.count === '0') return resolve();
+          } catch (error) { return reject(error instanceof Error ? error : new Error(String(error))); }
+          if (Date.now() >= deadline) return reject(new Error('Repository lock pool connection was not released.'));
+          setTimeout(() => { void check(); }, 25);
+        };
+        void check();
+      }), 5_000, 'Repository lock pool release');
+      service.onModuleDestroy();
+      service = undefined;
+      await locks.onModuleDestroy();
+      poolEnded = true;
+    } finally {
+      if (child && child.exitCode === null && child.signalCode === null) {
+        await stopChild(child);
+      }
+      service?.onModuleDestroy();
+      if (!poolEnded) await locks.onModuleDestroy();
+      if (monitor) await monitor.end().catch(() => undefined);
+      await rm(gitRoot, { recursive: true, force: true });
     }
   }, 20_000);
 });

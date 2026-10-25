@@ -22,7 +22,7 @@ export class RepositoryLockService implements OnModuleDestroy {
     const abort = new AbortController();
     let released = false;
     const onError = () => abort.abort(new Error('Repository lock connection was lost.'));
-    client.once('error', onError);
+    client.on('error', onError);
     try {
       await client.query("SET statement_timeout = '15s'");
       await client.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [repositoryId]);
