@@ -4,7 +4,7 @@ import { request as httpRequest } from 'node:http';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -487,6 +487,113 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     expect(git(['for-each-ref', '--format=%(refname)%09%(objectname)', 'refs/heads/'])).toBe(preMergeRefs);
     expect(await db.pullRequest.findUniqueOrThrow({ where: { id: pullRequestId } })).toMatchObject({ status: 'OPEN', mergeCommitSha: null });
     expect(await db.pullRequestMergeOperation.count({ where: { pullRequestId } })).toBe(0);
+  }, 60_000);
+
+  it('rejects a merge queued behind missing-storage recovery after it advances storage generation', async () => {
+    const registration = await call('POST', 'auth/register', {
+      username: 'StorageRecoveryRaceOwner', email: 'storage-recovery-race-owner@example.test', password: 'test-password-123',
+    }, '');
+    expect(registration.status).toBe(201);
+    const recoveryRaceCookie = cookie(registration);
+
+    const repositoryResponse = await call('POST', 'repositories', {
+      name: 'StorageRecoveryRace', visibility: 'PRIVATE', initializeReadme: true,
+    }, recoveryRaceCookie);
+    expect(repositoryResponse.status).toBe(201);
+    const { repository } = await responseJson<{ repository: { id: string } }>(repositoryResponse);
+    const storedRepository = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
+    const bare = join(storageRoot, storedRepository.storageKey);
+    const git = (args: string[]) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    const work = join(storageRoot, 'storage-recovery-race-clone');
+    git(['clone', bare, work]);
+    git(['-C', work, 'config', 'user.name', 'Storage Recovery Race Owner']);
+    git(['-C', work, 'config', 'user.email', 'storage-recovery-race-owner@example.test']);
+    git(['-C', work, 'switch', '-c', 'feature/storage-recovery-race']);
+    await writeFile(join(work, 'recovery-race.txt'), 'branch for stale merge after storage recovery\n');
+    git(['-C', work, 'add', 'recovery-race.txt']);
+    git(['-C', work, 'commit', '-m', 'Create storage recovery race fixture']);
+    git(['-C', work, 'push', '--set-upstream', 'origin', 'feature/storage-recovery-race']);
+
+    const pullsPath = 'repos/storagerecoveryraceowner/storagerecoveryrace/pulls';
+    const createResponse = await call('POST', pullsPath, {
+      title: 'Merge after queued storage recovery', sourceBranch: 'feature/storage-recovery-race', targetBranch: 'main',
+    }, recoveryRaceCookie);
+    expect(createResponse.status).toBe(201);
+    const created = await responseJson<{ pullRequest: { id: string; number: number; version: number } }>(createResponse);
+    const comparisonResponse = await call('GET', `${pullsPath}/${created.pullRequest.number}/compare`, undefined, recoveryRaceCookie);
+    expect(comparisonResponse.status).toBe(200);
+    const comparison = await responseJson<{ state: string; sourceSha: string; targetSha: string; storageGeneration: number }>(comparisonResponse);
+    expect(comparison).toMatchObject({ state: 'READY', storageGeneration: storedRepository.storageGeneration });
+
+    const mergeOperationsBefore = await db.pullRequestMergeOperation.count({ where: { pullRequestId: created.pullRequest.id } });
+    const mergeAuditsBefore = await db.auditLog.count({ where: { targetId: created.pullRequest.id,
+      action: { in: ['PULL_REQUEST_MERGED', 'PULL_REQUEST_MERGE_RECONCILED'] } } });
+    expect(mergeOperationsBefore).toBe(0);
+    expect(mergeAuditsBefore).toBe(0);
+
+    // This is the test-created storage key under this suite's owned temp root.
+    const resolvedStorageRoot = resolve(storageRoot);
+    const deletionTarget = resolve(bare);
+    const relativeDeletionTarget = relative(resolvedStorageRoot, deletionTarget);
+    expect(relativeDeletionTarget).not.toBe('');
+    expect(relativeDeletionTarget).not.toBe('..');
+    expect(relativeDeletionTarget.startsWith(`..${sep}`)).toBe(false);
+    expect(isAbsolute(relativeDeletionTarget)).toBe(false);
+    await rm(deletionTarget, { recursive: true, force: true });
+
+    const barrierUrl = new URL(process.env.DATABASE_URL_UNPOOLED!);
+    barrierUrl.searchParams.set('application_name', `${lockApplicationName}-storage-recovery-barrier`);
+    const barrier = new Client({ connectionString: barrierUrl.toString(), connectionTimeoutMillis: 5_000 });
+    let barrierLockHeld = false;
+    let recoveryRequest: Promise<Response> | undefined;
+    let mergeRequest: Promise<Response> | undefined;
+    try {
+      await barrier.connect();
+      await barrier.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [repository.id]);
+      barrierLockHeld = true;
+
+      // Queue recovery first so PostgreSQL releases it ahead of the merge.
+      recoveryRequest = call('GET', 'repos/storagerecoveryraceowner/storagerecoveryrace/branches', undefined, recoveryRaceCookie);
+      await waitForAdvisoryLockWaiter(barrier, lockApplicationName, 10_000, 1);
+
+      mergeRequest = call('POST', `${pullsPath}/${created.pullRequest.number}/merge`, {
+        operationId: randomUUID(), expectedSourceSha: comparison.sourceSha, expectedTargetSha: comparison.targetSha,
+        storageGeneration: comparison.storageGeneration, version: created.pullRequest.version,
+      }, recoveryRaceCookie);
+      await waitForAdvisoryLockWaiter(barrier, lockApplicationName, 10_000, 2);
+
+      const unlocked = await barrier.query<{ pg_advisory_unlock: boolean }>(
+        'SELECT pg_advisory_unlock(hashtextextended($1, 0))', [repository.id]);
+      expect(unlocked.rows[0]?.pg_advisory_unlock).toBe(true);
+      barrierLockHeld = false;
+
+      const recoveryResponse = await recoveryRequest;
+      expect(recoveryResponse.status).toBe(200);
+      const recovered = await responseJson<{ branches: unknown[]; defaultBranch: string; storageState: string; storageGeneration: number }>(recoveryResponse);
+      expect(recovered).toMatchObject({ branches: [], defaultBranch: 'main', storageState: 'RESET',
+        storageGeneration: storedRepository.storageGeneration + 1 });
+      expect(await db.repository.findUniqueOrThrow({ where: { id: repository.id } }))
+        .toMatchObject({ storageGeneration: recovered.storageGeneration });
+
+      const refsBeforeMerge = git(['--git-dir', bare, 'for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)', 'refs/']);
+      const mergeResponse = await mergeRequest;
+      expect(mergeResponse.status).toBe(409);
+      expect(await responseJson<{ error: { code: string } }>(mergeResponse))
+        .toMatchObject({ error: { code: 'STALE_COMPARE' } });
+      expect(git(['--git-dir', bare, 'for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)', 'refs/']))
+        .toBe(refsBeforeMerge);
+      expect(await db.pullRequest.findUniqueOrThrow({ where: { id: created.pullRequest.id } }))
+        .toMatchObject({ status: 'OPEN', storageGeneration: storedRepository.storageGeneration, mergeCommitSha: null, mergedById: null });
+      expect(await db.pullRequestMergeOperation.count({ where: { pullRequestId: created.pullRequest.id } }))
+        .toBe(mergeOperationsBefore);
+      expect(await db.auditLog.count({ where: { targetId: created.pullRequest.id,
+        action: { in: ['PULL_REQUEST_MERGED', 'PULL_REQUEST_MERGE_RECONCILED'] } } }))
+        .toBe(mergeAuditsBefore);
+    } finally {
+      if (barrierLockHeld) await barrier.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [repository.id]).catch(() => undefined);
+      await Promise.allSettled([recoveryRequest, mergeRequest].filter((request): request is Promise<Response> => request !== undefined));
+      await barrier.end();
+    }
   }, 60_000);
 
   it('rejects merges when compared refs advance or disappear without changing refs or merge metadata', async () => {

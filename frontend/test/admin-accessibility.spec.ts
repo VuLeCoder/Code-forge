@@ -87,7 +87,9 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
     await expect(lockButton).toBeFocused();
 
     const secondLockButton = page.getByRole("row", { name: /bob/ }).getByRole("button", { name: "Khóa tài khoản" });
-    await secondLockButton.press("Enter");
+    await secondLockButton.focus();
+    await expect(secondLockButton).toBeFocused();
+    await page.keyboard.press("Enter");
     const secondDialog = page.getByRole("dialog", { name: "Khóa bob?" });
     await expect(secondDialog).toBeVisible();
     await expect(secondDialog.getByRole("button", { name: "Xác nhận" })).toBeFocused();

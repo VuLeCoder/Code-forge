@@ -131,6 +131,43 @@ describe('PullRequestsService', () => {
     expect(storage.compareAndSwapBranch).not.toHaveBeenCalled();
   });
 
+  it('returns RECONCILING for the same unresolved operation without starting another merge', async () => {
+    db.pullRequestMergeOperation.findUnique.mockResolvedValueOnce({ operationId, repositoryId: repoId, pullRequestId: pullId,
+      expectedSourceSha: sourceSha, expectedTargetSha: targetSha, storageGeneration: 2, status: 'NEEDS_RECONCILIATION' });
+
+    const result = await service.merge('owner', 'repo', ownerId, 4, { operationId, expectedSourceSha: sourceSha,
+      expectedTargetSha: targetSha, storageGeneration: 2, version: 3 });
+
+    expect(result).toEqual({ status: 'RECONCILING', operationId });
+    expect(locks.acquire).not.toHaveBeenCalled();
+    expect(storage.compare).not.toHaveBeenCalled();
+    expect(storage.createMergeCandidate).not.toHaveBeenCalled();
+    expect(storage.compareAndSwapBranch).not.toHaveBeenCalled();
+    expect(db.pullRequestMergeOperation.create).not.toHaveBeenCalled();
+    expect(db.pullRequestMergeOperation.update).not.toHaveBeenCalled();
+    expect(db.pullRequestMergeOperation.updateMany).not.toHaveBeenCalled();
+    expect(db.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a retry for the same failed operation without starting another merge', async () => {
+    db.pullRequestMergeOperation.findUnique.mockResolvedValueOnce({ operationId, repositoryId: repoId, pullRequestId: pullId,
+      expectedSourceSha: sourceSha, expectedTargetSha: targetSha, storageGeneration: 2, status: 'FAILED' });
+
+    await expect(service.merge('owner', 'repo', ownerId, 4, { operationId, expectedSourceSha: sourceSha,
+      expectedTargetSha: targetSha, storageGeneration: 2, version: 3 })).rejects.toMatchObject({
+      response: { error: { code: 'MERGE_OPERATION_FAILED' } }, status: 409,
+    });
+
+    expect(locks.acquire).not.toHaveBeenCalled();
+    expect(storage.compare).not.toHaveBeenCalled();
+    expect(storage.createMergeCandidate).not.toHaveBeenCalled();
+    expect(storage.compareAndSwapBranch).not.toHaveBeenCalled();
+    expect(db.pullRequestMergeOperation.create).not.toHaveBeenCalled();
+    expect(db.pullRequestMergeOperation.update).not.toHaveBeenCalled();
+    expect(db.pullRequestMergeOperation.updateMany).not.toHaveBeenCalled();
+    expect(db.auditLog.create).not.toHaveBeenCalled();
+  });
+
   it('rechecks the operation ID under the repository lock before allocating a merge', async () => {
     db.pullRequestMergeOperation.findUnique
       .mockResolvedValueOnce(null)
