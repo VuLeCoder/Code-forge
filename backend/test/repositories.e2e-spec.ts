@@ -1046,6 +1046,104 @@ process.exit(result.status ?? 1);
     }
   }, 60_000);
 
+  it('rejects a queued receive-pack when the actor is locked before repository lock acquisition', async () => {
+    const created = await call('POST', 'repositories', ownerCookie, { name: 'QueuedPushUserLock', initializeReadme: true });
+    expect(created.status).toBe(201);
+    const { repository } = await created.json() as { repository: { id: string } };
+    const stored = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
+    const bare = join(storageRoot, stored.storageKey);
+    const mainBefore = execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim();
+    const tokenResponse = await call('POST', 'tokens', ownerCookie, {
+      name: 'Queued push user-lock race', scopes: ['repo:read', 'repo:write'],
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    expect(tokenResponse.status).toBe(201);
+    const { secret, token } = await tokenResponse.json() as { secret: string; token: { id: string } };
+    const barrier = new Client({ connectionString: originalUrl });
+    const storage = app.get(GitStorageService);
+    const openPack = jest.spyOn(storage, 'openPack');
+    const url = `${base}/git/Owner/QueuedPushUserLock.git/git-receive-pack`;
+    const requestController = new AbortController();
+    let barrierHeld = false;
+    let userLocked = false;
+    let requestPromise: Promise<Response> | undefined;
+    let response: Response | undefined;
+    const unlockBarrier = async () => {
+      if (!barrierHeld) return;
+      const result = await barrier.query<{ pg_advisory_unlock: boolean }>(
+        'SELECT pg_advisory_unlock(hashtextextended($1, 0))', [stored.id]);
+      if (!result.rows[0]?.pg_advisory_unlock) throw new Error('The queued-push barrier lock was not held.');
+      barrierHeld = false;
+    };
+    const waitForQueuedReceivePack = async () => {
+      const deadline = Date.now() + 5_000;
+      do {
+        const waiters = await admin.$queryRawUnsafe<{ waiting: number }[]>(`
+          WITH lock_key AS (SELECT hashtextextended($2, 0) AS value)
+          SELECT COUNT(DISTINCT activity.pid)::int AS waiting
+          FROM pg_stat_activity AS activity
+          JOIN pg_locks AS pg_lock ON pg_lock.pid = activity.pid
+          CROSS JOIN lock_key
+          WHERE activity.application_name = $1
+            AND activity.wait_event_type = 'Lock'
+            AND activity.wait_event = 'advisory'
+            AND pg_lock.locktype = 'advisory'
+            AND pg_lock.granted = false
+            AND pg_lock.classid = ((lock_key.value >> 32) & 4294967295)::oid
+            AND pg_lock.objid = (lock_key.value & 4294967295)::oid
+            AND pg_lock.objsubid = 1`, lockApplicationName, stored.id);
+        if ((waiters[0]?.waiting ?? 0) === 1) return;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      } while (Date.now() < deadline);
+      throw new Error('Timed out waiting for receive-pack to queue on the repository advisory lock.');
+    };
+
+    try {
+      await barrier.connect();
+      await barrier.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [stored.id]);
+      barrierHeld = true;
+      requestPromise = fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${Buffer.from(`Owner:${secret}`).toString('base64')}`,
+          'content-type': 'application/x-git-receive-pack-request',
+        },
+        body: Buffer.from('0000'),
+        signal: requestController.signal,
+      });
+      await waitForQueuedReceivePack();
+
+      userLocked = true;
+      await db.user.update({ where: { id: ownerId }, data: { status: 'LOCKED', lockedAt: new Date() } });
+      await unlockBarrier();
+      response = await requestPromise;
+
+      expect(response.status).toBe(401);
+      expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(mainBefore);
+      expect(await db.gitPushOperation.count({ where: { repositoryId: stored.id } })).toBe(0);
+      expect(await db.auditLog.count({ where: { targetId: stored.id, action: 'GIT_PUSH_COMPLETED' } })).toBe(0);
+      expect(openPack).not.toHaveBeenCalled();
+
+      const lockProbe = await barrier.query<{ acquired: boolean }>(
+        'SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS acquired', [stored.id]);
+      expect(lockProbe.rows[0]?.acquired).toBe(true);
+      const probeUnlock = await barrier.query<{ pg_advisory_unlock: boolean }>(
+        'SELECT pg_advisory_unlock(hashtextextended($1, 0))', [stored.id]);
+      expect(probeUnlock.rows[0]?.pg_advisory_unlock).toBe(true);
+    } finally {
+      if (barrierHeld) await unlockBarrier();
+      if (requestPromise && !response) {
+        requestController.abort();
+        await requestPromise.catch(() => undefined);
+      }
+      openPack.mockRestore();
+      if (userLocked) await db.user.update({ where: { id: ownerId }, data: { status: 'ACTIVE', lockedAt: null } });
+      await db.personalAccessToken.deleteMany({ where: { id: token.id, userId: ownerId } });
+      await db.repository.deleteMany({ where: { id: stored.id } });
+      await barrier.end();
+    }
+  }, 60_000);
+
   it('serializes a valid Git push before repository soft-delete and rejects later writes', async () => {
     const created = await call('POST', 'repositories', ownerCookie, { name: 'PushDeleteRace', initializeReadme: true });
     expect(created.status).toBe(201);
