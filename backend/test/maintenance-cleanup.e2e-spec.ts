@@ -218,6 +218,10 @@ describe('MaintenanceJobsService PostgreSQL cleanup and purge', () => {
       expectedTargetSha: pullRequest.targetSha, oldTargetSha: pullRequest.targetSha,
       status: 'NEEDS_RECONCILIATION', errorCode: 'RECONCILIATION_UNAVAILABLE', createdAt: new Date(),
     } });
+    expect(Date.now() - operation.createdAt.getTime()).toBeGreaterThanOrEqual(0);
+    expect(Date.now() - operation.createdAt.getTime()).toBeLessThan(120_000);
+    expect(Date.now() - immediateOperation.createdAt.getTime()).toBeGreaterThanOrEqual(0);
+    expect(Date.now() - immediateOperation.createdAt.getTime()).toBeLessThan(120_000);
 
     await maintenance.runOnce();
     expect((await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId: operation.operationId } }))

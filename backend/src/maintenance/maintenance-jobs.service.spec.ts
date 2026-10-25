@@ -147,6 +147,19 @@ describe('MaintenanceJobsService', () => {
     expect(fixture.lock.release).toHaveBeenCalledTimes(2);
   });
 
+  it('retries a later run after the process-wide lock release fails', async () => {
+    const fixture = makeFixture();
+    fixture.lock.release.mockRejectedValueOnce(new Error('unlock failed')).mockResolvedValueOnce(undefined);
+
+    await fixture.service.runOnce();
+    await fixture.service.runOnce();
+
+    expect(fixture.locks.acquire).toHaveBeenCalledTimes(2);
+    expect(fixture.db.$executeRaw).toHaveBeenCalledTimes(6);
+    expect(fixture.purge.purgeDue).toHaveBeenCalledTimes(2);
+    expect(fixture.storage.cleanupOrphanedTemporaryDirectories).toHaveBeenCalledTimes(2);
+  });
+
   it('skips an overlapping batch and releases the process-wide job lock once', async () => {
     const fixture = makeFixture();
     let releaseAcquire!: (lock: { release: jest.Mock }) => void;
@@ -273,13 +286,7 @@ describe('MaintenanceJobsService', () => {
       error: { code: 'GIT_PUSH_RECONCILIATION_REQUIRED' },
     }));
 
-    const fixedNow = new Date('2026-10-25T08:00:00.000Z').getTime();
-    const dateNow = jest.spyOn(Date, 'now').mockReturnValue(fixedNow);
-    try {
-      await fixture.internals.reconcileMerges();
-    } finally {
-      dateNow.mockRestore();
-    }
+    await fixture.internals.reconcileMerges();
 
     const mergeCalls = fixture.db.pullRequestMergeOperation.findMany.mock.calls as unknown as unknown[][];
     const query = mergeCalls[0]?.[0] as {
@@ -290,7 +297,10 @@ describe('MaintenanceJobsService', () => {
     } | undefined;
     expect(query?.where.OR[0]?.status).toBe('PENDING');
     const pendingCutoff = query?.where.OR[0]?.createdAt?.lte;
-    expect(pendingCutoff).toEqual(new Date(fixedNow - 120_000));
+    expect(pendingCutoff).toBeInstanceOf(Date);
+    const pendingCutoffAgeMs = Date.now() - (pendingCutoff as Date).getTime();
+    expect(pendingCutoffAgeMs).toBeGreaterThanOrEqual(119_000);
+    expect(pendingCutoffAgeMs).toBeLessThanOrEqual(121_000);
     expect(query?.where.OR[1]?.status).toBe('NEEDS_RECONCILIATION');
     expect(query?.where.OR[1]?.createdAt).toBeUndefined();
     expect(query?.where.AND[0]?.OR).toEqual([

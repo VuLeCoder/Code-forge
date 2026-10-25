@@ -59,8 +59,14 @@ export class MaintenanceJobsService implements OnModuleInit, OnModuleDestroy {
       // Logs identify only the job and never include database URLs or row data.
       this.logger.warn('Maintenance batch failed; it will retry on the next run.');
     } finally {
-      if (jobLock) await jobLock.release();
-      this.running = false;
+      try {
+        if (jobLock) await jobLock.release();
+      } catch {
+        // The lock service discards a connection whose advisory unlock failed.
+        this.logger.warn('Maintenance lock release failed; it will retry on the next run.');
+      } finally {
+        this.running = false;
+      }
     }
   }
 
