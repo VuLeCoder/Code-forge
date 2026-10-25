@@ -114,8 +114,9 @@ test('WRITE collaborator accepts invite, pushes a feature branch, and owner merg
     await page.getByRole('link', { name: /Review collaborator change/ }).click();
     await expect(page.getByRole('heading', { name: /Review collaborator change/ })).toBeVisible();
     await expect(page.getByText('feature/pull-flow', { exact: true }).first()).toBeVisible();
-    await expect(page.getByLabel('Nội dung diff dạng văn bản')).toContainText('Change pushed by the WRITE collaborator.');
-    await expect(page.getByText('collaborator-change.txt', { exact: true })).toBeVisible();
+    await expect(page.getByLabel('Diff của collaborator-change.txt')).toContainText('Change pushed by the WRITE collaborator.');
+    await expect(page.getByRole('region', { name: /Files changed/ })
+      .getByText('collaborator-change.txt', { exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: 'Merge pull request' }).click();
     await page.getByRole('button', { name: 'Xác nhận merge' }).click();

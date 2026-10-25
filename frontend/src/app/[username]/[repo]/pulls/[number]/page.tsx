@@ -96,14 +96,15 @@ export default function PullRequestDetailPage() {
     requestJson<DetailResult>(base), requestJson<CompareSummary>(`${base}/compare?summary=true`),
   ]), [base]);
 
-  const fetchPageSet = useCallback((snapshot: Snapshot, page = 1) => {
+  const fetchPageSet = useCallback(async (snapshot: Snapshot, page = 1) => {
     const query = new URLSearchParams({ sourceSha: snapshot.sourceSha, targetSha: snapshot.targetSha,
       storageGeneration: String(snapshot.storageGeneration), page: String(page), pageSize: "20" });
-    return Promise.all([
+    const [commits, files] = await Promise.all([
       requestJson<CommitPage>(`${base}/commits?${query}`),
       requestJson<FilePage>(`${base}/files?${query}`),
-      requestJson<FilePage>(`${base}/diff?${query}`),
     ]);
+    const diff = await requestJson<FilePage>(`${base}/diff?${query}`);
+    return [commits, files, diff] as [CommitPage, FilePage, FilePage];
   }, [base]);
 
   const isStaleSnapshot = (cause: unknown) => cause instanceof ApiRequestError && cause.status === 409 && cause.code === "STALE_COMPARE";
