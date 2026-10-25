@@ -4,6 +4,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
+import { Client } from 'pg';
 // cookie-parser is CommonJS; this import form works in the Jest runtime.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import cookieParser = require('cookie-parser');
@@ -11,11 +12,13 @@ import cookieParser = require('cookie-parser');
 // Each run owns a fresh schema. Never reset or truncate the development schema.
 describe('Milestone 1 HTTP + PostgreSQL', () => {
   const schema = `m1_test_${randomBytes(8).toString('hex')}`;
+  const appDatabaseApplicationName = `auth-logout-${randomBytes(6).toString('hex')}`;
   let admin: PrismaClient;
   let db: PrismaClient;
   let app: INestApplication;
   let origin: string;
   let url: string;
+  let isolatedDatabaseUrl: string;
   let originalDatabaseUrl: string | undefined;
   let originalDatabaseUrlUnpooled: string | undefined;
   const account = { username: 'Alice', email: 'alice@example.test', password: 'test-password-123' };
@@ -28,6 +31,27 @@ describe('Milestone 1 HTTP + PostgreSQL', () => {
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 
+  const waitForUserRowWaiters = async (monitor: Client, expected: number) => {
+    const deadline = Date.now() + 5_000;
+    let waiting = 0;
+    while (Date.now() < deadline) {
+      const result = await monitor.query<{ waiting: number }>(`
+        SELECT COUNT(*)::int AS waiting
+        FROM pg_stat_activity
+        WHERE application_name = $1
+          AND datname = current_database()
+          AND pid <> pg_backend_pid()
+          AND wait_event_type = 'Lock'
+          AND query ILIKE '%FROM users%'
+          AND query ILIKE '%FOR UPDATE%'
+      `, [appDatabaseApplicationName]);
+      waiting = result.rows[0]?.waiting ?? 0;
+      if (waiting === expected) return;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error(`Expected ${expected} auth request(s) waiting for the user row lock; observed ${waiting}.`);
+  };
+
   beforeAll(async () => {
     await ConfigModule.forRoot({ envFilePath: '.env' });
     originalDatabaseUrl = process.env.DATABASE_URL;
@@ -37,6 +61,8 @@ describe('Milestone 1 HTTP + PostgreSQL', () => {
     await admin.$executeRawUnsafe(`CREATE SCHEMA "${schema}"`);
     const isolatedUrl = new URL(originalDatabaseUrl);
     isolatedUrl.searchParams.set('schema', schema);
+    isolatedUrl.searchParams.set('application_name', appDatabaseApplicationName);
+    isolatedDatabaseUrl = isolatedUrl.toString();
     process.env.DATABASE_URL = isolatedUrl.toString();
     process.env.DATABASE_URL_UNPOOLED = isolatedUrl.toString();
     execFileSync(process.execPath, [require.resolve('prisma/build/index.js'), 'migrate', 'deploy'], {
@@ -162,6 +188,55 @@ describe('Milestone 1 HTTP + PostgreSQL', () => {
     const loggedOutSuccessor = await db.session.findUniqueOrThrow({ where: { id: rotatedSession.id } });
     expect(loggedOutSuccessor.revokedAt).not.toBeNull();
     expect((await call('auth/me', undefined, cookie(rotated))).status).toBe(401);
+  });
+
+  it('serializes concurrent refresh then logout and revokes the full session family', async () => {
+    const loggedIn = await call('auth/login', { login: 'alice', password: account.password });
+    expect(loggedIn.status).toBe(200);
+    const oldCookie = cookie(loggedIn);
+    const oldRefreshToken = refreshToken(loggedIn);
+    expect(oldRefreshToken).toBeTruthy();
+    const oldSession = await db.session.findUniqueOrThrow({ where: {
+      tokenHash: createHash('sha256').update(oldRefreshToken!).digest('hex'),
+    } });
+
+    const lockConnectionUrl = new URL(isolatedDatabaseUrl);
+    lockConnectionUrl.searchParams.set('application_name', `auth-row-lock-${randomBytes(6).toString('hex')}`);
+    const rowLock = new Client({ connectionString: lockConnectionUrl.toString() });
+    let rowLockConnected = false;
+    let transactionOpen = false;
+    let refreshRequest: Promise<Response> | undefined;
+    let logoutRequest: Promise<Response> | undefined;
+    try {
+      await rowLock.connect();
+      rowLockConnected = true;
+      await rowLock.query('BEGIN');
+      transactionOpen = true;
+      await rowLock.query('SELECT id FROM users WHERE normalized_username = $1 FOR UPDATE', ['alice']);
+
+      refreshRequest = call('auth/refresh', {}, oldCookie);
+      await waitForUserRowWaiters(rowLock, 1);
+      logoutRequest = call('auth/logout', {}, oldCookie);
+      await waitForUserRowWaiters(rowLock, 2);
+
+      await rowLock.query('COMMIT');
+      transactionOpen = false;
+      const [refreshed, loggedOut] = await Promise.all([refreshRequest, logoutRequest]);
+      expect(refreshed.status).toBe(200);
+      expect(loggedOut.status).toBe(204);
+
+      const family = await db.session.findMany({ where: { familyId: oldSession.familyId } });
+      expect(family.length).toBeGreaterThanOrEqual(2);
+      expect(family.every((session) => session.revokedAt !== null)).toBe(true);
+      expect((await call('auth/me', undefined, cookie(refreshed))).status).toBe(401);
+    } finally {
+      try {
+        if (transactionOpen) await rowLock.query('ROLLBACK');
+      } finally {
+        await Promise.allSettled([refreshRequest, logoutRequest].filter((request): request is Promise<Response> => Boolean(request)));
+        if (rowLockConnected) await rowLock.end();
+      }
+    }
   });
 
   it('revokes refresh on logout and rejects locked users at login, me and refresh', async () => {
