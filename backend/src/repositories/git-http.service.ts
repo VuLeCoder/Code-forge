@@ -109,10 +109,20 @@ export class GitHttpService implements OnModuleDestroy {
     let parsed = false;
     let drained = false;
     const inputs: Transform[] = [];
+    let timer: NodeJS.Timeout | null = null;
+    const cancel = () => stop();
+    const lockLost = () => stop(503);
+    const cleanup = () => {
+      if (timer) { clearTimeout(timer); timer = null; }
+      req.off('aborted', cancel);
+      res.off('close', cancel);
+      lock?.signal.removeEventListener('abort', lockLost);
+    };
     const stop = (status = 503) => {
       if (stopped) return;
       failureStatus = status;
       stopped = true;
+      cleanup();
       req.unpipe();
       for (const stream of inputs) stream.destroy();
       child.stdin.destroy();
@@ -157,15 +167,8 @@ export class GitHttpService implements OnModuleDestroy {
       return stream;
     };
     this.running.add(stop);
-    const timer = setTimeout(() => stop(504), this.timeoutMs);
-    const cancel = () => stop();
-    const lockLost = () => stop(503);
-    const cleanup = () => {
-      clearTimeout(timer);
-      req.off('aborted', cancel);
-      res.off('close', cancel);
-      lock?.signal.removeEventListener('abort', lockLost);
-    };
+    timer = setTimeout(() => stop(504), this.timeoutMs);
+    timer.unref();
     req.once('aborted', cancel);
     res.once('close', cancel);
     lock.signal.addEventListener('abort', lockLost, { once: true });
