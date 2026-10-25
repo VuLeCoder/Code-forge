@@ -273,7 +273,13 @@ describe('MaintenanceJobsService', () => {
       error: { code: 'GIT_PUSH_RECONCILIATION_REQUIRED' },
     }));
 
-    await fixture.internals.reconcileMerges();
+    const fixedNow = new Date('2026-10-25T08:00:00.000Z').getTime();
+    const dateNow = jest.spyOn(Date, 'now').mockReturnValue(fixedNow);
+    try {
+      await fixture.internals.reconcileMerges();
+    } finally {
+      dateNow.mockRestore();
+    }
 
     const mergeCalls = fixture.db.pullRequestMergeOperation.findMany.mock.calls as unknown as unknown[][];
     const query = mergeCalls[0]?.[0] as {
@@ -284,10 +290,7 @@ describe('MaintenanceJobsService', () => {
     } | undefined;
     expect(query?.where.OR[0]?.status).toBe('PENDING');
     const pendingCutoff = query?.where.OR[0]?.createdAt?.lte;
-    expect(pendingCutoff).toBeInstanceOf(Date);
-    const cutoffDelta = Date.now() - (pendingCutoff as Date).getTime();
-    expect(cutoffDelta).toBeGreaterThanOrEqual(119_000);
-    expect(cutoffDelta).toBeLessThanOrEqual(121_000);
+    expect(pendingCutoff).toEqual(new Date(fixedNow - 120_000));
     expect(query?.where.OR[1]?.status).toBe('NEEDS_RECONCILIATION');
     expect(query?.where.OR[1]?.createdAt).toBeUndefined();
     expect(query?.where.AND[0]?.OR).toEqual([
