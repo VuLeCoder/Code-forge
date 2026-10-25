@@ -64,6 +64,7 @@ process.stdin.on('end', () => {
       !ref.startsWith('refs/heads/')) reject('chỉ được cập nhật branch trong refs/heads.');
     const branch = ref.slice('refs/heads/'.length);
     if (git(['check-ref-format', '--branch', branch]) === null) reject('tên branch không hợp lệ.');
+    if (Buffer.byteLength(branch, 'utf8') > 255) reject('branch vượt quá 255 byte.');
     if (ref === `refs/heads/${defaultBranch}` &&
       !(zero(oldSha) && process.env.CODE_FORGE_ALLOW_DEFAULT_BRANCH_INITIALIZATION === 'true')) {
       reject('branch mặc định chỉ được cập nhật qua pull request do owner merge.');

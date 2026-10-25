@@ -65,4 +65,35 @@ describe('pre-receive branch protection', () => {
     expect(run(zero, first, 'refs/heads/main', true).status).toBe(0);
     expect(run(zero, first, 'refs/heads/feature/topic', false).status).toBe(0);
   });
+
+  it('accepts a 255-byte branch suffix and rejects a 256-byte suffix before ref update', () => {
+    const first = git(['-C', work, 'rev-parse', 'HEAD^']);
+    const zero = '0'.repeat(first.length);
+    const acceptedBranch = `${'a'.repeat(127)}/${'a'.repeat(127)}`;
+    const rejectedBranch = `${'b'.repeat(128)}/${'b'.repeat(127)}`;
+
+    const accepted = run(zero, first, `refs/heads/${acceptedBranch}`, false);
+    expect(accepted.status).toBe(0);
+
+    const rejected = run(zero, first, `refs/heads/${rejectedBranch}`, false);
+    expect(rejected.status).toBe(1);
+    expect(rejected.stderr).toContain('branch vượt quá 255 byte');
+    expect(git(['--git-dir', bare, 'for-each-ref', '--format=%(refname)', 'refs/heads/']))
+      .toBe('refs/heads/main');
+  });
+
+  it('measures branch limits in UTF-8 bytes, not JavaScript characters', () => {
+    const first = git(['-C', work, 'rev-parse', 'HEAD^']);
+    const zero = '0'.repeat(first.length);
+    const branchAtLimit = `${'é'.repeat(63)}a/${'é'.repeat(63)}a`; // 255 UTF-8 bytes
+    const branchOverLimit = `${'é'.repeat(64)}/${'é'.repeat(63)}a`; // 256 UTF-8 bytes
+
+    expect(Buffer.byteLength(branchAtLimit, 'utf8')).toBe(255);
+    expect(Buffer.byteLength(branchOverLimit, 'utf8')).toBe(256);
+    expect(run(zero, first, `refs/heads/${branchAtLimit}`, false).status).toBe(0);
+
+    const rejected = run(zero, first, `refs/heads/${branchOverLimit}`, false);
+    expect(rejected.status).toBe(1);
+    expect(rejected.stderr).toContain('branch vượt quá 255 byte');
+  });
 });

@@ -461,6 +461,8 @@ describe('Repository HTTP + PostgreSQL', () => {
     const writeOnlyToken = await makeToken(other.id, 'M4 write only', ['repo:write']);
     const repo = await db.repository.findFirstOrThrow({ where: { ownerId, normalizedName: 'demo' } });
     const bare = join(storageRoot, repo.storageKey);
+    // The exact 255-byte ref path can exceed MAX_PATH under the Windows temp root.
+    execFileSync('git', ['--git-dir', bare, 'config', 'core.longpaths', 'true']);
     const url = `${base}/git/Owner/Demo.git`;
     const askpass = join(storageRoot, 'm4-askpass.sh');
     await writeFile(askpass, '#!/bin/sh\ncase "$1" in *Username*) printf "%s\\n" "$TEST_GIT_USER" ;; *) printf "%s\\n" "$TEST_GIT_PAT" ;; esac\n', { mode: 0o700 });
@@ -503,6 +505,17 @@ describe('Repository HTTP + PostgreSQL', () => {
       expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', `refs/heads/${candidate.branch}`], { encoding: 'utf8' }).trim()).toBe(candidate.sha);
     }
     expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(first);
+
+    const byteLimitBranch = `${'é'.repeat(63)}a/${'é'.repeat(63)}a`;
+    const overByteLimitBranch = `${'é'.repeat(64)}/${'é'.repeat(63)}a`;
+    expect(Buffer.byteLength(byteLimitBranch, 'utf8')).toBe(255);
+    expect(Buffer.byteLength(overByteLimitBranch, 'utf8')).toBe(256);
+    await git(['-C', work, 'push', 'origin', `HEAD:refs/heads/${byteLimitBranch}`]);
+    expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', `refs/heads/${byteLimitBranch}`], { encoding: 'utf8' }).trim()).toBe(first);
+    await expect(git(['-C', work, 'push', 'origin', `HEAD:refs/heads/${overByteLimitBranch}`])).rejects.toThrow();
+    expect(() => execFileSync('git', ['--git-dir', bare, 'rev-parse', '--verify', `refs/heads/${overByteLimitBranch}`], { stdio: 'pipe' })).toThrow();
+    expect(await db.gitPushOperation.count({ where: { repositoryId: repo.id,
+      status: { in: ['PENDING', 'NEEDS_RECONCILIATION'] } } })).toBe(0);
 
     await writeFile(join(work, 'code.txt'), 'second\n');
     await git(['-C', work, 'add', 'code.txt']);
