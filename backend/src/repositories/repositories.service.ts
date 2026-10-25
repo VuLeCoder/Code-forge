@@ -218,9 +218,12 @@ export class RepositoriesService {
     return this.db.$transaction(async (tx) => {
       const current = await tx.repository.findUnique({ where: { id: repositoryId },
         include: { members: { where: { userId: userId ?? '00000000-0000-0000-0000-000000000000' } } } });
-      if (operation === 'write') {
-        const users = userId ? await tx.$queryRaw<{ status: string }[]>`SELECT status FROM users WHERE id = ${userId}::uuid` : [];
+      if (operation === 'write' && !userId) throw new UnauthorizedException();
+      if (userId) {
+        const users = await tx.$queryRaw<{ status: string }[]>`SELECT status FROM users WHERE id = ${userId}::uuid`;
         if (users[0]?.status !== 'ACTIVE') throw new UnauthorizedException();
+      }
+      if (operation === 'write') {
         this.policy.assertWrite(current, userId!);
       } else {
         this.policy.assertRead(current, userId);
