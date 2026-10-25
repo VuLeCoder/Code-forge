@@ -1,6 +1,6 @@
 # 04 — Tiến độ và lộ trình
 
-Đối chiếu ngày 25/10/2026. Nguồn trạng thái hiện tại: [implementation ledger](docs/implementation-status.md), [remaining actions](docs/next-actions.md), [M2](docs/m2-acceptance-report.md), [M4](docs/m4-acceptance-report.md), [M5](docs/m5-acceptance-report.md), schema, source và hosted run `40138087574` trên `7e0aa27`. Các báo cáo milestone M2/M4/M5 bên dưới giữ giá trị lịch sử; hosted CI mới hơn là bằng chứng regression hiện tại.
+Đối chiếu ngày 25/10/2026. Nguồn trạng thái hiện tại: [implementation ledger](implementation-status.md), [remaining actions](next-actions.md), [M2](m2-acceptance-report.md), [M4](m4-acceptance-report.md), [M5](m5-acceptance-report.md), schema, source và hosted run `40138087574` trên `7e0aa27`. Các báo cáo milestone M2/M4/M5 bên dưới giữ giá trị lịch sử; hosted CI mới hơn là bằng chứng regression hiện tại.
 
 ## Bảng trạng thái tổng hợp
 
@@ -35,7 +35,7 @@ Giới hạn hiện có: 1.000 branch/mục tree; lệnh đọc thường timeou
 
 ## Việc còn lại và tiêu chí nghiệm thu
 
-Chi tiết task/owner nằm trong [next-actions](docs/next-actions.md). Ưu tiên kế tiếp:
+Chi tiết task/owner nằm trong [next-actions](next-actions.md). Ưu tiên kế tiếp:
 
 1. Giữ hai test advisory-lock regression trong CI; repository lock qua process con và maintenance batch giữa hai service instance/DB sessions đã đạt hosted. E2E không chạy local vì cấu hình máy trỏ tới database phát triển.
 2. Hoàn thiện failure/crash/reconciliation matrix cho merge và các lifecycle race còn lại; kiểm tra quota API đầy đủ.

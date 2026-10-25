@@ -14,7 +14,7 @@ Hành trình khi **MVP hoàn thiện**:
 6. Owner xem commits/diff rồi merge PR không conflict; hệ thống chống ghi đè thay đổi khi có thao tác đồng thời.
 7. Admin quản lý tài khoản và trạng thái repository, xem audit. Admin không tự có quyền đọc source private.
 
-Các bước 4–7 và push đã có implementation trong source hiện tại. Hosted CI gần nhất trên `7e0aa27` xác nhận các journey chính cùng test Git/PostgreSQL/advisory lock; các failure/crash matrix rộng hơn và cloud smoke vẫn mở. Xem [ledger nghiệm thu](docs/implementation-status.md) và [các việc còn lại](docs/next-actions.md).
+Các bước 4–7 và push đã có implementation trong source hiện tại. Hosted CI gần nhất trên `7e0aa27` xác nhận các journey chính cùng test Git/PostgreSQL/advisory lock; các failure/crash matrix rộng hơn và cloud smoke vẫn mở. Xem [ledger nghiệm thu](implementation-status.md) và [các việc còn lại](next-actions.md).
 
 ## Vai trò và quyền mục tiêu
 
@@ -55,4 +55,4 @@ Ngoài MVP: SSH, Git LFS, fork, organization, issue, star, notification, CI/revi
 
 Điều chỉnh quota theo từng user/repo nằm ngoài scope hiện tại; kế hoạch đã chốt quota toàn cục và chưa có override theo đối tượng.
 
-Tài liệu nguồn còn hiện hữu trong repository: [nghiệm thu M2](docs/m2-acceptance-report.md), [nghiệm thu M4](docs/m4-acceptance-report.md), [nghiệm thu M5](docs/m5-acceptance-report.md), [ledger implementation](docs/implementation-status.md) và [next actions](docs/next-actions.md). Tài liệu yêu cầu/kế hoạch cũ được dẫn trong bản trước không có tại các đường dẫn đó trong checkout này.
+Tài liệu nguồn còn hiện hữu trong repository: [nghiệm thu M2](m2-acceptance-report.md), [nghiệm thu M4](m4-acceptance-report.md), [nghiệm thu M5](m5-acceptance-report.md), [ledger implementation](implementation-status.md) và [next actions](next-actions.md). Tài liệu yêu cầu/kế hoạch cũ được dẫn trong bản trước không có tại các đường dẫn đó trong checkout này.
