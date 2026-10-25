@@ -38,7 +38,8 @@ describe('Git HTTP process lifecycle', () => {
       { provide: RepositoriesService, useValue: { prepareGit, recheckGit: jest.fn(() => Promise.resolve(access)) } },
       { provide: RepositoryLockService, useValue: { acquire: jest.fn(() => Promise.resolve({ signal: new AbortController().signal, release: jest.fn() })) } },
       { provide: GitStorageService, useValue: { openPack: start } },
-      { provide: GitPushJournalService, useValue: { begin: jest.fn(), finish: jest.fn(), fail: jest.fn(), markNeedsReconciliation: jest.fn() } },
+      { provide: GitPushJournalService, useValue: { begin: jest.fn(), recordChildSuccess: jest.fn(), finish: jest.fn(),
+        fail: jest.fn(), markChildFailed: jest.fn(), markNeedsReconciliation: jest.fn() } },
       { provide: ConfigService, useValue: { getOrThrow: (key: string) => key === 'MAX_PUSH_BYTES' ? 1024 * 1024 : undefined } },
     ] }).compile();
     app = module.createNestApplication();
@@ -138,5 +139,81 @@ describe('Git HTTP process lifecycle', () => {
     expect(start).toHaveBeenCalledWith('key', 'main', 'git-receive-pack', true, undefined, true);
     const raw = logs.mock.calls.map(([value]) => String(value)).find((value) => value.includes('"event":"git_write"'))!;
     expect(JSON.parse(raw)).toMatchObject({ event: 'git_write', operation: 'receive-pack-discovery', status: 200 });
+  });
+
+  it.each([
+    ['nonzero child exit', 'Content-Type: application/x-git-receive-pack-result\r\n\r\n0000', 17, 'failed'],
+    ['incomplete CGI headers', 'Content-Type: application/x-git-receive-pack-result', 0, 'failed'],
+    ['invalid CGI content type', 'Content-Type: text/plain\r\n\r\n0000', 0, 'failed'],
+    ['successful child and complete CGI', 'Content-Type: application/x-git-receive-pack-result\r\n\r\n0000', 0, 'succeeded'],
+    ['child-success proof write fails', 'Content-Type: application/x-git-receive-pack-result\r\n\r\n0000', 0, 'unknown'],
+  ])('journals receive-pack only after known success: %s', async (_name, payload, exitCode, outcome) => {
+    const access = { storageKey: 'key', defaultBranch: 'main', repositoryId: 'repository-id', userId: 'actor-id',
+      actorIsOwner: true, operation: 'write' as const, storageGeneration: 3 };
+    const repositories = app.get<RepositoriesService, {
+      prepareGit: jest.Mock; recheckGit: jest.Mock;
+    }>(RepositoriesService);
+    repositories.prepareGit.mockResolvedValue(access);
+    repositories.recheckGit.mockResolvedValue(access);
+
+    const storage = app.get<GitStorageService, { snapshotRefs: jest.Mock }>(GitStorageService);
+    const beforeRefs = { 'refs/heads/main': 'a'.repeat(40) };
+    const afterRefs = { 'refs/heads/main': 'b'.repeat(40) };
+    storage.snapshotRefs = jest.fn().mockResolvedValueOnce(beforeRefs).mockResolvedValue(afterRefs);
+    const journal = app.get<GitPushJournalService, {
+      begin: jest.Mock; recordChildSuccess: jest.Mock; finish: jest.Mock;
+      markChildFailed: jest.Mock; markNeedsReconciliation: jest.Mock;
+    }>(GitPushJournalService);
+    journal.begin.mockResolvedValue({ operationId: 'push-operation-id' });
+    let startProof!: () => void;
+    let commitProof!: (value: boolean) => void;
+    const proofStarted = new Promise<void>((resolve) => { startProof = resolve; });
+    const proofCommitted = new Promise<boolean>((resolve) => { commitProof = resolve; });
+    journal.recordChildSuccess.mockImplementation(() => {
+      startProof();
+      return outcome === 'unknown' ? Promise.reject(new Error('isolated proof persistence failure')) : proofCommitted;
+    });
+    const finalized = new Promise<void>((resolve) => {
+      journal.finish.mockImplementation(() => { resolve(); return Promise.resolve(true); });
+      journal.markChildFailed.mockImplementation(() => { resolve(); return Promise.resolve(); });
+      journal.markNeedsReconciliation.mockImplementation(() => { resolve(); return Promise.resolve(); });
+    });
+
+    script = `process.stdin.resume(); process.stdin.on('end', () => { process.stdout.end(${JSON.stringify(payload)}); process.exitCode = ${exitCode}; });`;
+    const response = fetch(`${url}/git-receive-pack`, {
+      method: 'POST',
+      headers: { Authorization: 'Basic test', 'Content-Type': 'application/x-git-receive-pack-request' },
+      body: '0000',
+    }).then((response) => response.text()).catch(() => undefined);
+    if (outcome === 'succeeded') {
+      await proofStarted;
+      expect(storage.snapshotRefs).toHaveBeenCalledTimes(1);
+      expect(journal.finish).not.toHaveBeenCalled();
+      commitProof(true);
+    }
+    await response;
+    await finalized;
+
+    expect(journal.begin).toHaveBeenCalledWith('repository-id', 'actor-id', 3, beforeRefs);
+    if (outcome === 'succeeded') {
+      expect(journal.recordChildSuccess).toHaveBeenCalledWith('push-operation-id');
+      expect(storage.snapshotRefs).toHaveBeenCalledTimes(2);
+      expect(journal.finish).toHaveBeenCalledTimes(1);
+      expect(journal.finish).toHaveBeenCalledWith('push-operation-id', afterRefs);
+      expect(journal.markNeedsReconciliation).not.toHaveBeenCalled();
+      expect(journal.markChildFailed).not.toHaveBeenCalled();
+    } else {
+      expect(storage.snapshotRefs).toHaveBeenCalledTimes(1);
+      expect(journal.finish).not.toHaveBeenCalled();
+      if (outcome === 'failed') {
+        expect(journal.recordChildSuccess).not.toHaveBeenCalled();
+        expect(journal.markChildFailed).toHaveBeenCalledWith('push-operation-id');
+        expect(journal.markNeedsReconciliation).not.toHaveBeenCalled();
+      } else {
+        expect(journal.recordChildSuccess).toHaveBeenCalledWith('push-operation-id');
+        expect(journal.markNeedsReconciliation).toHaveBeenCalledWith('push-operation-id');
+        expect(journal.markChildFailed).not.toHaveBeenCalled();
+      }
+    }
   });
 });
