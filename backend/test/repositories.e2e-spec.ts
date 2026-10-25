@@ -681,8 +681,27 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/member-write'], { encoding: 'utf8' }).trim()).toBe(second);
     await git(['-C', work, 'reset', '--hard', second]);
 
-    await git(['-C', work, 'push', 'origin', ':member-write'], 'Other', writeOnlyToken.secret);
+    const branchDeleteSha = execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/member-write'], { encoding: 'utf8' }).trim();
+    const pushOperationsBeforeDelete = new Set((await db.gitPushOperation.findMany({
+      where: { repositoryId: repo.id }, select: { operationId: true },
+    })).map(({ operationId }) => operationId));
+    const pushAuditsBeforeDelete = new Set((await db.auditLog.findMany({
+      where: { targetId: repo.id, action: 'GIT_PUSH_COMPLETED' }, select: { id: true },
+    })).map(({ id }) => id));
+    await git(['-C', work, 'push', 'origin', '--delete', 'member-write'], 'Other', writeOnlyToken.secret);
     expect(() => execFileSync('git', ['--git-dir', bare, 'rev-parse', '--verify', 'refs/heads/member-write'], { stdio: 'pipe' })).toThrow();
+    const deletionOperations = (await db.gitPushOperation.findMany({ where: { repositoryId: repo.id } }))
+      .filter(({ operationId }) => !pushOperationsBeforeDelete.has(operationId));
+    expect(deletionOperations).toHaveLength(1);
+    expect(deletionOperations[0]).toMatchObject({ status: 'COMPLETED', changedRefCount: 1, errorCode: null, beforeRefs: null });
+    const deletionAudits = (await db.auditLog.findMany({ where: { targetId: repo.id, action: 'GIT_PUSH_COMPLETED' } }))
+      .filter(({ id }) => !pushAuditsBeforeDelete.has(id));
+    expect(deletionAudits).toHaveLength(1);
+    expect(deletionAudits[0]?.details).toMatchObject({ operationId: deletionOperations[0]?.operationId,
+      repositoryId: repo.id, changedRefCount: 1 });
+    const deletionRecord = JSON.stringify({ operation: deletionOperations[0], audit: deletionAudits[0]?.details });
+    expect(deletionRecord).not.toContain('member-write');
+    expect(deletionRecord).not.toContain(branchDeleteSha);
     await db.repositoryMember.delete({ where: { repositoryId_userId: { repositoryId: repo.id, userId: other.id } } });
     await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/member-revoked'], 'Other', writeOnlyToken.secret)).rejects.toThrow();
 
@@ -1052,7 +1071,7 @@ process.exit(result.status ?? 1);
     const { repository } = await created.json() as { repository: { id: string } };
     const stored = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
     const bare = join(storageRoot, stored.storageKey);
-    const mainBefore = execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim();
+    const refsBefore = execFileSync('git', ['--git-dir', bare, 'for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)', 'refs/'], { encoding: 'utf8' });
     const tokenResponse = await call('POST', 'tokens', ownerCookie, {
       name: 'Queued push user-lock race', scopes: ['repo:read', 'repo:write'],
       expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
@@ -1119,7 +1138,8 @@ process.exit(result.status ?? 1);
       response = await requestPromise;
 
       expect(response.status).toBe(401);
-      expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim()).toBe(mainBefore);
+      expect(execFileSync('git', ['--git-dir', bare, 'for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)', 'refs/'], { encoding: 'utf8' }))
+        .toBe(refsBefore);
       expect(await db.gitPushOperation.count({ where: { repositoryId: stored.id } })).toBe(0);
       expect(await db.auditLog.count({ where: { targetId: stored.id, action: 'GIT_PUSH_COMPLETED' } })).toBe(0);
       expect(openPack).not.toHaveBeenCalled();
@@ -1318,6 +1338,47 @@ process.exit(result.status ?? 1);
     expect((await call('GET', 'repos/owner/renamed')).status).toBe(404);
     expect((await db.repository.findUniqueOrThrow({ where: { id: before.id } })).storageKey).toBe(before.storageKey);
     expect(await db.auditLog.count({ where: { targetId: before.id, action: 'REPOSITORY_UPDATED' } })).toBe(2);
+  });
+
+  it('blocks repository deletion while an unresolved Git push journal exists', async () => {
+    const id = randomUUID();
+    const name = 'UnresolvedPushDelete';
+    const storageKey = `${id}.git`;
+    const operationId = randomUUID();
+    const storage = app.get(GitStorageService);
+    let repositoryCreated = false;
+    try {
+      const stored = await db.repository.create({ data: {
+        id, ownerId, name, normalizedName: name.toLowerCase(), storageKey, visibility: 'PRIVATE',
+      } });
+      repositoryCreated = true;
+      await storage.create(storageKey, stored.defaultBranch, true, name);
+      const bare = join(storageRoot, storageKey);
+      const refsBefore = execFileSync('git', ['--git-dir', bare, 'for-each-ref', '--sort=refname',
+        '--format=%(refname)%09%(objectname)', 'refs/'], { encoding: 'utf8' });
+      const beforeRefs = { 'refs/heads/main': execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim() };
+      const operation = await db.gitPushOperation.create({ data: {
+        operationId, repositoryId: stored.id, actorId: ownerId, storageGeneration: stored.storageGeneration,
+        beforeRefs, status: 'NEEDS_RECONCILIATION', errorCode: 'GIT_CHILD_OUTCOME_UNKNOWN',
+      } });
+
+      const response = await call('DELETE', `repos/owner/${name.toLowerCase()}`, ownerCookie);
+
+      expect(response.status).toBe(409);
+      expect((await response.json()).error.code).toBe('GIT_PUSH_RECONCILIATION_REQUIRED');
+      expect(await db.repository.findUniqueOrThrow({ where: { id: stored.id } }))
+        .toMatchObject({ status: 'ACTIVE', storageGeneration: stored.storageGeneration });
+      expect(execFileSync('git', ['--git-dir', bare, 'for-each-ref', '--sort=refname',
+        '--format=%(refname)%09%(objectname)', 'refs/'], { encoding: 'utf8' })).toBe(refsBefore);
+      expect(await db.gitPushOperation.findUniqueOrThrow({ where: { operationId } }))
+        .toMatchObject({ status: 'NEEDS_RECONCILIATION', errorCode: 'GIT_CHILD_OUTCOME_UNKNOWN',
+          storageGeneration: stored.storageGeneration, beforeRefs: operation.beforeRefs });
+      expect(await db.auditLog.count({ where: { targetId: stored.id, action: 'REPOSITORY_SOFT_DELETED' } })).toBe(0);
+    } finally {
+      await db.gitPushOperation.deleteMany({ where: { operationId } });
+      await storage.remove(storageKey);
+      if (repositoryCreated) await db.repository.deleteMany({ where: { id } });
+    }
   });
 
   it('soft-deletes, computes configured retention and reserves the deleted name', async () => {

@@ -216,4 +216,62 @@ describe('Git HTTP process lifecycle', () => {
       }
     }
   });
+
+  it('terminates receive-pack and journals child failure when the client aborts after streaming starts', async () => {
+    const receiveResult = 'Content-Type: application/x-git-receive-pack-result\r\n\r\n0000';
+    const access = { storageKey: 'key', defaultBranch: 'main', repositoryId: 'repository-id', userId: 'actor-id',
+      actorIsOwner: true, operation: 'write' as const, storageGeneration: 3 };
+    const repositories = app.get<RepositoriesService, {
+      prepareGit: jest.Mock; recheckGit: jest.Mock;
+    }>(RepositoriesService);
+    repositories.prepareGit.mockResolvedValue(access);
+    repositories.recheckGit.mockResolvedValue(access);
+
+    const storage = app.get<GitStorageService, { snapshotRefs: jest.Mock }>(GitStorageService);
+    const beforeRefs = { 'refs/heads/main': 'a'.repeat(40) };
+    storage.snapshotRefs = jest.fn().mockResolvedValue(beforeRefs);
+    const journal = app.get<GitPushJournalService, {
+      begin: jest.Mock; recordChildSuccess: jest.Mock; finish: jest.Mock;
+      markChildFailed: jest.Mock; markNeedsReconciliation: jest.Mock;
+    }>(GitPushJournalService);
+    journal.begin.mockResolvedValue({ operationId: 'push-operation-id' });
+    journal.markChildFailed.mockResolvedValue(undefined);
+
+    script = `process.stdin.resume(); process.stdin.on('end', () => { process.stdout.write(${JSON.stringify(receiveResult)}); setInterval(() => {}, 1000); });`;
+    const authorizationCanary = 'receive-pack-auth-canary';
+    const controller = new AbortController();
+    const response = await fetch(`${url}/git-receive-pack`, {
+      method: 'POST',
+      headers: { Authorization: `Basic ${authorizationCanary}`, 'Content-Type': 'application/x-git-receive-pack-request' },
+      body: '0000',
+      signal: controller.signal,
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('application/x-git-receive-pack-result');
+    expect(start).toHaveBeenCalledTimes(1);
+
+    const child = children[0]!;
+    const closed = once(child, 'close');
+    controller.abort();
+    await response.text().catch(() => undefined);
+    expect((await closed)[1]).toBe('SIGKILL');
+
+    expect(journal.begin).toHaveBeenCalledWith('repository-id', 'actor-id', 3, beforeRefs);
+    expect(journal.markChildFailed).toHaveBeenCalledWith('push-operation-id');
+    expect(journal.recordChildSuccess).not.toHaveBeenCalled();
+    expect(journal.markNeedsReconciliation).not.toHaveBeenCalled();
+    expect(journal.finish).not.toHaveBeenCalled();
+    expect(storage.snapshotRefs).toHaveBeenCalledTimes(1);
+
+    const requestId = response.headers.get('x-request-id');
+    expect(requestId).toMatch(/^[a-f0-9-]{36}$/);
+    const writeEvent = logs.mock.calls.map(([value]) => String(value))
+      .map((raw) => { try { return JSON.parse(raw) as Record<string, unknown>; } catch { return undefined; } })
+      .find((event) => event?.event === 'git_write' && event.requestId === requestId);
+    expect(writeEvent).toMatchObject({ event: 'git_write', operation: 'receive-pack', outcome: 'aborted' });
+    const writeLogs = logs.mock.calls.map(([value]) => String(value))
+      .filter((raw) => raw.includes(`"requestId":"${requestId}"`) && raw.includes('"event":"git_write"'));
+    expect(writeLogs).toHaveLength(1);
+    expect(writeLogs.join('\n')).not.toContain(authorizationCanary);
+  });
 });

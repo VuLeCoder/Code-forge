@@ -115,6 +115,16 @@ describe('Admin HTTP + isolated PostgreSQL + Git', () => {
     const repositoryOwner = await register('PrivateOwner');
     await db!.user.update({ where: { id: admin.userId }, data: { systemRole: 'ADMIN' } });
 
+    const selfLock = await call('PATCH', `admin/users/${admin.userId}/status`, admin.cookie, { status: 'LOCKED' });
+    expect(selfLock.status).toBe(409);
+    expect(await selfLock.json()).toMatchObject({ error: { code: 'CANNOT_LOCK_SELF' } });
+    expect(await db!.user.findUniqueOrThrow({ where: { id: admin.userId }, select: { status: true } }))
+      .toMatchObject({ status: 'ACTIVE' });
+    expect((await call('GET', 'auth/me', admin.cookie)).status).toBe(200);
+    expect(await db!.auditLog.count({ where: {
+      actorId: admin.userId, targetId: admin.userId, action: 'ADMIN_USER_LOCKED',
+    } })).toBe(0);
+
     const publicRepository = await call('POST', 'repositories', lockedUser.cookie, {
       name: 'PatLockGate', visibility: 'PUBLIC', initializeReadme: true,
     });

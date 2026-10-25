@@ -99,6 +99,36 @@ describe('GitPushJournalService', () => {
     expect(JSON.stringify(f.tx.auditLog.create.mock.calls)).not.toContain('a'.repeat(40));
   });
 
+  it('does not emit an audit when the transactional completion loses its compare-and-swap', async () => {
+    const f = fixture();
+    f.tx.gitPushOperation.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(f.service.finish(operationId, { 'refs/heads/main': 'b'.repeat(40) })).resolves.toBe(false);
+
+    expect(f.db.$transaction).toHaveBeenCalledTimes(1);
+    expect(f.tx.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('counts changed, added, and deleted branch refs without leaking refs or SHAs into the audit', async () => {
+    const f = fixture({ beforeRefs: {
+      'refs/heads/main': 'a'.repeat(40), 'refs/heads/deleted': 'd'.repeat(40),
+    } });
+    const result = await f.service.finish(operationId, {
+      'refs/heads/main': 'b'.repeat(40), 'refs/heads/added': 'c'.repeat(40),
+    });
+
+    expect(result).toBe(true);
+    expect(f.tx.gitPushOperation.updateMany).toHaveBeenCalledWith({ where: { operationId,
+      status: { in: ['PENDING', 'NEEDS_RECONCILIATION'] }, storageGeneration: 4, errorCode: 'GIT_CHILD_SUCCEEDED' },
+      data: { status: 'COMPLETED', changedRefCount: 3, errorCode: null, beforeRefs: Prisma.DbNull } });
+    expect(f.tx.auditLog.create).toHaveBeenCalledTimes(1);
+    expect(f.tx.auditLog.create).toHaveBeenCalledWith({ data: { actorId, action: 'GIT_PUSH_COMPLETED', targetId: repositoryId,
+      details: { operationId, repositoryId, storageGeneration: 4, changedRefCount: 3 } } });
+    const audit = JSON.stringify(f.tx.auditLog.create.mock.calls);
+    for (const ref of ['refs/heads/main', 'refs/heads/deleted', 'refs/heads/added']) expect(audit).not.toContain(ref);
+    for (const sha of ['a', 'b', 'c', 'd']) expect(audit).not.toContain(sha.repeat(40));
+  });
+
   it('marks a no-ref-change operation failed without emitting a success audit', async () => {
     const f = fixture();
     await expect(f.service.finish(operationId, { 'refs/heads/main': 'a'.repeat(40) })).resolves.toBe(true);
@@ -106,6 +136,16 @@ describe('GitPushJournalService', () => {
       status: { in: ['PENDING', 'NEEDS_RECONCILIATION'] }, errorCode: 'GIT_CHILD_SUCCEEDED' },
       data: { status: 'FAILED', errorCode: 'NO_REF_CHANGE', beforeRefs: Prisma.DbNull } });
     expect(f.db.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed ref snapshot without completing or auditing the push', async () => {
+    const f = fixture({ beforeRefs: { 'refs/heads/main': 'not-a-sha' } });
+
+    await expect(f.service.finish(operationId, { 'refs/heads/main': 'b'.repeat(40) }))
+      .rejects.toThrow('Invalid Git ref snapshot');
+
+    expect(f.db.$transaction).not.toHaveBeenCalled();
+    expect(f.tx.auditLog.create).not.toHaveBeenCalled();
   });
 
   it('refuses to attribute a changed ref snapshot across storage generations', async () => {
@@ -128,6 +168,27 @@ describe('GitPushJournalService', () => {
     expect(f.lock.release).toHaveBeenCalledTimes(1);
     expect(f.db.$transaction).toHaveBeenCalledTimes(1);
     expect(f.tx.auditLog.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a durable child-success journal fail-closed when its storage generation is stale', async () => {
+    const f = fixture({ status: 'NEEDS_RECONCILIATION', storageGeneration: 3,
+      repository: { ...repository, storageGeneration: 4 } });
+    f.db.gitPushOperation.findMany.mockResolvedValue([{ operationId, repositoryId }]);
+
+    await f.service.reconcilePending();
+
+    expect(f.locks.acquire).toHaveBeenCalledWith(repositoryId);
+    expect(f.lock.release).toHaveBeenCalledTimes(1);
+    expect(f.db.gitPushOperation.updateMany).toHaveBeenCalledWith({ where: { operationId,
+      status: { in: ['PENDING', 'NEEDS_RECONCILIATION'] } }, data: { status: 'NEEDS_RECONCILIATION' } });
+    expect(f.storage.snapshotRefs).not.toHaveBeenCalled();
+    expect(f.db.$transaction).not.toHaveBeenCalled();
+    expect(f.tx.auditLog.create).not.toHaveBeenCalled();
+
+    f.db.gitPushOperation.count.mockResolvedValueOnce(1);
+    await expect(f.service.assertNoUnresolvedPush(repositoryId)).rejects.toMatchObject({
+      response: { error: { code: 'GIT_PUSH_RECONCILIATION_REQUIRED' } },
+    });
   });
 
   it('does not reconcile a push while an unresolved merge could explain its ref delta', async () => {

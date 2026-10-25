@@ -1556,10 +1556,27 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       const cookieParser = require('cookie-parser');
       (async () => {
         const { AppModule } = require(process.env.CODE_FORGE_TEST_APP_MODULE);
+        const { MaintenanceJobsService } = require(process.env.CODE_FORGE_TEST_MAINTENANCE_SERVICE);
         const app = await NestFactory.create(AppModule, { logger: false });
         app.use(cookieParser());
         app.setGlobalPrefix('api/v1');
         app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+        let controlBuffer = '';
+        process.stdin.setEncoding('utf8');
+        process.stdin.on('data', (chunk) => {
+          controlBuffer += chunk;
+          while (controlBuffer.includes('\\n')) {
+            const newline = controlBuffer.indexOf('\\n');
+            const command = controlBuffer.slice(0, newline).trim();
+            controlBuffer = controlBuffer.slice(newline + 1);
+            if (command === 'RUN_MAINTENANCE') {
+              app.get(MaintenanceJobsService).runOnce().then(
+                () => process.stdout.write('CODE_FORGE_MAINTENANCE_COMPLETE\\n'),
+                () => process.stdout.write('CODE_FORGE_MAINTENANCE_FAILED\\n'),
+              );
+            }
+          }
+        });
         await app.listen(0, '127.0.0.1');
         process.stdout.write('CODE_FORGE_TEST_READY:' + await app.getUrl() + '\\n');
       })().catch(() => process.exit(2));
@@ -1571,7 +1588,8 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
         detached: true,
         cwd: backendRoot,
         env: { ...process.env, DATABASE_URL: databaseUrl.toString(), DATABASE_URL_UNPOOLED: databaseUrl.toString(),
-          GIT_STORAGE_PATH: storageRoot, CODE_FORGE_TEST_APP_MODULE: join(backendRoot, 'src', 'app.module.ts') },
+          GIT_STORAGE_PATH: storageRoot, CODE_FORGE_TEST_APP_MODULE: join(backendRoot, 'src', 'app.module.ts'),
+          CODE_FORGE_TEST_MAINTENANCE_SERVICE: join(backendRoot, 'src', 'maintenance', 'maintenance-jobs.service.ts') },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       startedApiProcesses.push({ applicationName, process: apiProcess });
@@ -1597,7 +1615,36 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
             if (!ready) rejectReady(new Error('Child API exited before becoming ready.'));
           });
         });
-        return { process: apiProcess, base: apiBase };
+        const runMaintenance = () => new Promise<void>((resolveMaintenance, rejectMaintenance) => {
+          let markerOutput = '';
+          const cleanup = () => {
+            clearTimeout(timeout);
+            apiProcess.stdout.removeListener('data', onData);
+            apiProcess.removeListener('exit', onExit);
+          };
+          const onData = (chunk: string) => {
+            markerOutput += chunk;
+            if (markerOutput.includes('CODE_FORGE_MAINTENANCE_COMPLETE')) {
+              cleanup();
+              resolveMaintenance();
+            } else if (markerOutput.includes('CODE_FORGE_MAINTENANCE_FAILED')) {
+              cleanup();
+              rejectMaintenance(new Error('Child maintenance run failed.'));
+            }
+          };
+          const onExit = () => {
+            cleanup();
+            rejectMaintenance(new Error('Child API exited before maintenance completed.'));
+          };
+          const timeout = setTimeout(() => {
+            cleanup();
+            rejectMaintenance(new Error('Child maintenance run did not complete within 30 seconds.'));
+          }, 30_000);
+          apiProcess.stdout.on('data', onData);
+          apiProcess.once('exit', onExit);
+          apiProcess.stdin.write('RUN_MAINTENANCE\n');
+        });
+        return { process: apiProcess, base: apiBase, runMaintenance };
       } catch (error) {
         if (apiProcess.pid && apiProcess.exitCode === null && apiProcess.signalCode === null) {
           const exited = new Promise<void>((resolveExit) => apiProcess.once('close', () => resolveExit()));
@@ -1637,42 +1684,60 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
         await barrier.query('SELECT pg_terminate_backend($1)', [session.pid]);
       }
     };
-    const waitForMergeReconciliationScan = async (applicationName: string, timeoutMs: number) => {
+    const mergeJournalTable = `"${schema}"."pull_request_merge_operations"`;
+    const waitForMergeReconciliationQueryToFinish = async (pid: number, timeoutMs: number) => {
       if (!barrier) throw new Error('Crash-recovery barrier client is not connected.');
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
-        const result = await barrier.query<{ count: number }>(`SELECT COUNT(*)::int AS count
-          FROM pg_stat_activity WHERE application_name = $1 AND datname = current_database()
-            AND state = 'active' AND query ILIKE '%pull_request_merge_operations%'`, [applicationName]);
-        if ((result.rows[0]?.count ?? 0) === 0) return;
+        const result = await barrier.query<{ active: boolean }>(`SELECT EXISTS (
+          SELECT 1 FROM pg_stat_activity AS activity
+          JOIN pg_locks AS lock ON lock.pid = activity.pid
+          WHERE activity.pid = $1 AND activity.datname = current_database()
+            AND activity.pid <> pg_backend_pid() AND activity.state = 'active'
+            AND lock.locktype = 'relation' AND lock.relation = to_regclass($2)
+            AND lock.mode = 'AccessShareLock' AND lock.granted
+        ) AS active`, [pid, mergeJournalTable]);
+        if (!result.rows[0]?.active) return;
         await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
       }
-      throw new Error(`Maintenance did not finish its merge-journal scan for ${applicationName}.`);
+      const snapshot = await barrier.query<{ pid: number; state: string; waitEventType: string | null; waitEvent: string | null; query: string }>(`
+        SELECT activity.pid, activity.state, activity.wait_event_type AS "waitEventType", activity.wait_event AS "waitEvent",
+          LEFT(regexp_replace(regexp_replace(activity.query, $$'([^']|'')*'$$, '[redacted]', 'g'),
+            '[0-9a-fA-F]{32,}', '[redacted]', 'g'), 180) AS query
+        FROM pg_stat_activity AS activity
+        JOIN pg_locks AS lock ON lock.pid = activity.pid
+        WHERE activity.pid = $1 AND activity.datname = current_database()
+          AND lock.locktype = 'relation' AND lock.relation = to_regclass($2)
+          AND lock.mode = 'AccessShareLock'
+        LIMIT 1`, [pid, mergeJournalTable]);
+      throw new Error(`Maintenance PID ${pid} still has an active merge-table query after the barrier; snapshot: ${JSON.stringify(snapshot.rows)}.`);
     };
-    const waitForMergeReconciliationWaiter = async (applicationName: string, timeoutMs: number) => {
+    const waitForMergeReconciliationWaiter = async (applicationName: string, timeoutMs: number): Promise<number> => {
       if (!barrier) throw new Error('Crash-recovery barrier client is not connected.');
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
-        const result = await barrier.query<{ count: number }>(`SELECT COUNT(*)::int AS count
+        const result = await barrier.query<{ pid: number }>(`SELECT activity.pid
           FROM pg_stat_activity AS activity
           JOIN pg_locks AS lock ON lock.pid = activity.pid
           WHERE activity.application_name = $1 AND activity.datname = current_database()
             AND activity.pid <> pg_backend_pid() AND activity.state = 'active'
             AND lock.locktype = 'relation' AND lock.relation = to_regclass($2)
             AND lock.mode = 'AccessShareLock' AND NOT lock.granted`,
-        [applicationName, `"${schema}"."pull_request_merge_operations"`]);
-        if ((result.rows[0]?.count ?? 0) > 0) return;
+        [applicationName, mergeJournalTable]);
+        if (result.rows[0]) return result.rows[0].pid;
         await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
       }
-      const snapshot = await barrier.query<{ state: string; waitEventType: string | null; waitEvent: string | null; query: string }>(`
-        SELECT activity.state, activity.wait_event_type AS "waitEventType", activity.wait_event AS "waitEvent",
+      const snapshot = await barrier.query<{ pid: number; state: string; waitEventType: string | null; waitEvent: string | null; query: string }>(`
+        SELECT activity.pid, activity.state, activity.wait_event_type AS "waitEventType", activity.wait_event AS "waitEvent",
           LEFT(regexp_replace(regexp_replace(activity.query, $$'([^']|'')*'$$, '[redacted]', 'g'),
             '[0-9a-fA-F]{32,}', '[redacted]', 'g'), 180) AS query
         FROM pg_stat_activity AS activity
+        JOIN pg_locks AS lock ON lock.pid = activity.pid
         WHERE activity.application_name = $1 AND activity.datname = current_database()
-          AND activity.pid <> pg_backend_pid() AND activity.state = 'active'
-        ORDER BY activity.query_start DESC LIMIT 3`, [applicationName]);
-      throw new Error(`Maintenance did not enter the merge-journal query for ${applicationName}; active-session snapshot: ${JSON.stringify(snapshot.rows)}.`);
+          AND activity.pid <> pg_backend_pid() AND lock.locktype = 'relation'
+          AND lock.relation = to_regclass($2) AND lock.mode = 'AccessShareLock' AND NOT lock.granted
+        ORDER BY activity.query_start DESC LIMIT 3`, [applicationName, mergeJournalTable]);
+      throw new Error(`Maintenance did not wait for the merge table; waiter snapshot: ${JSON.stringify(snapshot.rows)}.`);
     };
     let mergeJournalTableLockHeld = false;
     const startApiAndObserveReconciliationScan = async (applicationName: string) => {
@@ -1683,10 +1748,14 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       let api: Awaited<ReturnType<typeof startApi>> | undefined;
       try {
         api = await startApi(applicationName);
-        await waitForMergeReconciliationWaiter(applicationName, 30_000);
+        let maintenanceError: unknown;
+        const maintenanceRun = api.runMaintenance().catch((error: unknown) => { maintenanceError = error; });
+        const waiterPid = await waitForMergeReconciliationWaiter(applicationName, 30_000);
         await barrier.query('COMMIT');
         mergeJournalTableLockHeld = false;
-        await waitForMergeReconciliationScan(applicationName, 5_000);
+        await waitForMergeReconciliationQueryToFinish(waiterPid, 30_000);
+        await maintenanceRun;
+        if (maintenanceError) throw maintenanceError;
         return api;
       } catch (error) {
         await barrier.query('ROLLBACK').catch(() => undefined);
@@ -1797,10 +1866,20 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
 
       const youngOperation = await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId } });
       expect(Date.now() - youngOperation.createdAt.getTime()).toBeLessThan(120_000);
+      const owner = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'beforecasowner' } });
+      const agedSentinelOperationId = randomUUID();
+      await db.pullRequestMergeOperation.create({ data: {
+        operationId: agedSentinelOperationId, repositoryId: storedRepo.id, pullRequestId: pullRequest.id,
+        actorId: owner.id, storageGeneration: storedRepo.storageGeneration,
+        expectedSourceSha: comparison.sourceSha, expectedTargetSha: comparison.targetSha,
+        oldTargetSha: targetSha, createdAt: new Date(Date.now() - 121_000),
+      } });
       const young = await startApiAndObserveReconciliationScan(firstRecoveryName);
       youngRecovery = young.process;
       expect(await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId } }))
         .toMatchObject({ status: 'PENDING', candidateSha: null, errorCode: null });
+      expect(await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId: agedSentinelOperationId } }))
+        .toMatchObject({ status: 'FAILED', errorCode: 'REF_NOT_UPDATED', candidateSha: null, resultingSha: null });
       expect(git(['--git-dir', bare, 'for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)', 'refs/']))
         .toBe(refsBeforeMerge);
       await stopApi(youngRecovery);
