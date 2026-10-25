@@ -107,8 +107,7 @@ export default function AdminPage() {
     setPendingAction(action);
   }
 
-  function restoreDialogFocus() {
-    const opener = focusReturn.current;
+  function restoreDialogFocus(opener = focusReturn.current) {
     focusReturn.current = null;
     window.requestAnimationFrame(() => {
       if (opener?.isConnected && !opener.disabled) {
@@ -117,6 +116,13 @@ export default function AdminPage() {
       }
       adminHeading.current?.focus();
     });
+  }
+
+  function closeConfirmation() {
+    const opener = focusReturn.current;
+    if (confirmation.current?.open) confirmation.current.close();
+    setPendingAction(null);
+    restoreDialogFocus(opener);
   }
 
   function search(event: FormEvent) {
@@ -148,13 +154,11 @@ export default function AdminPage() {
         body: pendingAction.body ? JSON.stringify(pendingAction.body) : undefined,
       });
       setNotice("Đã cập nhật thành công.");
-      setPendingAction(null);
-      confirmation.current?.close();
+      closeConfirmation();
       await load();
     } catch (cause) {
       setError(errorGuidance(cause as RequestError));
-      setPendingAction(null);
-      confirmation.current?.close();
+      closeConfirmation();
     } finally {
       setBusy(false);
     }
@@ -212,9 +216,9 @@ export default function AdminPage() {
       </>}
     </section>
 
-    <dialog ref={confirmation} className={styles.dialog} aria-labelledby="admin-confirm-title" aria-describedby="admin-confirm-description" onCancel={(event) => { if (busy) event.preventDefault(); else setPendingAction(null); }} onClose={() => { setPendingAction(null); restoreDialogFocus(); }}>
+    <dialog ref={confirmation} className={styles.dialog} aria-labelledby="admin-confirm-title" aria-describedby="admin-confirm-description" onCancel={(event) => { event.preventDefault(); if (!busy) closeConfirmation(); }} onClose={() => setPendingAction(null)}>
       <h2 id="admin-confirm-title">{pendingAction?.title}</h2><p id="admin-confirm-description">{pendingAction?.description}</p>
-      <div className={styles.dialogActions}><button className="button buttonPrimary" type="button" disabled={busy} onClick={() => void confirmMutation()}>{busy ? "Đang cập nhật…" : "Xác nhận"}</button><button className="button buttonSecondary" type="button" disabled={busy} onClick={() => confirmation.current?.close()}>Hủy</button></div>
+      <div className={styles.dialogActions}><button className="button buttonPrimary" type="button" disabled={busy} onClick={() => void confirmMutation()}>{busy ? "Đang cập nhật…" : "Xác nhận"}</button><button className="button buttonSecondary" type="button" disabled={busy} onClick={closeConfirmation}>Hủy</button></div>
     </dialog>
   </main>;
 }
