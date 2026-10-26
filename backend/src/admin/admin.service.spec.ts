@@ -48,6 +48,47 @@ describe('AdminService account locking', () => {
     await expect(fixture.service.setUserStatus(actorId, actorId, 'LOCKED')).rejects.toThrow(ConflictException);
     expect(fixture.transaction).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['already locked', 'LOCKED', new Date('2026-10-01T00:00:00.000Z')],
+    ['already active', 'ACTIVE', null],
+  ] as const)('treats a repeated user status request (%s) as a no-op', async (_label, status, lockedAt) => {
+    const fixture = makeService({ id: userId, status, systemRole: 'USER', lockedAt }, [{ id: actorId }]);
+
+    const result = await fixture.service.setUserStatus(actorId, userId, status);
+
+    expect(result).toEqual({ user: { id: userId, status, lockedAt }, changed: false });
+    expect(fixture.updateUser).not.toHaveBeenCalled();
+    expect(fixture.revokeSessions).not.toHaveBeenCalled();
+    expect(fixture.createAudit).not.toHaveBeenCalled();
+  });
+});
+
+describe('AdminService repository status idempotency', () => {
+  const repositoryId = '33333333-3333-4333-8333-333333333333';
+  const actorId = '22222222-2222-4222-8222-222222222222';
+
+  it.each(['ACTIVE', 'LOCKED'] as const)('treats a repeated repository %s request as a no-op', async (status) => {
+    const release = jest.fn().mockResolvedValue(undefined);
+    const findRepository = jest.fn().mockResolvedValue({ id: repositoryId, status });
+    const updateRepository = jest.fn();
+    const createAudit = jest.fn();
+    const tx = { repository: { findUnique: findRepository, update: updateRepository }, auditLog: { create: createAudit } };
+    const transaction = jest.fn((callback: (client: typeof tx) => unknown) => Promise.resolve(callback(tx)));
+    const locks = { acquire: jest.fn().mockResolvedValue({ release }) };
+    const pushJournal = { assertNoUnresolved: jest.fn().mockResolvedValue(undefined) };
+    const service = new AdminService({ $transaction: transaction } as unknown as PrismaService,
+      locks as unknown as RepositoryLockService, pushJournal as never);
+
+    const result = await service.setRepositoryStatus(actorId, repositoryId, status);
+
+    expect(result).toEqual({ repository: { id: repositoryId, status }, changed: false });
+    expect(locks.acquire).toHaveBeenCalledWith(repositoryId);
+    expect(pushJournal.assertNoUnresolved).toHaveBeenCalledWith(repositoryId);
+    expect(updateRepository).not.toHaveBeenCalled();
+    expect(createAudit).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('AdminService restore and audit privacy', () => {

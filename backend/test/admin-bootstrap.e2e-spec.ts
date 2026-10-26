@@ -100,6 +100,26 @@ describe('Admin bootstrap CLI + PostgreSQL', () => {
     ]);
   });
 
+  it('rejects a password confirmation mismatch without creating a user or audit record', async () => {
+    const password = 'Admin-Password-123!';
+    const confirmation = 'Admin-Password-456!';
+    const auditCountBefore = await db.auditLog.count();
+    const result = runBootstrap(`MismatchPassword\nmismatch-password@example.test\n${password}\n${confirmation}\n`);
+
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(1);
+    expect(result.stdout).not.toContain(password);
+    expect(result.stdout).not.toContain(confirmation);
+    expect(result.stderr).toContain('Mật khẩu xác nhận không khớp.');
+    expect(result.stderr).not.toContain(password);
+    expect(result.stderr).not.toContain(confirmation);
+    expect(result.args.join('\0')).not.toContain(password);
+    expect(result.args.join('\0')).not.toContain(confirmation);
+    await expect(db.user.findUnique({ where: { normalizedUsername: 'mismatchpassword' } })).resolves.toBeNull();
+    await expect(db.user.findUnique({ where: { normalizedEmail: 'mismatch-password@example.test' } })).resolves.toBeNull();
+    await expect(db.auditLog.count()).resolves.toBe(auditCountBefore);
+  });
+
   it('is idempotent when the matching account already has ADMIN role', async () => {
     const passwordHash = await argon2.hash('Existing-Admin-Password-123!', { type: argon2.argon2id, memoryCost: 4_096, timeCost: 1, parallelism: 1 });
     const lockedAt = new Date('2026-10-01T00:00:00.000Z');

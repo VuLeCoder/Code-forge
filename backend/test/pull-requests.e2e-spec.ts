@@ -261,6 +261,30 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     expect(await db.gitPushOperation.count({ where: { repositoryId: repository.id } })).toBe(pushOperationCount);
     expect((await git(['--git-dir', bare, 'rev-parse', 'refs/heads/feature/snapshot'])).stdout.trim()).toBe(advancedSourceSha);
     expect((await git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).stdout.trim()).toBe(snapshot.targetSha);
+
+    const refreshedCompare = { sourceSha: advancedSourceSha, targetSha: snapshot.targetSha,
+      storageGeneration: snapshot.storageGeneration };
+    const refreshedPageQuery = new URLSearchParams({
+      sourceSha: refreshedCompare.sourceSha, targetSha: refreshedCompare.targetSha,
+      storageGeneration: String(refreshedCompare.storageGeneration), page: '1', pageSize: '20',
+    }).toString();
+    const refreshedCommitsResponse = await call('GET', `${repoPath}/${number}/commits?${refreshedPageQuery}`, undefined, snapshotOwnerCookie);
+    expect(refreshedCommitsResponse.status).toBe(200);
+    expect(await responseJson<{ snapshot: typeof refreshedCompare }>(refreshedCommitsResponse))
+      .toMatchObject({ snapshot: refreshedCompare });
+
+    const targetTree = (await git(['--git-dir', bare, 'rev-parse', `${refreshedCompare.targetSha}^{tree}`])).stdout.trim();
+    const advancedTargetSha = (await git(['--git-dir', bare, '-c', 'user.name=Snapshot Owner', '-c',
+      'user.email=snapshot-owner@example.test', 'commit-tree', targetTree, '-p', refreshedCompare.targetSha,
+      '-m', 'Advance snapshot target'])).stdout.trim();
+    await git(['--git-dir', bare, 'update-ref', 'refs/heads/main', advancedTargetSha, refreshedCompare.targetSha]);
+    for (const section of ['commits', 'files', 'diff']) {
+      const staleResponse = await call('GET', `${repoPath}/${number}/${section}?${refreshedPageQuery}`, undefined, snapshotOwnerCookie);
+      expect(staleResponse.status).toBe(409);
+      expect(await responseJson<{ error: { code: string } }>(staleResponse))
+        .toMatchObject({ error: { code: 'STALE_COMPARE' } });
+    }
+    expect((await git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).stdout.trim()).toBe(advancedTargetSha);
   }, 60_000);
 
   it('rejects pull request creation for unrelated histories without side effects', async () => {
@@ -594,6 +618,14 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     expect(compareAfterResetResponse.status).toBe(200);
     expect(await responseJson<{ state: string; sourceSha: string; targetSha: string; storageGeneration: number }>(compareAfterResetResponse))
       .toMatchObject({ state: 'STORAGE_RESET', sourceSha, targetSha, storageGeneration: recoveredStorage.storageGeneration });
+    const stalePageQuery = new URLSearchParams({ sourceSha, targetSha,
+      storageGeneration: String(initialCompare.storageGeneration), page: '1', pageSize: '20' }).toString();
+    for (const section of ['commits', 'files', 'diff']) {
+      const stalePageResponse = await call('GET', `${pullsPath}/${created.pullRequest.number}/${section}?${stalePageQuery}`, undefined, resetOwnerCookie);
+      expect(stalePageResponse.status).toBe(409);
+      expect(await responseJson<{ error: { code: string } }>(stalePageResponse))
+        .toMatchObject({ error: { code: 'STALE_COMPARE' } });
+    }
 
     const retained = await db.pullRequest.findUniqueOrThrow({ where: { id: pullRequestId } });
     expect(retained).toMatchObject({ id: pullRequestId, status: 'OPEN', storageGeneration: storedRepository.storageGeneration });

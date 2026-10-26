@@ -261,8 +261,55 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect((await call('GET', 'repos/owner/demo/image?path=logo.png', ownerCookie)).status).toBe(404);
     expect((await call('GET', 'repos/owner/demo/image?path=README.md', ownerCookie)).status).toBe(400);
     await rm(bare, { recursive: true });
-    const concurrentRecoveryResponses = await Promise.all(Array.from({ length: 5 }, () =>
-      call('GET', 'repos/owner/demo/commits', ownerCookie)));
+    const recoveryBarrier = new Client({ connectionString: originalUrl! });
+    let recoveryBarrierHeld = false;
+    let concurrentRecoveryPromise: Promise<Response[]> | undefined;
+    const unlockRecoveryBarrier = async () => {
+      if (!recoveryBarrierHeld) return;
+      const result = await recoveryBarrier.query<{ pg_advisory_unlock: boolean }>(
+        'SELECT pg_advisory_unlock(hashtextextended($1, 0))', [stored.id]);
+      if (!result.rows[0]?.pg_advisory_unlock) throw new Error('The concurrent-recovery barrier lock was not held.');
+      recoveryBarrierHeld = false;
+    };
+    let concurrentRecoveryResponses: Response[] = [];
+    await recoveryBarrier.connect();
+    try {
+      await recoveryBarrier.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [stored.id]);
+      recoveryBarrierHeld = true;
+      concurrentRecoveryPromise = Promise.all(Array.from({ length: 5 }, () =>
+        call('GET', 'repos/owner/demo/commits', ownerCookie)));
+      const deadline = Date.now() + 5_000;
+      let queuedReaders = 0;
+      do {
+        const waiters = await admin.$queryRawUnsafe<{ waiting: number }[]>(`
+          WITH lock_key AS (SELECT hashtextextended($2, 0) AS value)
+          SELECT COUNT(DISTINCT activity.pid)::int AS waiting
+          FROM pg_stat_activity AS activity
+          JOIN pg_locks AS pg_lock ON pg_lock.pid = activity.pid
+          CROSS JOIN lock_key
+          WHERE activity.application_name = $1
+            AND activity.wait_event_type = 'Lock'
+            AND activity.wait_event = 'advisory'
+            AND pg_lock.locktype = 'advisory'
+            AND pg_lock.granted = false
+            AND pg_lock.classid = ((lock_key.value >> 32) & 4294967295)::oid
+            AND pg_lock.objid = (lock_key.value & 4294967295)::oid
+            AND pg_lock.objsubid = 1`, lockApplicationName, stored.id);
+        queuedReaders = waiters[0]?.waiting ?? 0;
+        // RepositoryLockService caps its pool at four clients; the fifth HTTP
+        // request remains queued in that pool until one of these lock waiters proceeds.
+        if (queuedReaders === 4) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      } while (Date.now() < deadline);
+      expect(queuedReaders).toBe(4);
+      await unlockRecoveryBarrier();
+      concurrentRecoveryResponses = await concurrentRecoveryPromise;
+    } finally {
+      try { await unlockRecoveryBarrier(); }
+      catch { /* Closing the dedicated barrier session also releases its lock. */ }
+      try { await recoveryBarrier.end(); }
+      finally { if (concurrentRecoveryPromise) await concurrentRecoveryPromise.catch(() => undefined); }
+    }
     expect(concurrentRecoveryResponses.map((response) => response.status)).toEqual([200, 200, 200, 200, 200]);
     const concurrentRecoveryResults = await Promise.all(concurrentRecoveryResponses.map(async (response) =>
       await response.json() as { commits: unknown[]; storageState: string; storageGeneration: number }));

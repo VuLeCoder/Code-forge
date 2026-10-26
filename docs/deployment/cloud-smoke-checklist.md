@@ -2,19 +2,23 @@
 
 Điền release commit và thời gian chạy. Lưu output không chứa PAT, cookie, access token, Authorization header, mã nguồn private hoặc diff private.
 
-Chưa có cloud smoke nào được thực hiện; bảng và mọi mục cloud bên dưới giữ trạng thái chưa chạy. Các kiểm tra local hiện có được ghi trong [README release](./README.md) và không thay thế nghiệm thu cloud.
+Đã có một probe readiness trên Render; endpoint chạy `SELECT 1`, kiểm tra Git và tạo thư mục nếu thiếu rồi ghi/xóa một file tạm. Đây không phải probe chỉ đọc và cũng **không phải** cloud smoke end-to-end. Các kiểm tra local được ghi trong [README release](./README.md) và không thay thế nghiệm thu cloud. Vercel hiện nằm ngoài phạm vi; chưa có frontend cloud URL được nghiệm thu.
 
 | Trường | Kết quả |
 | --- | --- |
-| Release commit | Chưa chạy |
-| Frontend URL | Chưa công bố |
-| Backend URL | Chưa công bố |
-| Thời điểm UTC | Chưa chạy |
-| Người nghiệm thu | Chưa ghi nhận |
+| Source tip được kiểm tra | `95a7651` trên `thviet` (test/docs; không có thay đổi runtime trong hai commit cuối) |
+| Render commit đang chạy | `388c584` theo Render Dashboard; chưa phải source tip hiện tại |
+| Frontend URL | Chưa có; Vercel deferred/out of scope |
+| Backend URL | `https://code-forge-api-thviet.onrender.com` |
+| Readiness probe | 2026-10-26: `GET /api/v1/health/ready` → HTTP 200; database/Git/storage đều `up` |
+| Người nghiệm thu | Codex; probe qua endpoint public, không phải kiểm thử nghiệp vụ |
+
+Readiness implementation chạy `SELECT 1` qua Prisma và ghi/xóa file tạm trong Git storage (có thể tạo thư mục nếu thiếu), nhưng probe đơn lẻ không chứng minh login, migration, backup/restore, Git HTTP hoặc quyền dữ liệu. Render Dashboard vẫn cho thấy last successful deploy là `388c584`; không deploy/restart để cập nhật source trước khi có kế hoạch sao lưu/khôi phục Git vì storage Free có thể mất dữ liệu.
 
 ## Tài khoản và quyền truy cập
 
-- [ ] Frontend HTTPS tải được; `GET /api/v1/health/ready` trả trạng thái database, Git executable và khả năng ghi storage đều khỏe.
+- [x] Backend readiness: `GET https://code-forge-api-thviet.onrender.com/api/v1/health/ready` trả HTTP 200; database, Git executable và storage đều `up` (2026-10-26; deployed commit `388c584`).
+- [ ] Frontend HTTPS tải được. Chưa có frontend cloud host trong phạm vi hiện tại; không suy ra từ API readiness.
 - [ ] Kiểm tra rate limit qua Render với hai client độc lập; gửi `X-Forwarded-For`/`CF-Connecting-IP` và `X-CodeForge-Client-IP`/signature giả từ client, xác minh không chia sẻ bucket sai hoặc vượt giới hạn. Ghi lại số trusted proxy hop thực tế; backend phải bỏ qua IP chưa ký hợp lệ.
 - [ ] Đăng ký hoặc đăng nhập, refresh, logout; sau logout request API dùng access token cũ bị từ chối.
 - [ ] Tạo repository public và private, xác minh URL clone trả về Render trực tiếp.
@@ -26,9 +30,9 @@ Chưa có cloud smoke nào được thực hiện; bảng và mọi mục cloud 
 - [ ] `git ls-remote <public-url>` hoạt động qua HTTPS/TLS.
 - [ ] Clone, tạo commit, push branch, fetch branch mới hoạt động; test private repo với PAT.
 - [ ] Xác minh Basic challenge và `Authorization` không bị proxy/host loại bỏ.
-- [ ] Push payload hợp lệ lớn hơn 4,5 MB qua URL Render trực tiếp; kiểm tra push sát quota hoạt động, vượt quota bị từ chối và ref không thay đổi. Ngưỡng Vercel Function 4,5 MB là lý do test này phải đi trực tiếp Render. [Vercel payload limit](https://vercel.com/docs/errors/function_payload_too_large)
+- [ ] Push payload hợp lệ lớn hơn 4,5 MB qua URL Render trực tiếp; kiểm tra push sát quota hoạt động, vượt quota bị từ chối và ref không thay đổi. Git Smart HTTP phải đi trực tiếp backend Render, không đi qua frontend proxy.
 - [ ] Timeout/disconnect hủy Git child process; lỗi hook không được audit như push thành công.
-- [ ] Kiểm tra URL từ browser được tạo bằng `GIT_PUBLIC_BASE_URL`, không phải Vercel origin.
+- [ ] Kiểm tra clone URL được tạo bằng `GIT_PUBLIC_BASE_URL` và trỏ trực tiếp tới backend Render.
 
 ## Cộng tác, pull request, quản trị
 
