@@ -49,12 +49,14 @@ export class MaintenanceJobsService implements OnModuleInit, OnModuleDestroy {
     let jobLock: Awaited<ReturnType<RepositoryLockService['acquire']>> | undefined;
     try {
       jobLock = await this.locks.acquire('code-forge-maintenance-jobs');
-      await this.expireInvitations();
-      await this.cleanupExpiredCredentials();
-      await this.pushJournal.reconcilePending();
-      await this.reconcileMerges();
-      await this.purge.purgeDue(50);
-      await this.storage.cleanupOrphanedTemporaryDirectories();
+      // Keep independent cleanup work moving when one transient dependency fails.
+      // Reconciliation remains fail-closed inside its own job and retries next tick.
+      await this.runJob('expire invitations', () => this.expireInvitations());
+      await this.runJob('cleanup credentials', () => this.cleanupExpiredCredentials());
+      await this.runJob('reconcile pushes', () => this.pushJournal.reconcilePending());
+      await this.runJob('reconcile merges', () => this.reconcileMerges());
+      await this.runJob('purge repositories', () => this.purge.purgeDue(50));
+      await this.runJob('cleanup temporary directories', () => this.storage.cleanupOrphanedTemporaryDirectories());
     } catch {
       // Logs identify only the job and never include database URLs or row data.
       this.logger.warn('Maintenance batch failed; it will retry on the next run.');
@@ -67,6 +69,15 @@ export class MaintenanceJobsService implements OnModuleInit, OnModuleDestroy {
       } finally {
         this.running = false;
       }
+    }
+  }
+
+  private async runJob(name: string, job: () => Promise<unknown>) {
+    try {
+      await job();
+    } catch {
+      // Never include dependency URLs, row data, or Git paths in maintenance logs.
+      this.logger.warn(`Maintenance job failed: ${name}; it will retry on the next run.`);
     }
   }
 
