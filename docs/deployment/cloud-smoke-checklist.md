@@ -6,18 +6,19 @@
 
 | Trường | Kết quả |
 | --- | --- |
-| Source tip | `e0a5fc4` on `thviet` (exact SHA `e0a5fc4b93b21ac4d848c42dd14c6d93c4d453b4`) |
-| Code CI evidence | Actions `MVP verification` #136 (`40274166587`) passed on the exact source SHA; #129–#135 also passed on their respective SHAs |
-| Latest CI at check | #136 (`40274166587`): completed successfully |
+| Source tip | `7588c0a` on `thviet` (exact SHA `7588c0a4306abf5309de2fe0cb8c6e0c93dac0e2`) |
+| Code CI evidence | Actions `MVP verification` #138 (`40276491886`) passed on the exact source SHA |
+| Latest CI at check | #138 (`40276491886`): completed successfully |
 | Render commit đang chạy | `388c584` theo Render Dashboard; chưa phải source tip hiện tại |
 | Frontend URL | Chưa có; Vercel deferred/out of scope |
 | Backend URL | `https://code-forge-api-thviet.onrender.com` |
-| Readiness probe | 2026-10-26: `GET /api/v1/health/ready` → HTTP 200; database/Git/storage đều `up` trên deployed `388c584` (Render vẫn chưa ở source tip `97db5ff`) |
+| Readiness probe | 2026-10-26: `GET /api/v1/health/ready` → HTTP 200; database/Git/storage đều `up` trên deployed `388c584` (Render vẫn chưa ở source tip `7588c0a`) |
+| Live revision endpoint | 2026-10-26: `GET /api/v1/health/live` → HTTP 200, body chỉ có `status` và `timestamp`; `commitSha` chưa có trên deployed `388c584`, nên source change `97d5d34` chưa được xác minh live |
 | Public repository API | 2026-10-26: HTTP 200 sau cold start; initial wake requests returned `503 hibernate-pending-wake` |
 | Git/PR HTTPS smoke | 2026-10-26: anonymous public clone/fetch; private PAT clone/push/fetch; owner PR merge/fetch `f8468c6063a70aea4306f6ab6de7a1c58cafb7bd`; WRITE invitation→accept→collaborator push/PR→owner merge/fetch `481d75d44f2ad2855bab853cb55d28c96235877b`. Both merge commits have two parents. Temporary PATs revoked and sessions logged out. Payload/quota, admin and recovery not tested. |
 | Người nghiệm thu | Codex; Render API/Git/PR integration smoke, not visual browser or full release acceptance |
 
-Readiness implementation chạy `SELECT 1` qua Prisma và ghi/xóa file tạm trong Git storage (có thể tạo thư mục nếu thiếu). Public/private Git HTTPS và collaborator invitation→accept→push/PR→owner merge/fetch đã được smoke-test qua API/Git; browser UI journey, admin, migration, backup/restore, payload quota và source recovery sau restart chưa được nghiệm thu. Render Dashboard vẫn cho thấy last verified successful deploy là `388c584` (source tip `e0a5fc4` mới hơn); không deploy/restart trước khi có kế hoạch sao lưu/khôi phục Git vì storage Free có thể mất dữ liệu.
+Readiness implementation chạy `SELECT 1` qua Prisma và ghi/xóa file tạm trong Git storage (có thể tạo thư mục nếu thiếu). Public/private Git HTTPS và collaborator invitation→accept→push/PR→owner merge/fetch đã được smoke-test qua API/Git; browser UI journey, admin, migration, backup/restore, payload quota và source recovery sau restart chưa được nghiệm thu. Render Dashboard vẫn cho thấy last verified successful deploy là `388c584` (source tip `7588c0a` mới hơn); `/api/v1/health/live` chưa trả `commitSha`. Không deploy/restart trước khi có kế hoạch sao lưu/khôi phục Git vì storage Free có thể mất dữ liệu.
 
 ## Tài khoản và quyền truy cập
 

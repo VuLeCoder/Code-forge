@@ -41,7 +41,7 @@
 
 ### Issue #5 — durable push audit / ambiguous recovery
 
-Keep the existing issue open until the owner reviews the remaining gap. Before commenting, recheck the issue's live state and decide whether to keep the operator-resolution follow-up scoped under #5 or track it separately. Current draft issue `docs/operations/issue-draft-ambiguous-git-journals.md` is unpublished; it records the unresolved questions about `ADMIN` versus a separate operator role and single versus dual approval. No duplicate issue has been created by this task.
+Keep issue #5 open until the owner reviews the remaining gap. Supporting issue #6 is already published and open; `docs/operations/issue-draft-ambiguous-git-journals.md` is its local copy and records the unresolved questions about `ADMIN` versus a separate operator role and single versus dual approval. Do not create a duplicate or post a comment without explicit owner authorization.
 
 ## Historical drafts — obsolete, do not post
 
