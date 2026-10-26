@@ -650,4 +650,127 @@ describe('Auth session refresh/logout concurrency with PostgreSQL', () => {
       throwCleanupFailures(cleanupErrors, scenarioError);
     }
   }, 20_000);
+
+  it('revokes the successor when the same active refresh token is submitted concurrently', async () => {
+    if (!admin || !seedDb || !refreshDb || !reuseDb) throw new Error('Auth concurrency E2E setup did not finish.');
+
+    const familyId = randomUUID();
+    const rawRefreshToken = randomBytes(48).toString('base64url');
+    const config = new ConfigService({
+      JWT_ACCESS_SECRET: `auth-same-token-test-secret-${randomBytes(24).toString('hex')}`,
+      ACCESS_TOKEN_TTL_SECONDS: 900,
+      REFRESH_TOKEN_TTL_DAYS: 30,
+    });
+    const jwt = new JwtService({});
+    const firstService = new AuthService(
+      refreshDb as unknown as PrismaService,
+      new UsersService(refreshDb as unknown as PrismaService),
+      jwt,
+      config,
+    );
+    const secondService = new AuthService(
+      reuseDb as unknown as PrismaService,
+      new UsersService(reuseDb as unknown as PrismaService),
+      jwt,
+      config,
+    );
+
+    const barrierUrl = new URL(isolatedUrl);
+    barrierUrl.searchParams.set('schema', schema);
+    barrierUrl.searchParams.set('application_name', barrierApplicationName);
+    const barrier = createPostgresTestClient(barrierUrl.toString());
+    const monitorUrl = new URL(barrierUrl);
+    monitorUrl.searchParams.set('application_name', monitorApplicationName);
+    const monitor = createPostgresTestClient(monitorUrl.toString());
+    let barrierConnected = false;
+    let monitorConnected = false;
+    let transactionOpen = false;
+    let firstSettled = false;
+    let secondSettled = false;
+    let scenarioError: unknown;
+    let firstOutcome: Promise<Outcome<Awaited<ReturnType<AuthService['refresh']>>>> | undefined;
+    let secondOutcome: Promise<Outcome<Awaited<ReturnType<AuthService['refresh']>>>> | undefined;
+
+    try {
+      const user = await withTimeout(seedDb.user.create({ data: {
+        username: 'same-token-race-owner',
+        normalizedUsername: 'same-token-race-owner',
+        email: 'same-token-race-owner@example.test',
+        normalizedEmail: 'same-token-race-owner@example.test',
+        passwordHash: 'test-only-unused-password-hash',
+      } }), DATABASE_OPERATION_TIMEOUT_MS, 'Creating the same-token refresh race user');
+      const originalSession = await withTimeout(seedDb.session.create({ data: {
+        userId: user.id,
+        familyId,
+        tokenHash: createHash('sha256').update(rawRefreshToken).digest('hex'),
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      } }), DATABASE_OPERATION_TIMEOUT_MS, 'Creating the same-token refresh race session');
+
+      await barrier.connect();
+      barrierConnected = true;
+      await monitor.connect();
+      monitorConnected = true;
+      await barrier.query('BEGIN');
+      transactionOpen = true;
+      const locked = await barrier.query(`SELECT id FROM "${schema}".users WHERE id = $1::uuid FOR UPDATE`, [user.id]);
+      expect(locked.rowCount).toBe(1);
+      const pidResult = await barrier.query<{ pid: number }>('SELECT pg_backend_pid() AS pid');
+      const barrierPid = Number(pidResult.rows[0]?.pid);
+      expect(Number.isInteger(barrierPid)).toBe(true);
+
+      firstOutcome = captureOutcome(firstService.refresh(rawRefreshToken), () => { firstSettled = true; });
+      const trackedApplications = [refreshApplicationName, reuseApplicationName, barrierApplicationName, monitorApplicationName];
+      await waitForBarrierWaiter(monitor, refreshApplicationName, trackedApplications, barrierPid, () => firstSettled);
+
+      secondOutcome = captureOutcome(secondService.refresh(rawRefreshToken), () => { secondSettled = true; });
+      await waitForRequestBlockedByRequest(monitor, reuseApplicationName, refreshApplicationName, () => secondSettled);
+
+      await barrier.query('COMMIT');
+      transactionOpen = false;
+      const [firstResult, secondResult] = await withTimeout(
+        Promise.all([firstOutcome, secondOutcome]),
+        CLEANUP_TIMEOUT_MS,
+        'Waiting for concurrent refresh attempts using the same token',
+      );
+      if (firstResult.ok === false) throw firstResult.error;
+      expect(secondResult).toMatchObject({ ok: false });
+      if (secondResult.ok === true) throw new Error('Concurrent reuse of one refresh token unexpectedly succeeded.');
+      expect(secondResult.error).toMatchObject({ status: HttpStatus.UNAUTHORIZED });
+
+      const family = await withTimeout(
+        seedDb.session.findMany({ where: { familyId }, orderBy: { createdAt: 'asc' } }),
+        DATABASE_OPERATION_TIMEOUT_MS,
+        'Reading the completed same-token refresh family',
+      );
+      expect(family).toHaveLength(2);
+      expect(family.find(({ id }) => id === originalSession.id)?.revokedAt).toBeInstanceOf(Date);
+      expect(family.every(({ revokedAt }) => revokedAt !== null)).toBe(true);
+      await expect(withTimeout(
+        firstService.refresh(firstResult.value.refreshToken),
+        CLEANUP_TIMEOUT_MS,
+        'Checking that concurrent token reuse revoked the successful response token',
+      )).rejects.toMatchObject({ status: HttpStatus.UNAUTHORIZED });
+    } catch (error) {
+      scenarioError = error;
+      throw error;
+    } finally {
+      const cleanupErrors: unknown[] = [];
+      if (transactionOpen) {
+        await attemptCleanup(cleanupErrors, 'Rolling back the same-token refresh barrier', () => barrier.query('ROLLBACK'));
+        transactionOpen = false;
+      }
+      const connectionsToClose: Array<[string, () => Promise<unknown>]> = [];
+      if (monitorConnected) connectionsToClose.push(['Closing the same-token refresh monitor', () => monitor.end()]);
+      if (barrierConnected) connectionsToClose.push(['Closing the same-token refresh barrier', () => barrier.end()]);
+      await Promise.all(connectionsToClose.map(([label, close]) => attemptCleanup(cleanupErrors, label, close)));
+
+      const pendingRequests: Promise<unknown>[] = [];
+      if (firstOutcome) pendingRequests.push(firstOutcome);
+      if (secondOutcome) pendingRequests.push(secondOutcome);
+      if (pendingRequests.length > 0) {
+        await attemptCleanup(cleanupErrors, 'Waiting for same-token refresh requests after releasing barriers', () => Promise.allSettled(pendingRequests));
+      }
+      throwCleanupFailures(cleanupErrors, scenarioError);
+    }
+  }, 20_000);
 });

@@ -1438,16 +1438,50 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     const sameOperationRequest = { operationId: sameOperationId, expectedSourceSha: sameOperationCompare.sourceSha,
       expectedTargetSha: sameOperationCompare.targetSha, storageGeneration: sameOperationCompare.storageGeneration,
       version: sameOperationDetail.pullRequest.version };
-    const sameOperationResponses = await Promise.all([
-      call('POST', `${repoPath}/${sameOperationPull.pullRequest.number}/merge`, sameOperationRequest),
-      call('POST', `${repoPath}/${sameOperationPull.pullRequest.number}/merge`, sameOperationRequest),
-    ]);
-    expect(sameOperationResponses.map((response) => response.status)).toEqual([200, 200]);
-    const sameOperationResults = await Promise.all(sameOperationResponses.map((response) =>
-      responseJson<{ status: string; operationId: string; mergeCommitSha: string }>(response)));
-    expect(sameOperationResults[0]).toMatchObject({ status: 'MERGED', operationId: sameOperationId });
-    expect(sameOperationResults[1]).toEqual(sameOperationResults[0]);
-    const sameOperationMergeSha = sameOperationResults[0]!.mergeCommitSha;
+    const storage = app.get(GitStorageService);
+    const createMergeCandidate = storage.createMergeCandidate.bind(storage);
+    let markCandidateStarted!: () => void;
+    let releaseCandidate!: () => void;
+    const candidateStarted = new Promise<void>((resolve) => { markCandidateStarted = resolve; });
+    const candidateBarrier = new Promise<void>((resolve) => { releaseCandidate = resolve; });
+    const candidateSpy = jest.spyOn(storage, 'createMergeCandidate').mockImplementation(async (
+      storageKey, targetBranch, expectedTargetSha, sourceSha, signal,
+    ) => {
+      markCandidateStarted();
+      await candidateBarrier;
+      return createMergeCandidate(storageKey, targetBranch, expectedTargetSha, sourceSha, signal);
+    });
+    const firstMergeRequest = call('POST', `${repoPath}/${sameOperationPull.pullRequest.number}/merge`, sameOperationRequest);
+    let firstMergeResponse: Response | undefined;
+    let retryResponse: Response | undefined;
+    try {
+      let startTimeout: NodeJS.Timeout | undefined;
+      try {
+        await Promise.race([candidateStarted, new Promise<void>((_, reject) => {
+          startTimeout = setTimeout(() => reject(new Error('Merge did not reach candidate creation.')), 10_000);
+        })]);
+      } finally { if (startTimeout) clearTimeout(startTimeout); }
+
+      const pendingOperation = await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId: sameOperationId } });
+      expect(pendingOperation).toMatchObject({ status: 'PENDING', candidateSha: null });
+      expect((await git(['--git-dir', bare, 'rev-parse', `refs/heads/${sameOperationTargetBranch}`])).stdout.trim())
+        .toBe(sameOperationTargetSha);
+
+      retryResponse = await call('POST', `${repoPath}/${sameOperationPull.pullRequest.number}/merge`, sameOperationRequest);
+      expect(retryResponse.status).toBe(202);
+      expect(await responseJson<{ status: string; operationId: string }>(retryResponse))
+        .toEqual({ status: 'RECONCILING', operationId: sameOperationId });
+      expect(await db.pullRequestMergeOperation.count({ where: { pullRequestId: sameOperationPull.pullRequest.id } })).toBe(1);
+      expect(await db.auditLog.count({ where: { targetId: sameOperationPull.pullRequest.id, action: 'PULL_REQUEST_MERGED' } })).toBe(0);
+    } finally {
+      releaseCandidate();
+      candidateSpy.mockRestore();
+      firstMergeResponse = await firstMergeRequest.catch(() => undefined);
+    }
+    expect(firstMergeResponse?.status).toBe(200);
+    const sameOperationResult = await responseJson<{ status: string; operationId: string; mergeCommitSha: string }>(firstMergeResponse!);
+    expect(sameOperationResult).toMatchObject({ status: 'MERGED', operationId: sameOperationId });
+    const sameOperationMergeSha = sameOperationResult.mergeCommitSha;
     expect(sameOperationMergeSha).not.toBe(sameOperationTargetSha);
     expect((await git(['--git-dir', bare, 'rev-parse', `refs/heads/${sameOperationTargetBranch}`])).stdout.trim())
       .toBe(sameOperationMergeSha);
@@ -1491,7 +1525,6 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       storageGeneration: storedRepo.storageGeneration, state: 'READY', stale: false });
 
     const raceOperationId = randomUUID();
-    const storage = app.get(GitStorageService);
     const updateTarget = storage.compareAndSwapBranch.bind(storage);
     let releaseMerge!: () => void;
     let markMergeAtRefUpdate!: () => void;

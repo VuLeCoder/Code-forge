@@ -79,11 +79,12 @@ describe('Admin bootstrap CLI + PostgreSQL', () => {
     ]);
   });
 
-  it('promotes an existing account without replacing its password', async () => {
+  it('promotes an existing account without unlocking it or replacing its password', async () => {
     const passwordHash = await argon2.hash('Existing-Password-123!', { type: argon2.argon2id, memoryCost: 4_096, timeCost: 1, parallelism: 1 });
+    const lockedAt = new Date('2026-10-01T00:00:00.000Z');
     await db.user.create({ data: {
       username: 'ExistingAdmin', normalizedUsername: 'existingadmin', email: 'existing@example.test',
-      normalizedEmail: 'existing@example.test', passwordHash,
+      normalizedEmail: 'existing@example.test', passwordHash, status: 'LOCKED', lockedAt,
     } });
     const result = runBootstrap('ExistingAdmin\nexisting@example.test\n');
 
@@ -94,6 +95,7 @@ describe('Admin bootstrap CLI + PostgreSQL', () => {
     expect(result.stdout).not.toContain('Password:');
     const user = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'existingadmin' } });
     expect(user.systemRole).toBe('ADMIN');
+    expect(user).toMatchObject({ status: 'LOCKED', lockedAt });
     expect(user.passwordHash).toBe(passwordHash);
     await expect(db.auditLog.findMany({ where: { targetId: user.id } })).resolves.toEqual([
       expect.objectContaining({ actorId: null, action: 'SYSTEM_ADMIN_PROMOTED', details: { channel: 'bootstrap_cli' } }),
