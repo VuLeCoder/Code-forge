@@ -148,6 +148,9 @@ describe('Admin HTTP + isolated PostgreSQL + Git', () => {
     expect(lockedSession.revokedAt).toBeInstanceOf(Date);
     expect((await call('GET', 'auth/me', lockedUser.cookie)).status).toBe(401);
     expect((await gitAdvertisement()).status).toBe(401);
+    expect((await fetch(`${base}/git/LockedMember/PatLockGate.git/info/refs?service=git-upload-pack`)).status).toBe(200);
+    expect(await db!.repository.findFirstOrThrow({ where: { name: 'PatLockGate' }, select: { status: true, visibility: true } }))
+      .toMatchObject({ status: 'ACTIVE', visibility: 'PUBLIC' });
     expect(await db!.auditLog.findFirst({ where: {
       actorId: admin.userId, targetId: lockedUser.userId, action: 'ADMIN_USER_LOCKED',
       details: { equals: { from: 'ACTIVE', to: 'LOCKED' } },
