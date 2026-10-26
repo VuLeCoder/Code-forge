@@ -1161,3 +1161,8 @@ snapshots, not current status. Current acceptance state is in the task board.
 
 - GitHub Actions `MVP verification` run #135 (`40273582715`) completed successfully on exact `thviet` source `2eed94471d4a1d8c3ea80163b26afec0a05ebf1c`; backend unit/E2E, lint, typecheck, build, frontend E2E/full-stack, Docker image checks, migration-image checks and diff whitespace all completed in the green workflow.
 - Updated the current acceptance, next-actions and cloud-checklist snapshots to this exact source/CI evidence. Render remains on `388c584`; this CI result does not claim a new cloud deployment or verify migration, backup/restore, admin cloud, quota, or restart recovery. No runtime code or cloud state changed.
+
+## T23-BTL SOURCE TIP CI RECHECK — complete
+
+- Read-only GitHub Actions API check found `MVP verification` run #136 (`40274166587`) completed with `success` on exact `thviet` SHA `e0a5fc4b93b21ac4d848c42dd14c6d93c4d453b4`.
+- Updated the current acceptance, next-actions and cloud-checklist snapshots from #135 / `2eed944` to #136 / `e0a5fc4`. Render remains on `388c584`; this CI result does not claim a cloud deploy or close migration, backup/restore, admin cloud, quota, or restart-recovery acceptance. No runtime code, cloud data, or service configuration changed.
