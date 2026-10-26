@@ -1166,3 +1166,9 @@ snapshots, not current status. Current acceptance state is in the task board.
 
 - Read-only GitHub Actions API check found `MVP verification` run #136 (`40274166587`) completed with `success` on exact `thviet` SHA `e0a5fc4b93b21ac4d848c42dd14c6d93c4d453b4`.
 - Updated the current acceptance, next-actions and cloud-checklist snapshots from #135 / `2eed944` to #136 / `e0a5fc4`. Render remains on `388c584`; this CI result does not claim a cloud deploy or close migration, backup/restore, admin cloud, quota, or restart-recovery acceptance. No runtime code, cloud data, or service configuration changed.
+
+## T24-BTL DEPLOY REVISION VISIBILITY — implemented in source, not deployed
+
+- Code commit `97d5d34` extends `GET /api/v1/health/live` with nullable `commitSha`, populated only when Render's documented runtime `RENDER_GIT_COMMIT` value is a 40/64-character hex SHA. Missing or malformed values return `null`; no other environment data is exposed.
+- TDD evidence: the focused health test failed to compile before implementation because `commitSha` did not exist; after implementation, `corepack pnpm --filter backend test src/health/health.controller.spec.ts` passed 3/3, targeted ESLint passed, backend typecheck passed, and `git diff --check` passed.
+- This change is not deployed yet. It enables verifying the running commit after a future approved deploy, but does not itself resolve source backup/recovery or authorize restart/deploy.
