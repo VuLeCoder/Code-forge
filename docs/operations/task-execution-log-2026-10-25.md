@@ -1105,3 +1105,9 @@ snapshots, not current status. Current acceptance state is in the task board.
 - On 2026-10-26 at 04:11 UTC, `GET /api/v1/health/ready` returned HTTP 200 with database, Git executable, and storage all `up`; the public repository list returned HTTP 200 with an empty list. The readiness endpoint may write/delete its documented temporary storage probe file. `/health` and `/api/v1/health` returned 404; use `/api/v1/health/ready` for this app.
 - This is readiness/list evidence only. No account/repository was created; no migration, backup, deploy, restart, or source-storage mutation occurred. Git HTTPS/authenticated workflows and the business-flow smoke remain unverified.
 - Updated the current acceptance snapshot to match clean source tip `48b29f2` and green Actions #125 on its exact SHA. The historical P1001 cause remains unknown; no attempt was made to infer it from the current readiness result.
+
+## T14-BTL RENDER GIT CHALLENGE + LOCAL DEMO AVAILABILITY
+
+- At 2026-10-26 04:19 UTC, a GET to the Render Git Smart HTTP route for a deliberately nonexistent repository returned `401` with `WWW-Authenticate: Basic realm="Code Forge Git", charset="UTF-8"`. This proves the direct Render route and challenge are reachable, not successful clone/fetch/push for an existing repository.
+- Quick local checks found no listener on `localhost:3000/login` or `localhost:4000/api/v1/health/ready`; both connections were refused. No local server was started, and no cloud account/repository was created.
+- Current acceptance docs now record CI #126 (`40267850619`) passing on exact source `f240e72`, the Render Git challenge, and the remaining demo smoke gaps. `git diff --check` passed; P2/P8 remain open.
