@@ -1137,3 +1137,9 @@ snapshots, not current status. Current acceptance state is in the task board.
 - On the deployed Render API, a new synthetic account/repository `btlclouda930e3db/pr-smoke` completed a bounded private flow: create a source branch with one test-only file, push by temporary PAT, create PR #1, compare and inspect files/diff, verify owner merge permission, merge, then fetch `main`.
 - Fetched `main` resolved to merge commit `f8468c6063a70aea4306f6ab6de7a1c58cafb7bd`; Git inspection confirmed exactly two parents. PAT deletion and session logout requests succeeded. No application repository/source or credential was included.
 - This proves direct API/Git cloud integration for the owner PR journey; it is not visual/browser acceptance and does not cover collaborator invitation, admin, stale/conflict cloud cases, quota boundary, migration, backup/restore or restart/source-loss recovery. No deployment or migration occurred.
+
+## T19-BTL RENDER COLLABORATOR→PR→OWNER MERGE SMOKE — passed
+
+- On a separate private Render fixture, owner `btlown653b1a6a` invited `btlcol653b1a6a` with role `WRITE`; collaborator listed and accepted the invitation, cloned the repository via temporary PAT, pushed `collaborator-feature`, and created PR #1. Owner fetched the compare/files snapshot and verified `canMerge`; owner merged, then collaborator fetched `main`.
+- Fetched target points to merge SHA `481d75d44f2ad2855bab853cb55d28c96235877b`; Git inspection confirmed two parents. PAT revoke and owner/collaborator logout succeeded. Fixture repo `collab-smoke` contains only a smoke file; no project source or credentials were written to the repo or log.
+- This does not test admin/audit, stale/conflict cloud behavior, payload/quota limits, migration, backup/restore or restart/source-loss recovery. No deployment or migration occurred.
