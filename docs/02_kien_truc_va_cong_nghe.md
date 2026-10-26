@@ -50,7 +50,7 @@ Database và filesystem không cùng một transaction. Khi tạo, xóa, reset s
 | PersonalAccessToken | Prefix/hash, scopes dạng String[], hạn dùng và revoke |
 | AuditLog | actorId, action, targetId, createdAt; actorId hiện không khai báo foreign key |
 
-`Invitation`, `PullRequest` và `PullRequestMergeOperation` có trong [schema hiện tại](backend/prisma/schema.prisma); hỗ trợ vòng đời lời mời, PR và reconciliation merge. AuditLog lưu allowlisted metadata; không lưu secret hoặc source/diff.
+`Invitation`, `PullRequest` và `PullRequestMergeOperation` có trong [schema hiện tại](../backend/prisma/schema.prisma); hỗ trợ vòng đời lời mời, PR và reconciliation merge. AuditLog lưu allowlisted metadata; không lưu secret hoặc source/diff.
 
 Commit/tree/blob/branch được đọc từ Git, không có bảng lưu bản sao toàn bộ source. Storage dùng key UUID, không ghép trực tiếp owner/tên repo thành đường dẫn filesystem. `RepositoryStatus` hiện chỉ có ACTIVE/LOCKED/DELETED; trạng thái provisioning/failure trong activity là mô tả quy trình, không phải enum đang tồn tại.
 
@@ -58,21 +58,21 @@ Commit/tree/blob/branch được đọc từ Git, không có bảng lưu bản s
 
 | Đường dẫn | Việc cần hiểu |
 | --- | --- |
-| [package.json](package.json), [workspace](pnpm-workspace.yaml) | Scripts root và phiên bản pnpm |
-| [backend/src/main.ts](backend/src/main.ts), [app.module.ts](backend/src/app.module.ts) | Khởi động Nest, middleware/module |
-| [backend/src/config/environment.ts](backend/src/config/environment.ts) | Cấu hình được validate và default |
-| [backend/src/auth](backend/src/auth), [users](backend/src/users) | Session, guards, normalize, public profile |
-| [repository.policy.ts](backend/src/repositories/repository.policy.ts) | Quyền đọc/quản lý tập trung |
-| [repositories.controller.ts](backend/src/repositories/repositories.controller.ts), [service](backend/src/repositories/repositories.service.ts) | REST metadata, source, quota số repo, transaction |
-| [git-storage.service.ts](backend/src/repositories/git-storage.service.ts) | Tạo bare, đọc source, validation, giới hạn và reset |
-| [git-http.service.ts](backend/src/repositories/git-http.service.ts) | PAT authorization, CGI/stream, timeout/cancel/log |
-| [repository-purge.service.ts](backend/src/repositories/repository-purge.service.ts) | Purge repo hết retention |
-| [backend/src/tokens](backend/src/tokens) | Tạo/list/revoke PAT và audit |
-| [backend/prisma](backend/prisma) | Schema và migration là lịch sử dữ liệu cần giữ |
-| [frontend/src/app](frontend/src/app) | Routes, pages, API proxy và Git proxy |
-| [frontend/src/components](frontend/src/components), [lib](frontend/src/lib) | UI, auth provider và client/helper |
-| [backend/test](backend/test), [frontend/test](frontend/test) | HTTP và browser harness; unit nằm cạnh backend source |
-| [compose.yaml](compose.yaml), [Dockerfile](backend/Dockerfile) | Local infrastructure và image backend |
+| [package.json](../package.json), [workspace](../pnpm-workspace.yaml) | Scripts root và phiên bản pnpm |
+| [backend/src/main.ts](../backend/src/main.ts), [app.module.ts](../backend/src/app.module.ts) | Khởi động Nest, middleware/module |
+| [backend/src/config/environment.ts](../backend/src/config/environment.ts) | Cấu hình được validate và default |
+| [backend/src/auth](../backend/src/auth), [users](../backend/src/users) | Session, guards, normalize, public profile |
+| [repository.policy.ts](../backend/src/repositories/repository.policy.ts) | Quyền đọc/quản lý tập trung |
+| [repositories.controller.ts](../backend/src/repositories/repositories.controller.ts), [service](../backend/src/repositories/repositories.service.ts) | REST metadata, source, quota số repo, transaction |
+| [git-storage.service.ts](../backend/src/repositories/git-storage.service.ts) | Tạo bare, đọc source, validation, giới hạn và reset |
+| [git-http.service.ts](../backend/src/repositories/git-http.service.ts) | PAT authorization, CGI/stream, timeout/cancel/log |
+| [repository-purge.service.ts](../backend/src/repositories/repository-purge.service.ts) | Purge repo hết retention |
+| [backend/src/tokens](../backend/src/tokens) | Tạo/list/revoke PAT và audit |
+| [backend/prisma](../backend/prisma) | Schema và migration là lịch sử dữ liệu cần giữ |
+| [frontend/src/app](../frontend/src/app) | Routes, pages, API proxy và Git proxy |
+| [frontend/src/components](../frontend/src/components), [lib](../frontend/src/lib) | UI, auth provider và client/helper |
+| [backend/test](../backend/test), [frontend/test](../frontend/test) | HTTP và browser harness; unit nằm cạnh backend source |
+| [compose.yaml](../compose.yaml), [Dockerfile](../backend/Dockerfile) | Local infrastructure và image backend |
 
 `packages/*` vẫn chưa có thư mục riêng trong workspace; shared contracts hiện được tích hợp theo module/API. `.github/workflows/ci.yml` có hosted gate cho unit, PostgreSQL/Git E2E, browser/full-stack, Docker image và migration. CI không thay thế smoke test cloud.
 

@@ -7,6 +7,43 @@ or private cloud values.
 This is a chronological log: entries labeled **historical/superseded** are
 snapshots, not current status. Current acceptance state is in the task board.
 
+## T-CURRENT-RELEASE — latest verified release snapshot
+
+- Owner: Codex release lead.
+- Status: incomplete; this entry supersedes older current-state claims below.
+- Branch/worktree: `thviet`, `E:\Prj1`, HEAD and `origin/thviet` both
+  `4407e7d2e49d0e43aeb48b1e49ee96e986745a03`.
+- Hosted evidence: GitHub Actions run [#92 / `40198015346`](https://github.com/VuLeCoder/Code-forge/actions/runs/40198015346)
+  succeeded on that exact SHA.
+- Cloud evidence: Render deployment of `4407e7d` failed startup with Prisma
+  `P1001`. The sanitized connectivity probe reported DNS and TCP `ok`. Neon UI
+  showed public internet enabled, `Any IP`, and IP allowlisting unavailable.
+  This confirms only the observed DNS/TCP path; it does not establish database
+  authentication or successful SQL queries. No migration or cloud smoke is
+  claimed as passed.
+- Diagnostic lead (not a confirmed root cause): Neon's [Prisma guide](https://neon.com/docs/guides/prisma)
+  says scale-to-zero wake-up can cause P1001 and shows `connect_timeout=15`.
+  A local unpushed candidate now uses a 15-second default, preserves explicit
+  overrides, and adds an opt-in bounded PostgreSQL handshake probe. Focused
+  focused tests pass (2 suites / 17 tests, including a stalled-server case),
+  and the full backend unit suite passes (20 suites / 166 tests). Backend
+  lint/typecheck/build and `git diff --check` pass. Read-only independent review
+  found no actionable issue after inspecting the pinned `pg@8.23.1` timeout
+  behavior. Push, Render deploy, and post-change DB/health verification remain
+  pending; this is not yet a confirmed fix.
+- Audit evidence: AGY static review timed out after 120 seconds with no usable
+  result. Codex static security review reported no actionable finding in the
+  reviewed scope and did not run dynamic tests.
+- Open controls: P0–P8 are not complete; P2/P8 cloud release/recovery and
+  remaining P3/P4 acceptance are open. Issue #6 remains fail-closed pending the
+  owner authority/approval policy. Vercel is deferred/out of scope per the
+  latest owner objective.
+- Changed paths in this documentation task: `docs/implementation-status.md`,
+  `docs/next-actions.md`, `docs/operations/acceptance-task-board-2026-10-25.md`,
+  `docs/operations/task-execution-log-2026-10-25.md`, `docs/tasks/plan.md`,
+  `docs/tasks/todo.md`, and `docs/remaining-work-breakdown.md`. No secrets,
+  database URLs, or private cloud values are included.
+
 ## T-BASE — historical baseline snapshot (superseded)
 
 - Owner: Codex lead.
@@ -331,14 +368,15 @@ snapshots, not current status. Current acceptance state is in the task board.
 
 - Owner: Codex lead; `/root/ambiguous_journal_design` read-only security/design
   review.
-- Status: local draft prepared; not posted to GitHub.
+- Status: published as open GitHub issue #6; API recheck on 2026-10-25 confirmed
+  the issue is open.
 - Artifact: `docs/operations/issue-draft-ambiguous-git-journals.md`.
 - Finding: fail-closed unresolved push/merge journals can block writes
   indefinitely, but there is no supported operator resolution endpoint/tool.
   No confirmed vulnerability; this is a medium operational-availability gap.
-  Existing issues #3–#5 remain open; draft says to confirm with the owner
-  before opening a distinct issue and asks who may resolve/if dual approval is
-  required.
+  Issue #6 is [tracked here](https://github.com/VuLeCoder/Code-forge/issues/6);
+  its authorization and approval design remains subject to the owner decisions
+  recorded in `docs/next-actions.md`.
 
 ## T-AGY-CI-LOCK — focused AGY read-only audit
 
@@ -346,8 +384,9 @@ snapshots, not current status. Current acceptance state is in the task board.
   `dangerously_skip_permissions=false`; project wrapper pins
   `gemini-3.8-flash-medium`.
 - Status: `timed_out` after 90 seconds; no usable output, no file changes.
-- Next: do not infer a clean audit and do not retry blindly. Codex read-only
-  review and isolated tests remain the evidence until AGY is operational.
+- Next: do not infer a clean audit from this timed-out Gemini attempt. A later
+  separate AGY read-only review using `claude-sonnet-5-5-medium` completed with
+  no blocking finding; see the alternative-model follow-up below.
 
 ## T-MAINT-GRACE — 120-second reconciliation acceptance gaps
 
@@ -447,8 +486,17 @@ snapshots, not current status. Current acceptance state is in the task board.
 
 - Owner: Codex lead with bounded test implementation and independent static
   review agents; leader owns integration.
-- Status: implemented, typechecked, diff-checked, and pushed; Linux E2E result
-  is pending inspection and the test is not yet accepted.
+- Status: run `40166811302` completed with failure on exact SHA
+  `1209bca8cde9e3f594c6dc44036426a9e73f7ea6`. Its backend unit/E2E, lint,
+  typecheck, and build steps passed. Frontend Playwright had 51 passed / 1
+  failed: `frontend/test/admin-accessibility.spec.ts:7`, desktop case; Escape
+  closed the dialog but focus was not restored to the opener button
+  “Khóa tài khoản” (assertion line 54). Later full-stack, Docker image,
+  migration, and diff-whitespace steps were skipped. The full hosted workflow
+  was unaccepted at that time. The local frontend fix passed the full frontend
+  E2E and focused spec, then was committed/pushed as `45cb1f4`. Replacement
+  hosted run `40167861108` succeeded in 5m32s on exact SHA
+  `24e6abc69cb947d575306134c362491bc96c93ad`.
 - Branch/commits: `thviet`, `e5eda1a` (`test: verify merge recovery after API
   restart`) plus `250ffdc` (`test: allow crash recovery E2E runtime margin`).
 - Owned file: `backend/test/pull-requests.e2e-spec.ts` only.
@@ -458,30 +506,89 @@ snapshots, not current status. Current acceptance state is in the task board.
   prove its startup maintenance completes PR/journal metadata and one audit;
   retry the same operation without duplicate merge; verify fetch retains the
   two-parent commit.
-- Verification performed: `corepack pnpm --filter backend typecheck` passed;
-  `git diff --check` still passes after the timeout follow-up. Targeted ESLint
-  reports only the existing
-  `await-thenable` at line 507, unchanged from the base. The test is Linux-only
-  because it uses PostgreSQL's client-connection check setting to observe the
-  killed process socket. No local E2E, database, or Docker operation was run.
-- Additional local regression evidence at HEAD `250ffdc`: `corepack pnpm
-  --filter backend test` passed 17 suites / 111 tests. This is the backend unit
-  suite only; it does not execute the new crash/restart E2E.
+- Verification performed: authenticated runs `40164718122` on `e5eda1a`,
+  `40164867636` on `250ffdc`, `40165071044` on `c98f548`, and `40165266658` on
+  `f1fb835` all showed
+  the child API transaction session still `active`, waiting on the test-owned
+  advisory barrier after the 60-second wait. The test released that barrier
+  only after waiting for the session, creating a circular wait; independent
+  static triage and security review both localized the evidence to the test
+  barrier, not the production lock pool. `b191165` releases the barrier before
+  checking for natural session exit. Run `40166209913` then passed that
+  crash/restart test but failed later in the same suite because the long PR
+  fixture exhausted the registration endpoint's five-per-minute limit. A
+  follow-up override of `APP_GUARD` did not take effect because Nest rewrites
+  that enhancer token; run `40166484359` failed at the same later `429`.
+  Commit `1209bca` replaces only the PR suite's throttler storage with a
+  non-blocking test fixture while preserving the real guard; the separate
+  `auth.e2e-spec.ts` rate-limit acceptance remains unchanged. Latest local
+  backend typecheck passed; backend unit tests passed 17 suites / 113 tests.
+  A separate PR-specific E2E was refused by its `_test` safety guard because
+  `backend/.env` points to a non-test DB; do not count this as a test failure or
+  integration result. The Linux-only crash case is skipped on Windows. Targeted ESLint
+  still reports the pre-existing
+  `await-thenable` at line 507, outside this edit. Docker Desktop responded;
+  no container or volume was modified.
 - Follow-up: `250ffdc` increases the Jest timeout from 119 seconds to 180
   seconds to provide runtime margin for the natural PostgreSQL-session exit and
   replacement startup. This changes no production behavior.
 - Review: independent static review found and the implementation fixed a
   startup-failure child-process leak; follow-up review found no actionable
   process cleanup race. This is static evidence only, not runtime acceptance.
-- CI: run `40164718122` for `e5eda1a` completed failure at the aggregate step
-  `Run corepack pnpm --filter backend test:e2e:failure`. The exact failing test
-  and cause are unknown until authenticated logs are inspected. Run
-  `40164867636` for `250ffdc` is currently in progress. The latest verified
-  green hosted run remains `40162474987` on ancestor `9c2eb81`.
-- Next safe action: after the current run completes and authenticated logs are
-  available, inspect the exact failing test and correct only from reproducible
-  evidence. Do not infer a cause from the aggregate step name and do not
-  force-terminate PostgreSQL sessions on the test's success path.
+- CI: `40166209913` on `b191165` explicitly showed the crash/restart test
+  passing, then failed at the next PR test with HTTP 429; `40166484359` on
+  `75e9ec0` failed at the same later 429. On `1209bca`, run `40166811302`
+  passed the complete backend E2E command, as well as backend unit, lint,
+  typecheck, and build; frontend Playwright had 51 passed / 1 failed. The sole
+  failure was the desktop Escape case in
+  `frontend/test/admin-accessibility.spec.ts:7`: closing the dialog did not
+  restore focus to “Khóa tài khoản” (assertion line 54). Later full-stack,
+  Docker, migration, and diff-whitespace steps were skipped in this historical
+  run. It was superseded by successful hosted run `40167861108` in 5m32s on
+  exact SHA `24e6abc69cb947d575306134c362491bc96c93ad`.
+- Local verification (latest): backend unit tests passed 17 suites / 113 tests;
+  workspace typecheck, lint, and build passed; focused backend lock spec passed
+  3/3; frontend Playwright passed 52/52; full-stack Playwright passed 3/3.
+  Full-stack used the dedicated existing `codeforge-merge-crash-test` database
+  `code_forge_test` on loopback port 49588; only the harness random schema and
+  temp Git root were created/cleaned, with no Docker volume reset/deletion. The
+  separate PR-specific E2E was refused by its `_test` safety guard because
+  `backend/.env` points to a non-test DB; it is not a test failure or integration
+  result. Frontend/repository-lock code fixes are committed and pushed as
+  `45cb1f4` and `896575c`; Markdown consolidation/status edits remain local,
+  uncommitted, and unpushed.
+- AGY review: Gemini 3.8 Flash timed out at 180 seconds and is not counted as a
+  successful audit. AGY model listing showed Gemini 4 Argon, Gemini 3.8 Flash,
+  Claude Opus/Sonnet 5.5, and GPT-OSS 120B. A separate read-only
+  `claude-sonnet-5-5-medium` review completed in 75 seconds with no blocking
+  finding; Nemotron Ultra also found no blocker. These reviews do not replace
+  hosted CI.
+- Hosted CI disposition: run `40167861108` succeeded in 5m32s on pushed SHA
+  `24e6abc69cb947d575306134c362491bc96c93ad`. Keep P3/P4 remaining matrix
+  work open. Never use
+  `pg_terminate_backend` as success-path evidence.
+
+## T-LOCK-SERVICE-FOLLOWUP — reproduced local regression and fix
+
+- Owner: Codex lead.
+- Status: a repository-lock service finding was reproduced RED, fixed, and
+  committed/pushed as `896575c`; it was independently reviewed by Codex
+  security reviewer, Nemotron Ultra via Continue CLI, and AGY
+  `claude-sonnet-5-5-medium`, with no blocking finding.
+- Local acceptance evidence: backend unit tests passed 17 suites / 113 tests;
+  workspace typecheck, lint, and build passed; focused backend lock spec passed
+  3/3; frontend Playwright 52/52 and full-stack Playwright 3/3 passed. Full-stack
+  used the dedicated existing test DB and only a random schema/temp Git root;
+  no Docker volume was reset or deleted. The PR-specific E2E was refused by the
+  `_test` guard because `backend/.env` points to a non-test database; no failure
+  or integration result is claimed. These are local results, not hosted CI.
+- Review: Gemini 3.8 Flash timed out and is not counted. One AGY read-only
+  `claude-sonnet-5-5-medium` review completed in 75 seconds with no blocking
+  finding; Nemotron Ultra and Codex security reviewer also found no blocker.
+- Hosted follow-up: run `40167861108` succeeded in 5m32s on pushed SHA
+  `24e6abc69cb947d575306134c362491bc96c93ad`. Keep remaining P3/P4
+  failure-matrix cases open. Markdown consolidation/status edits remain local
+  and were not included in that run.
 
 ## T-AGY-CRASH-SECURITY-REVIEW — bounded read-only audit attempt
 
@@ -493,23 +600,440 @@ snapshots, not current status. Current acceptance state is in the task board.
   resulted. This is not a successful audit and does not add security-review
   acceptance evidence.
 - Next: do not retry this AGY task. Preserve the timeout as an unresolved
-  review attempt; rely only on the separately recorded static review evidence
-  and pending Linux runtime CI until new direction is given.
+  review attempt; rely only on separately recorded static review evidence and
+  hosted backend E2E results. Run `40166811302` passed the backend E2E gate but
+  failed later at frontend E2E; neither result is an AGY audit.
 
-## T-AGY-MODEL-LOW — verify and pin a responsive local AGY model
+- Follow-up: after the exact CI failure was identified, one smaller
+  plan-mode review on Gemini 3.8 Flash Medium was attempted with a 180-second
+  print timeout. It returned no usable output. This remains `timed_out`, not a
+  successful audit; it was not retried. Independent Codex static triage and
+  security review found no confirmed exploitable vulnerability; neither review
+  substitutes for hosted runtime evidence. Run `40166811302` passed backend
+  E2E but failed later at frontend Playwright; overall workflow acceptance
+  remains incomplete.
+
+- Later bounded AGY review: Gemini 3.8 Flash timed out at 180 seconds with no
+  usable output and is not counted as an audit pass. A separate repository-lock
+  fix was independently reviewed by Codex security reviewer and Nemotron Ultra
+  via Continue CLI; both found no blocking issue. This does not change the
+  failed status of hosted run `40166811302` on old SHA `1209bca`.
+
+- Alternative-model follow-up: the AGY CLI model list included Gemini 4 Argon,
+  Gemini 3.8 Flash, Claude Opus 5.5, Claude Sonnet 5.5, and GPT-OSS 120B. A
+  single read-only `claude-sonnet-5-5-medium` review completed in 75 seconds
+  with no blocking finding on the repository-lock change. This makes AGY usable
+  through that alternative model for this bounded review; it does not convert
+  the Gemini timeout into a pass or change hosted CI status.
+
+## T-AGY-MODEL-TIERS — verify and select local AGY model effort
 
 - Owner: Codex lead; model check requested by user.
-- Status: local model listing and wrapper smoke passed; no global AGY/MCP
-  configuration or credentials changed.
+- Status: local model listing plus low/medium/high smoke prompts passed both
+  directly and through the project wrapper. Wrapper default is Medium, with
+  explicit low/medium/high effort for task-specific selection. No global
+  AGY/MCP configuration or credentials changed.
 - Evidence: `agy.exe models` listed Gemini 4 Argon, Gemini 3.8 Flash, Claude
-  Opus 5.5, Claude Sonnet 5.5, and GPT-OSS 120B variants. A no-tools prompt
-  with `gemini-3.8-flash-low` returned `AGY_MODEL_SMOKE_OK`; the project wrapper
-  then returned `AGY_WRAPPER_READY` with its pinned model. Each invocation
-  completed within the 30-second timeout.
-- Change: `scripts/agy.ps1` now pins `gemini-3.8-flash-low`, and
-  `docs/agy-plans/README.md` records the available model list and smoke result.
-  The earlier Medium audit timeout remains classified as inconclusive; this
-  smoke does not prove a full repository audit or MCP access.
-- Next: use the wrapper only for bounded tasks; keep permission bypass off and
-  do not retry the timed-out audit unless separately authorized with a new
-  bounded scope.
+  Opus 5.5, Claude Sonnet 5.5, and GPT-OSS 120B variants. No-tools prompts for
+  Gemini 3.8 Flash low/medium/high each returned `AGY_MODEL_SMOKE_OK` within
+  their 30-second limits. Wrapper default Medium, `-Effort high`, and
+  `-Effort low` each returned their expected response within 30 seconds.
+- Historical state at this entry: `scripts/agy.ps1` selected only Gemini 3.8 Flash tiers, defaulting to
+  Medium, and accepts `-Tier low|medium|high`. AGY rejects a mismatched CLI
+  `--effort` (for example, model High with effort Low); the wrapper now rejects
+  that combination clearly, accepts matching values, and rejects arbitrary
+  `--model` overrides. `docs/agy-plans/README.md` records the available model
+  list and task-specific tier guidance. The earlier 120-second Medium audit
+  timeout remains inconclusive; prompt smoke does not prove full repository
+  audit or MCP access.
+- Next: use the wrapper only for bounded tasks; use `-Tier high` for complex
+  review or architecture, Medium for normal implementation, and `-Tier low`
+  for quick checks.
+  Keep permission bypass off. The timed-out audit itself remains incomplete.
+
+## T-LOCAL-IMAGE-SMOKE — candidate Docker image runtime contents
+
+- Owner: Codex lead; local smoke only.
+- Status: candidate images built with unique local tags
+  `code-forge-api:codex-local-20261025` and
+  `code-forge-migrate:codex-local-20261025`.
+- API image checks: verified Git 2.39.5, executable `pre-receive` hook, and
+  Prisma client availability inside the container.
+- Migration image checks: verified Prisma 6.19.3 and Prisma client resolution.
+  No database migration was applied. No Docker volumes were reset or deleted.
+- Scope: this is local image/content smoke, not the skipped hosted Docker or
+  migration gates in failed run `40166811302`, and not release acceptance.
+
+## T-AGY-GEMINI4-SMOKE — one-off model responsiveness
+
+- Owner: Codex lead; bounded direct CLI smoke.
+- Evidence: direct `gemini-4-argon-medium` prompt returned
+  `AGY_GEMINI4_OK` within 30 seconds.
+- Interpretation: confirms the model responds to a short prompt only; it is
+  not a code review or security audit. At the time of this smoke, the project
+  wrapper remained pinned to Gemini 3.8 Flash Medium. The prior Gemini 3.8 Flash review timeout remains
+  uncounted; the separate successful Claude Sonnet Medium review is recorded
+  above.
+
+## T-PR-LIFECYCLE-AND-NO-MERGE-BASE — isolated regression evidence
+
+- Owner: Codex lead; test execution and independent bounded review.
+- Evidence: PostgreSQL HTTP E2E for “PR author and repository owner update
+  lifecycle state while denying other WRITE members” passed 1/1 in a newly
+  created tmpfs-only PostgreSQL test container. Container removal was verified;
+  no volumes were used or removed. Backend full typecheck passed.
+- Evidence: real-Git storage suite passed 20/20, including unrelated branch
+  histories returning `NO_MERGE_BASE` without moving refs. `git diff --check`
+  passed for the tested changes.
+- Review scope: an earlier AGY `gemini-4-argon-medium` Medium read-only review
+  covered the PR lifecycle test plus the then-current Git compare test and
+  reported no actionable findings. It did not cover the later storage-reset
+  E2E; AGY did not execute tests. This is separate from the later Gemini 3.8/
+  Gemini 4 PR-slice timeouts recorded in the latest verification entry.
+- Scope: these are local targeted test results, not evidence of cloud release
+  or completion of the remaining P3/P4 matrix. The Markdown documentation
+  updates are uncommitted/unpushed and are not part of hosted run `40167861108`.
+
+## T-AGY-DEFAULT-MODEL — current wrapper selection
+
+- Current decision: default to Gemini 3.8 Flash Medium. The user reports its
+  quota resets hourly, while Gemini 4 Argon resets weekly; prioritize the more
+  frequently replenished quota. Use Gemini 4 Argon Medium only as a bounded
+  fallback after a scoped Gemini 3.8 call times out. The earlier broad Gemini
+  3.8 review timeout does not imply every scoped task should skip 3.8.
+- The wrapper accepts Gemini 3.8 Flash, Gemini 4 Argon, Claude Sonnet 5.5, and
+  Claude Opus 5.5 families; default is Gemini 3.8 Flash Medium. Claude selection
+  is intentional via `-Family claude-sonnet-5-5` or `-Family claude-opus-5-5`.
+  Gemini 4 is the explicit fallback via `-Family gemini-4-argon`; user preference
+  is 3.8 first, Claude only when intentionally selected/available, and Gemini 4
+  after an observed Claude quota error. There is no quota-balance field to
+  pre-check. Tier selection remains `-Tier low|medium|high`; arbitrary model
+  overrides remain rejected.
+- Review evidence remains distinct: the bounded `gemini-4-argon-medium`
+  review of the PR lifecycle test plus then-current Git compare test completed
+  in about 40 seconds with no actionable findings; it did not cover the later
+  storage-reset E2E, and AGY did not run those tests. Gemini 3.8 broad-review
+  attempts timed out and are not counted as audits.
+- The earlier default-family smoke returned `AGY_GEMINI4_WRAPPER_OK` before
+  the latest default was changed back to Gemini 3.8. A later bounded review
+  invoked the current wrapper default (`gemini-3.8-flash-medium`) and returned
+  `NO_ACTIONABLE_FINDING`; this verifies the default invocation, though it is
+  not a standalone no-tools smoke.
+- Scope: current wrapper/docs changes are local and not included in pushed
+  code SHA `24e6abc` or hosted run `40167861108`.
+
+## T-PR-E2E-AND-AGY-3.8 — latest bounded verification
+
+- Backend unit: 17 suites / 114 tests passed.
+- PR E2E: full suite passed 6/6 using isolated tmpfs-only PostgreSQL. The
+  Linux crash/restart test was skipped on Windows and is not counted as a
+  local pass. This supersedes the earlier safe refusal by the `_test` guard
+  when `.env` targeted a non-test database.
+- AGY current-default review: `gemini-3.8-flash-medium` with
+  `--disable-slash-commands` reviewed only `git-storage.service.spec.ts` and
+  returned exact output `NO_ACTIONABLE_FINDING` (successful narrow review).
+- Larger PR review status is terminal: the two-test slice of
+  `pull-requests.e2e-spec.ts` timed out at 45s on Gemini 3.8 Medium; one exact
+  bounded Gemini 4 Medium fallback timed out at 60s. Neither returned usable
+  findings; there were no further retries and neither is an audit pass.
+- Separate earlier evidence: Gemini 4 Argon Medium's read-only review of the
+  PR lifecycle test plus then-current Git compare test completed with no
+  actionable findings. It did not cover the later storage-reset E2E. Prior
+  broad Gemini 3.8 review timeouts remain unsuccessful attempts.
+- Scope: targeted local acceptance only; cloud release and remaining P3/P4
+  matrix remain open. These documentation changes are not committed/pushed.
+
+## T-PUSHED-TESTS-A71 — historical snapshot (superseded by be99b55)
+
+- Source: branch `thviet` and `origin/thviet` point to exact SHA
+  `a71a2f021c1d6ef2a3bad7983a1805dcd4f2b75e`, commit
+  `test: cover PR lifecycle and storage reset`. It contains the PR lifecycle
+  and storage-reset backend test additions plus `scripts/agy.ps1` routing and
+  default changes.
+- Hosted status: workflow `40169100366` (MVP verification #67) is currently
+  `In progress`. It has no terminal result yet. The last terminal green run,
+  `40167861108`, succeeded on predecessor SHA
+  `24e6abc69cb947d575306134c362491bc96c93ad`; do not attribute that pass to
+  `a71a2f0`.
+- Local verification after test additions: backend unit 17 suites / 114 tests;
+  Git storage suite 20/20; full PR PostgreSQL/Git E2E 6/6, with the Linux
+  crash/restart test skipped on Windows; backend typecheck; PowerShell parser
+  and invalid-family guard; `git diff --check` all passed.
+- The documentation consolidation/status edits remain local and were not part
+  of SHA `a71a2f0`. Hosted CI remains pending; cloud release remains
+  unverified.
+
+## T-PR-COMPARE-BOUNDS — commit be99b55, CI newly triggered
+
+- Source: `thviet` and `origin/thviet` point to exact SHA
+  `be99b5509b760258a7b391b3b2f91dd972fcba32`, commit
+  `feat: bound pull request diffs per file`.
+- Behavior: PR compare reports per-file `TEXT`, `BINARY`, `TRUNCATED`, or
+  `UNAVAILABLE`; maximum 128 KiB per file, 1 MiB aggregate, and 15 seconds
+  overall.
+- Local verification on this change: backend unit 17 suites / 115 tests;
+  backend typecheck; frontend lint/typecheck; Git-storage real tests 21/21.
+- Hosted workflow for this SHA was just triggered; its terminal result has not
+  been verified. Previous green/in-progress runs belong to earlier SHAs.
+- The documentation updates remain local/uncommitted and are not part of
+  `be99b55`. Cloud release remains unverified.
+
+## T-PR-COMPARE-LOCK-POOL — commit 94ceb6f, hosted status unchecked
+
+- Source: `thviet` and `origin/thviet` point to exact SHA
+  `94ceb6fdb090c1632c53de0ec96e8a975f9a265d`.
+- Change: compare requests are capped at two concurrent operations per
+  process and endpoint rate-limited to 10 requests/IP/minute. A regression
+  test verifies that a third concurrent request is rejected before lock
+  acquisition.
+- Local gates: backend unit 17 suites / 116 tests; backend lint/typecheck;
+  frontend lint/typecheck; Git-storage real tests 21/21.
+- Hosted history: workflow #68 / `40169475724` failed on predecessor SHA
+  `be99b5509b760258a7b391b3b2f91dd972fcba32` at backend lint in
+  `git-storage.service.spec.ts:260` (`no-unsafe-assignment`). The lint issue
+  was corrected in `045f5c1`; CI for `94ceb6f` has not been checked and is not
+  assumed green.
+- Review evidence: Gemini 3.8 audit timed out after 90 seconds with no usable
+  result. Gemini4 fallback invocation used unsupported flags and produced no
+  completed review. Neither counts as an audit pass. A human security
+  subagent identified moderate denial-of-service risk; the concurrency and
+  rate-limit mitigation is committed.
+- Documentation updates remain local/outside the pushed SHA. Cloud release
+  remains unverified.
+
+## T-PR-PAGINATION — commit 41c23ec, hosted CI failed
+
+- Source: `thviet` and `origin/thviet` point to exact SHA
+  `41c23eca31823b9f12dc93924699d873120b0788`.
+- Local gates passed: backend PR E2E 6/6 (Linux-only crash test skipped on
+  Windows), GitStorage real-Git 21/21, frontend pulls/proxy Playwright 15/15,
+  backend/frontend lint and typecheck, and `git diff --check`.
+- Hosted run #70 / `40170763221` failed on this SHA: frontend Playwright 53/55;
+  desktop and narrow admin accessibility tests failed the Escape focus-return
+  assertion at `frontend/test/admin-accessibility.spec.ts:54`. `[WebServer]`
+  also logged `Không thể tải hồ sơ lúc này`. Full-stack, Docker, migration,
+  and diff-whitespace stages were skipped after that failure.
+- Distinction: run #69 / `40170013908` was on predecessor `94ceb6f` and failed
+  the same admin flow at a different dialog-visibility assertion. The current
+  admin fix agent is reproducing in an isolated worktree; no fix is verified.
+  These local results do not complete P4 acceptance or cloud release
+  acceptance. Documentation edits remain local/outside the pushed SHA.
+
+## T-AMBIGUOUS-JOURNAL-RESOLUTION — commit 1e8736c, pushed to origin/thviet
+
+**Superseded on 2026-10-25 by revert `4b7eaed`:** this implementation is no longer present and must not be treated as current or accepted. Per the owner's choice to defer operator resolution and preserve fail-closed behavior, Issue #6 remains open. Review found that `MARK_FAILED` / `RETRY_RECONCILE` did not establish safe resolution for ambiguous evidence, the retry audit was not atomic with reconciliation, and free-text reasons could enter audit records. Revisit only after the authorization/approval policy and security contract are approved.
+
+- Source: `thviet` and `origin/thviet` point to exact SHA
+  `1e8736ce3b4fe765c9b63481aa3a18a09f874287`, commit
+  `feat(admin): implement audited resolution workflow for ambiguous Git journals (Issue #6)`.
+- Implemented behavior:
+  - Added `AdminUnresolvedQueryDto` and `AdminResolveOperationDto` to `backend/src/admin/admin.dto.ts`.
+  - Added routes in `AdminController`:
+    - `GET /admin/operations/unresolved` to list unresolved operations across repositories with pagination, filtering, non-sensitive projection.
+    - `GET /admin/operations/:id` to inspect safe metadata (excluding private refs, commit messages, secrets).
+    - `POST /admin/operations/:id/resolve` with `@UseGuards(OriginGuard)` to resolve PUSH or MERGE operations via `MARK_FAILED` or `RETRY_RECONCILE`.
+  - Resolution executes under `RepositoryLockService.acquire(repositoryId)` exclusive advisory lock.
+  - Fail-closed rules enforced: operations are never deleted; Git refs are never rolled back; atomic transaction writes `AdminAuditLog` (`action: ADMIN_OPERATION_RESOLVED`).
+  - Made `reconcileOne` in `GitPushJournalService` and `reconcileOperation` in `MaintenanceJobsService` public.
+  - Exported `MaintenanceJobsService` from `MaintenanceModule` and imported into `AdminModule`.
+- Verification evidence:
+  - Backend unit test suite: 19 suites / 133 tests passed in 41.6s.
+  - Focused spec `admin.service.spec.ts`: 8/8 passed.
+  - Workspace typecheck (`corepack pnpm typecheck`) passed cleanly.
+  - Workspace lint (`corepack pnpm lint`) passed with 0 errors, 0 warnings.
+  - `git diff --check` passed.
+  - Pushed to `origin/thviet`.
+
+## T-MAINTENANCE-PURGE-JOURNAL-RETAIN — commit 027751b, pushed to origin/thviet
+
+- Source: `thviet` and `origin/thviet` point to exact SHA `027751b`, commit `test(maintenance): assert purge retains expired storage while merge journal needs reconciliation`.
+- Scope: P4/P6 invariant in `backend/test/maintenance-cleanup.e2e-spec.ts`.
+- Behavior verified:
+  - `RepositoryPurgeService.purgeDue()` refuses to purge soft-deleted repositories that have an active or unresolved merge operation (`NEEDS_RECONCILIATION`), preserving filesystem bare Git storage and repository records.
+  - Once the blocking journal transitions to a terminal state (`FAILED`), subsequent purge invocations successfully purge the repository and delete the storage directory.
+- Verification evidence:
+  - Isolated PostgreSQL container `codeforge-merge-crash-test-20261025` on loopback port 49588 (`code_forge_test`).
+  - `jest test/maintenance-cleanup.e2e-spec.ts`: 3/3 passed in 5.92s.
+  - `jest test/pull-requests.e2e-spec.ts`: 7 passed, 1 skipped in 42.87s.
+  - Full backend unit suite: 19 suites / 132 tests passed in 44.93s.
+  - Workspace typecheck (`corepack pnpm typecheck`): 0 errors.
+  - Workspace lint (`corepack pnpm lint`): 0 errors, 0 warnings.
+  - `git diff --check`: 0 errors.
+  - Pushed to `origin/thviet`.
+
+## T-GIT-HTTP-TIMER-OPEN-HANDLE — commit 1b0901b, pushed to origin/thviet
+
+- Source: `thviet` and `origin/thviet` point to exact SHA `1b0901b`, commit `fix(git-http): unref process timer and clear on stop to prevent open handles`.
+- Scope: Backend Git HTTP streaming handler in `backend/src/repositories/git-http.service.ts`.
+- Root cause diagnosis:
+  - When Git push operations fail or trigger reconciliation in E2E tests (e.g. `push-audit.e2e-spec.ts`), `git-http.service.ts` calls `stop()`.
+  - Previously, `stop()` set `stopped = true` but did not invoke `cleanup()`, leaving the 60,000 ms process timeout active in the Node.js event loop without `.unref()`.
+  - This caused Jest to hang with `Jest did not exit one second after the test run has completed` after running `push-audit.e2e-spec.ts`.
+- Fix applied:
+  - Invoked `cleanup()` inside `stop()` to immediately cancel the timer and detach abort listeners.
+  - Called `timer.unref()` on timer creation so the timer never prevents the process from cleanly exiting.
+- Verification evidence:
+  - `push-audit.e2e-spec.ts` executed without `--forceExit` and exited cleanly in 11.29s (exit code 0).
+  - All 9 backend E2E suites verified against isolated PostgreSQL container on loopback port 49588: 39 passed, 2 skipped (Windows process harness).
+  - `git-http.service.spec.ts`: 8/8 passed.
+  - Full backend unit suite: 19 suites / 132 tests passed in 38.11s.
+  - `corepack pnpm typecheck`: 0 errors.
+  - `corepack pnpm lint`: 0 errors, 0 warnings.
+  - `git diff --check`: 0 errors.
+  - Pushed to `origin/thviet`.
+
+## T-AGY-ADMIN-RESPONSIVE — plan commit 24e8d85; implementation timed out
+
+- Scope: admin responsive/accessibility task in `docs/agy-plans/2026-10-25-admin-frontend-responsive.md`; local Antigravity skill created at `C:\Users\ADmin\.gemini\config\skills\codeforge-admin-responsive\SKILL.md`.
+- Plan commit `24e8d85` was pushed to `origin/thviet`. Implementation ran in isolated worktree `E:\Prj1-worktrees\agy-admin-responsive`, branch `codex/agy-admin-responsive`, using Gemini 3.8 Flash Medium with permission bypass disabled.
+- Bridge job `102280b4ddec421c82a3b6f2613d9673` terminated as `FAILED` with `agy timed out after 300.0s`. The assigned worktree was checked after termination and had no changed files. No retry was made.
+- The user later said AGY had been started to code; no separate job or file changes were observable in the assigned worktree at the next check. Do not start another job against this worktree until its state is rechecked.
+- Next safe action: continue the user-requested backend tasks; retain this AGY task as timed out, not accepted.
+
+## T-PUSH-PURGE-UNRESOLVED-JOURNAL — commit 6f09ddf, local integration verified
+
+- Worktree: `E:\Prj1-worktrees\push-purge-acceptance`; agent commit `f416fec` was reviewed and cherry-picked onto `thviet` as `6f09ddf`.
+- Owned path: `backend/test/maintenance-cleanup.e2e-spec.ts` only. The test proves purge preserves a deleted repository and Git storage while either a `PENDING` or `NEEDS_RECONCILIATION` push journal remains unresolved, and purges only after both become terminal.
+- Agent verification: focused maintenance E2E 1 suite / 4 tests, backend typecheck, and `git diff --check` passed. Test used the dedicated loopback `code_forge_test` DB with a random schema and test-owned temporary Git directory; no `.env`, other DB, container, or volume was touched.
+- Leader rerun after integration: `corepack pnpm --filter backend exec jest --config test/jest-e2e.json --runInBand test/maintenance-cleanup.e2e-spec.ts` passed 1 suite / 4 tests (exit 0). Expected warning logs show purge deferral while merge/push journals are unresolved.
+- Not pushed yet. Next: include this code commit in the verified backend batch after the remaining review/test commits pass.
+
+## T-MERGE-OWNER-LOCK-RACE — commit 364f854, local integration verified
+
+- Worktree: `E:\Prj1-worktrees\merge-lock-user-state`; agent commit `545db83` was reviewed and cherry-picked onto `thviet` as `364f854`.
+- Owned path: `backend/test/pull-requests.e2e-spec.ts` only. The test holds the repository advisory lock, waits until a real merge request is queued, locks the owner, then releases the lock and verifies the merge is rejected with HTTP 403, refs unchanged, PR still OPEN, and no merge operation or success audit.
+- Agent verification: focused E2E passed (1 test; 8 skipped by test-name filter), backend typecheck, lint, and `git diff --check` passed. Test used only the dedicated loopback test database with a random schema and test-owned temporary Git path; no `.env` or credentials were printed/persisted.
+- Leader rerun after integration: focused owner-lock E2E printed 1 passed / 8 intentionally skipped; an explicit `JEST_EXIT=0` was captured. The surrounding PowerShell wrapper still returned exit 1 during cleanup, so wrapper status is recorded as a harness issue and not as a clean command exit.
+- The root rerun confirms the test body passes. The wrapper cleanup status caveat above remains; agent run had a clean exit. Not pushed yet.
+
+## T-PRE-RECEIVE-BRANCH-LIMIT — commit 89962e3, local integration
+
+- Worktree: `E:\Prj1-worktrees\pre-receive-branch-limit`; agent commit `52d09e9` was reviewed and cherry-picked onto `thviet` as `89962e3`.
+- Owned path: `backend/src/repositories/pre-receive-hook.spec.ts` only. The test builds 999 branches, verifies creation of branch 1,000 is accepted, then verifies branch 1,001 is rejected and the ref set is unchanged.
+- Verification: focused hook spec 5/5, backend typecheck, lint, and `git diff --check` passed; an independent read-only review found no actionable finding. No database/container used.
+- Not pushed yet; root will rerun focused unit verification in the integrated tree.
+
+## T-PUSH-CHILD-SUCCESS-PROOF — commit 8d9caa9, local integration
+
+- Worktree: `E:\Prj1-worktrees\issue5-partial-push-audit`; agent commit `7a9ca90` was reviewed and cherry-picked onto `thviet` as `8d9caa9`.
+- Scope: `git-http.service.ts` and its spec, `git-push-journal.service.ts` and its spec. Receive-pack completion/audit now requires a durable child-success marker; failed, unknown, and legacy rows without that proof remain unresolved and fail-closed. A retryable reconciliation error preserves the child-outcome evidence.
+- Verification in agent worktree: 2 focused unit suites / 37 tests; backend typecheck, lint, and `git diff --check` passed. Independent static review found no actionable finding.
+- Leader integrated rerun: `push-audit.e2e-spec.ts` passed 1/1 with explicit `JEST_EXIT=0` against the dedicated loopback test DB. Full backend unit suite also passed 19 suites / 154 tests; backend typecheck and lint passed.
+
+## T-PURGE-NEEDS-ONLY-REGRESSION — commit 370a6a7, local integration
+
+- Worktree: `E:\Prj1-worktrees\purge-needs-only`; agent commit `0e7c729` was reviewed and cherry-picked onto `thviet` as `370a6a7`.
+- Owned path: `backend/test/maintenance-cleanup.e2e-spec.ts` only. This closes the review gap by isolating `NEEDS_RECONCILIATION` as the only unresolved push journal, proving purge retains the repository/storage, then terminalizing the journal and proving purge proceeds.
+- Static verification: Prisma client generation, backend typecheck/lint, direct ESLint, and diff-check passed; independent review had identified the gap, and the revised test covers it.
+- Leader integrated rerun: `maintenance-cleanup.e2e-spec.ts` passed 4/4 with explicit `JEST_EXIT=0`; expected warnings show purge is deferred while journals remain unresolved. Not pushed yet.
+
+## T-PUSH-DELETE-RACE — commit c5bf02a, local integration verified
+
+- Worktree: `E:\Prj1-worktrees\push-delete-race`; agent commit `c5882cd` was reviewed and cherry-picked onto `thviet` as `c5bf02a`.
+- Owned path: `backend/test/repositories.e2e-spec.ts` only. A valid receive-pack is paused in pre-receive, DELETE is observed waiting on the same repository advisory lock, push completion/audit/ref are checked before deletion, and a subsequent push is denied with refs/audit unchanged.
+- Verification: focused E2E passed 1 test / 13 intentionally skipped; backend typecheck, lint, and `git diff --check` passed. A read-only review found no actionable finding.
+- Test-harness caveat: two earlier E2E setup attempts may have left empty random `repo_test_*` schemas in the dedicated test database. Their names/ownership were not captured, so none were deleted. Application data and Docker volumes were not touched.
+- Not pushed yet.
+
+## T-AUTH-LOGOUT-REFRESH-RACE — P2 finding, remediation in progress
+
+- Read-only auth review found that if refresh rotates an active token before a concurrent logout processes the old token, current logout revokes only the old row and can leave the new session active in the same family.
+- Root verified the code path in `AuthService.refresh()` and `logout()`; this is a security finding, not yet a runtime reproduction.
+- Remediation/test task assigned in an isolated worktree: serialize logout with refresh on the user-row lock; revoke the token family associated with the supplied token; add deterministic service and E2E regression coverage.
+- Root integrated implementation and tests as `6d8c827`/`da020f9`; agent unit suite 11/11, backend typecheck/lint and diff-check passed. The 19-suite backend unit run now passes 156/156; backend typecheck and lint also pass on integrated `thviet`.
+- Root E2E found the fixture's raw node `pg` connection ignored Prisma's `schema=` option; this was corrected. Final serial rerun remained 8/9: refresh queued behind the user-row barrier, but logout did not appear as a second waiter and both handlers emitted sanitized errors. The old waiter-count variant is not accepted; agent stopped further DB retries.
+- Independent review found the E2E setup lacked a guard against non-loopback/non-`_test` databases. The isolated follow-up adds a guard for both URLs and validates they target the same loopback test DB; backend typecheck, file lint and diff-check pass. It remains uncommitted in `E:\Prj1-worktrees\logout-refresh-family`.
+- Independent security review found no confirmed production defect in the family-revocation fix, but confirmed the test observer cannot attribute connections from one shared Prisma pool. A separate test-only real-Postgres `AuthService` concurrency E2E with two uniquely named clients is in progress; no DB run starts until the current bootstrap E2E finishes.
+- Not accepted until E2E passes; production fix is present locally on `thviet`, not pushed.
+
+## T-AGY-ADMIN-RESPONSIVE — correction pending accessibility review
+
+- AGY reported success in `E:\Prj1-worktrees\agy-admin-responsive` with only the three planned frontend files changed. Root reran frontend lint/typecheck and Playwright (4/4) successfully at 1280×800 and 375×812; `git diff --check` passed.
+- Independent review found a screen-reader semantics gap: narrow CSS uses `display:none` on the only table header row while visible labels are CSS-generated. The change is not accepted yet.
+- A bounded corrective AGY job was started in the same worktree with `dangerously_skip_permissions=false`, same three-file ownership and no commit/push permission; job id `1ac37ca652584bb4acc8b1f3` completed without fixing the issue. Current diff still has `display:none` and tests do not assert accessible column headers. Per user preference, Codex provided a precise prompt for the user to send; no further AGY job was dispatched. Not accepted/integrated.
+
+## T-STORAGE-RECOVERY-E2E-ASSERTION — commit 71a0c48, local integration
+
+- Independent static review found the recovery E2E asserted the recreated Git `HEAD` but omitted the repository/API `defaultBranch` metadata.
+- Added `defaultBranch: 'main'` to both response and database assertions in `backend/test/repositories.e2e-spec.ts`; integrated as `71a0c48` on `thviet`.
+- `git diff --check` passed in the agent worktree. Root reran `repositories.e2e-spec.ts -t "serializes completed push before missing-storage recovery"` serially; 1 passed, 14 intentionally skipped, exit 0. It verifies the push journal/audit/ref are durable before storage loss, recovery waits behind the repo lock, API/DB retain default branch `main`, generation increments 0→1, and recreated Git HEAD is `refs/heads/main`.
+
+## T-ADMIN-BOOTSTRAP-IDEMPOTENCE — local integration verified
+
+- Read-only security review of `0587f3f` found no secret-output or privilege-promotion defect. Password is read from stdin, hash is Argon2id, and audit mutation is transactional.
+- Remaining low-severity coverage gap: invoking bootstrap for an account already ADMIN should prove no password/state/audit mutation on repeat.
+- A test-only E2E was added in commit `4b43f71` (`backend/test/admin-bootstrap.e2e-spec.ts` only), after redaction commit `19a908c`. The agent's first harness attempt used the wrong test DB username and failed before schema creation; after correcting it to the dedicated `code_forge` user, agent and leader each verified the suite 4/4 on loopback `code_forge_test`. Password input remains stdin-only, repeated bootstrap leaves role/status/password and audit unchanged. No external DB or Docker volume was touched.
+
+## T-AUTH-SERVICE-CONCURRENCY-E2E — commit d7435ca, first integrated run failed
+
+- Replaced the unreliable shared HTTP-pool waiter observation with a separate real-PostgreSQL `AuthService` E2E using independently named Prisma clients, per-operation barrier waiter checks, and a loopback `_test` guard.
+- Test-only commit `d7435ca` adds `backend/test/auth-session-concurrency.e2e-spec.ts`; static typecheck, direct ESLint, and file diff-check passed.
+- Leader's first focused run failed to observe `auth-refresh-*` as a waiter. A second bounded diagnostic run confirmed app name and schema identity, then showed PostgreSQL reports the blocked refresh connection as `state=idle`, `wait_event_type=Lock`, with the barrier PID in `pg_blocking_pids`. The `state='active'` predicate was too strict. A one-line observer correction (remove that predicate, keep app name/lock/barrier checks) is in progress; one targeted run and then the full auth suite are the remaining gates.
+
+## T-RENDER-NEON-P1001 — local configuration audit
+
+- Read-only audit confirms the API image installs Git, copies built output and Prisma assets, runs non-root and binds `0.0.0.0:$PORT`; migration image contains Prisma CLI/schema and invokes `prisma migrate deploy`.
+- Prisma runtime `DATABASE_URL` is pooled; `DATABASE_URL_UNPOOLED` is direct for migrations and session advisory locks. No tracked Render blueprint was found; dashboard settings are not verified.
+- Render P1001 root cause remains unknown. Local DNS/TCP success does not prove Render connectivity. Safe next diagnostic: enable the existing sanitized `DATABASE_CONNECTIVITY_DIAGNOSTICS=true` on the exact deployed release and compare bounded DNS/TCP probe results with Prisma startup logs. No secrets, deployment, or external mutation occurred.
+
+## T1 P4 gap inventory — snapshot contract and unrelated histories
+
+- Read-only inventory compared current PR service/test behavior against the acceptance checklist and found two specific public-contract gaps, not confirmed product defects: (1) snapshot identity is asserted for commits/files but not diff, and stale snapshot subrequests are not all tested after a ref advance; (2) `NO_MERGE_BASE` is covered by Git-storage unit tests but not the PR API contract.
+- Snapshot test task is in progress in isolated worktree `E:\Prj1-worktrees\pr-snapshot-contract`, owned file `backend/test/pull-requests.e2e-spec.ts`. The unrelated-history test should follow sequentially because it owns the same file and needs the same DB slot.
+
+## T-MERGE-STALE-VERSION-QUEUE — commits 736c108, 9774bf9, ebd2816; local integration verified
+
+- Worktree: `E:\Prj1-worktrees\merge-stale-version-lock-queue`; added a barrier-based E2E where an owner PATCH and merge carrying the old version queue on the same repository lock. The test observes both waiters before release and asserts PATCH v2 wins, merge returns `409 STALE_COMPARE`, refs remain unchanged, PR stays OPEN, and no merge operation/audit is created.
+- Root first rerun exposed an invalid owner slug in the fixture (404); corrected in `ebd2816`. Cleanup now unlocks and awaits both started requests on failure.
+- Leader rerun after the fix: focused E2E passed 1 test / 9 intentionally skipped, `JEST_EXIT=0`, against the dedicated loopback test database. No `.env` read; random schema/temp Git storage were test-owned.
+- Not pushed yet.
+
+## T-AGY-ADMIN-RESPONSIVE — corrected accessibility fix accepted locally
+
+- AGY correction worktree `E:\Prj1-worktrees\agy-admin-responsive` changed only the three allowed paths: `frontend/src/app/admin/admin.module.css`, `frontend/src/app/admin/page.tsx`, and `frontend/test/admin-accessibility.spec.ts`.
+- The mobile table header row now uses a clipped visually-hidden pattern instead of `display:none`; native `<table>`, `<caption>`, and `<th scope="col">` semantics remain. Each of Users, Repositories, and Audit has five accessible column-header assertions; mobile cells retain visible `data-label` values and the tests check button bounds and horizontal overflow.
+- Independent review found no API, authorization, mutation, or source-content exposure changes. An initial full browser run failed once at the existing narrow dialog focus-return sequence (`Khóa bob?`); isolated narrow rerun passed, then the full 4-test suite passed twice including a root integrated rerun.
+- Integrated on `thviet` as commit `af80826` (`fix(admin): preserve mobile table headers for screen readers`). Root verified frontend lint, typecheck, Playwright 4/4 at 1280×800 and 375×812, and `git diff --check`. Not pushed yet.
+
+## T-AUTH-LOGOUT-REFRESH-RACE — deterministic test acceptance in agent worktree
+
+- Agent commit `3dd7e97` (`test(auth): make refresh logout concurrency acceptance deterministic`) changes only the auth E2E tests: direct-service concurrency uses separate named Prisma clients; both auth suites fail closed unless their PostgreSQL URLs are same-database loopback `*_test` URLs; redundant `.env` loading was removed; only the unreliable shared-pool waiter-count HTTP case was removed while sequential refresh/logout HTTP coverage remains.
+- Agent verification: direct-service concurrency E2E 1/1 and HTTP auth E2E 8/8, run serially on dedicated test database with a process-only test JWT secret; backend typecheck, lint for both files, diff-check and test-safety security review passed.
+- Commit is isolated in `E:\Prj1-worktrees\auth-e2e-acceptance`; root integration review/rerun still pending. No push.
+
+## T1 P4 PR snapshot and unrelated-history tests — agent implementation, E2E running
+
+- Agent commits `e711c94`, `f99c49b`, and `2b4b4a5` in `E:\Prj1-worktrees\pr-snapshot-contract` add compare snapshot consistency/stale-subrequest coverage and unrelated-history `NO_MERGE_BASE` API coverage in `backend/test/pull-requests.e2e-spec.ts`; the snapshot test has an explicit 60-second timeout.
+- Agent reports backend typecheck and diff-check pass; focused ESLint matches three diagnostics already present on the baseline. No DB tests had run at handoff.
+- After auth released the serial DB slot, the agent was assigned focused snapshot and unrelated-history E2Es, one after another, against the dedicated loopback test DB. Wait for exact exit codes and independent review before integration. No push.
+
+## T-MAINTENANCE-GRACE-GAP — existing coverage verified
+
+- Agent inspected `maintenance-jobs.service.spec.ts` and `maintenance-cleanup.e2e-spec.ts`; both requested 120-second cutoff precision and immediate `NEEDS_RECONCILIATION` pickup coverage already exist on `thviet`.
+- Focused maintenance unit suite passed 16/16. No duplicate changes were made. E2E remains covered by the existing test; no additional run was needed for this inventory task.
+
+## T1-AUTH-RACE — integrated root rerun passed
+
+- Agent change integrated on `thviet` as `b1c2c2a`. Root reran `auth-session-concurrency.e2e-spec.ts` and `auth.e2e-spec.ts` sequentially on the dedicated loopback `code_forge_test` database: concurrency 1/1 and HTTP auth 8/8 passed, each with exit 0.
+- Root backend typecheck and backend lint also passed after integration. Secrets were process-scoped and not printed; no `.env`/database outside the dedicated loopback test DB was targeted. This closes the race-test acceptance for the current candidate; production implementation remains `6d8c827`/`da020f9`.
+
+## T1-PR-SNAPSHOT / T1-NO-MERGE-BASE — integrated root reruns passed
+
+- Agent implementation was independently reviewed with no actionable finding and integrated as `c380bac`, `52face3`, `22d94a5`, `6c3a6c3` on `thviet`.
+- The first broad file run exposed a test fixture error in orphan branch setup (`git rm -rf .` against an empty index). The exact test-only correction removed that unnecessary command; no production code changed.
+- Root reran the two named cases serially on the dedicated loopback `code_forge_test` DB: snapshot/stale subrequests 1/1 and unrelated history `409 NO_MERGE_BASE` 1/1; 10 other cases intentionally skipped, process exit 0. Test assertions verify stale snapshot ref consistency and no unintended refs/PR/merge-operation/audit/push-operation effects.
+- Agent static verification: backend typecheck and diff-check pass; focused ESLint has only three diagnostics verified identical to baseline. No push.
+
+## T2-ADMIN-STATUS / T2-ADMIN-ROUTE-GUARDS — locally integrated
+
+- Agent added `admin.service.spec.ts` coverage for preventing generic reactivation of a deleted repository; integrated as `4d0f6a3`. Root focused service suite passed 6/6.
+- Agent added a new controller metadata spec for class-level access-token/admin guards and origin guards on all three mutations; integrated as `7bbe25f`. Root focused controller suite passed 4/4 and the new spec's lint/diff-check passed.
+- Both are test-only; no production/controller authorization code changed. Not pushed.
+
+## T3-BACKEND-E2E-REGRESSION — integrated local backend gate passed
+
+- Hardened test teardown in `backend/test/repository-lock.e2e-spec.ts`: wait boundedly for child close, terminate detached process groups where applicable, preserve Git test storage if closure is unconfirmed, and still attempt pool/monitor cleanup. Added missing push-journal methods to test doubles. Repository lifecycle E2Es now delete only the two repository IDs created by their race fixtures, preventing quota leakage into later cases.
+- Added private PR read-isolation assertions in `backend/test/pull-requests.e2e-spec.ts`: anonymous and authenticated non-members receive hidden 404s on list, detail, compare, commits, files, and diff, with no private markers in the body. Independent read-only review found no actionable issue.
+- On the dedicated loopback `code_forge_test` DB, root ran lock E2E (2 passed, 1 POSIX-only test skipped on Windows), repository E2E (15/15), then the complete backend E2E suite serially (10/10 suites, 49 passed, 2 skipped, exit 0; Jest exited cleanly). Backend unit passed 20/20 suites / 161 tests; backend lint, typecheck, build and `git diff --check` passed.
+- Both Docker images built from this tree. API image smoke confirmed Node 24, Git 2.39.5, built entry point and Prisma schema; migration image smoke confirmed Prisma CLI/client 6.19.3 and Linux engine. No migrations were executed by this smoke.
+- This closes the local backend regression subgate only. Hosted CI has not run on the new integrated candidate; cloud Render/Neon smoke and final documentation/handoff remain open. No secrets were displayed or committed; the only database target was the dedicated loopback test DB.

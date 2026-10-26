@@ -335,6 +335,24 @@ describe('GitStorageService with real Git', () => {
     expect(await storage.branchSha(key, 'main')).toBe(base);
   });
 
+  it('allows a merge candidate containing a file exactly at the configured file quota', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'main', true, 'Quota');
+    const git = (args: string[], input?: string) => execFileSync('git', ['--git-dir', join(root, key), ...args], { encoding: 'utf8', input }).trim();
+    const base = git(['rev-parse', 'refs/heads/main']);
+    const maxFileBytes = 1024;
+    const blob = git(['hash-object', '-w', '--stdin'], 'x'.repeat(maxFileBytes));
+    const tree = git(['mktree', '-z'], `100644 blob ${blob}\tboundary.bin\0`);
+    const source = git(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', tree, '-p', base, '-m', 'At file quota']);
+    git(['update-ref', 'refs/heads/feature/quota-boundary', source]);
+    const candidate = await storage.createMergeCandidate(key, 'main', base, source, 1);
+    const limited = new GitStorageService({ getOrThrow: (name: string) => name === 'GIT_STORAGE_PATH' ? root
+      : name === 'MAX_FILE_BYTES' ? maxFileBytes : 32 * 1024 } as unknown as ConfigService);
+
+    await expect(limited.assertMergeCandidateQuota(key, candidate)).resolves.toBeUndefined();
+    expect(await storage.branchSha(key, 'main')).toBe(base);
+  });
+
   it('rejects a merge candidate whose reachable objects exceed the repository quota', async () => {
     const key = `${randomUUID()}.git`;
     await storage.create(key, 'main', true, 'Quota');

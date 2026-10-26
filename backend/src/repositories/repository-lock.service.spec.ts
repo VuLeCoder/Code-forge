@@ -6,6 +6,33 @@ import { RepositoryLockService } from './repository-lock.service';
 describe('RepositoryLockService', () => {
   afterEach(() => jest.restoreAllMocks());
 
+  it.each(['statement_timeout', 'pg_advisory_lock'])('removes the socket listener and destroys the client when %s setup fails', async (failingQuery) => {
+    const client = new EventEmitter() as EventEmitter & Partial<PoolClient>;
+    const queryError = new Error('statement timed out');
+    let listenerCountAtFailure: number | undefined;
+    client.query = jest.fn((sql: string) => {
+      if (sql.includes(failingQuery)) {
+        listenerCountAtFailure = client.listenerCount('error');
+        return Promise.reject(queryError);
+      }
+      return Promise.resolve({ rows: [] });
+    }) as never;
+    client.release = jest.fn();
+    jest.spyOn(Pool.prototype, 'connect').mockReturnValue(Promise.resolve(client as PoolClient) as never);
+    jest.spyOn(Pool.prototype, 'end').mockReturnValue(undefined);
+
+    const config = { getOrThrow: () => 'postgresql://unused:unused@localhost/unused_test' } as unknown as ConfigService;
+    const locks = new RepositoryLockService(config);
+
+    await expect(locks.acquire('repository')).rejects.toBe(queryError);
+
+    expect(listenerCountAtFailure).toBe(1);
+    expect(client.listenerCount('error')).toBe(0);
+    expect(client.release).toHaveBeenCalledTimes(1);
+    expect(client.release).toHaveBeenCalledWith(true);
+    await locks.onModuleDestroy();
+  });
+
   it('handles repeated client errors until the lost connection is released', async () => {
     const client = new EventEmitter() as EventEmitter & Partial<PoolClient>;
     client.query = jest.fn().mockResolvedValue({ rows: [] });

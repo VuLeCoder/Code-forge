@@ -8,7 +8,7 @@ describe('pre-receive branch protection', () => {
   let bare: string;
   let work: string;
   const hook = join(__dirname, 'pre-receive-hook.cjs');
-  const git = (args: string[]) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+  const git = (args: string[], input?: string) => execFileSync('git', args, { encoding: 'utf8', input }).trim();
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'code-forge-hook-test-'));
@@ -95,5 +95,37 @@ describe('pre-receive branch protection', () => {
     const rejected = run(zero, first, `refs/heads/${branchOverLimit}`, false);
     expect(rejected.status).toBe(1);
     expect(rejected.stderr).toContain('branch vượt quá 255 byte');
+  });
+
+  it('accepts a push that reaches 1,000 branches and rejects branch 1,001 before ref movement', () => {
+    const first = git(['-C', work, 'rev-parse', 'HEAD^']);
+    const second = git(['-C', work, 'rev-parse', 'HEAD']);
+    const zero = '0'.repeat(first.length);
+    const existingBranchUpdates = Array.from({ length: 998 }, (_, index) =>
+      `update refs/heads/fixture-${String(index + 1).padStart(4, '0')} ${first}`).join('\n');
+    git(['--git-dir', bare, 'update-ref', '--stdin'], `${existingBranchUpdates}\n`);
+
+    const refsBeforeBoundaryPush = git(['--git-dir', bare, 'for-each-ref', '--sort=refname', '--format=%(refname)', 'refs/heads/'])
+      .split('\n').filter(Boolean);
+    expect(refsBeforeBoundaryPush).toHaveLength(999);
+
+    const branchAtLimit = 'refs/heads/feature/branch-1000';
+    const accepted = run(zero, second, branchAtLimit, false);
+    expect(accepted.status).toBe(0);
+
+    // Git moves refs only after every pre-receive hook accepts the update.
+    git(['--git-dir', bare, 'update-ref', branchAtLimit, second]);
+    const refsAtLimit = git(['--git-dir', bare, 'for-each-ref', '--sort=refname', '--format=%(refname)', 'refs/heads/'])
+      .split('\n').filter(Boolean);
+    expect(refsAtLimit).toHaveLength(1000);
+
+    const branchOverLimit = 'refs/heads/feature/branch-1001';
+    const rejected = run(zero, second, branchOverLimit, false);
+    expect(rejected.status).toBe(1);
+    expect(rejected.stderr).toContain('repository vượt giới hạn 1000 branch');
+    const refsAfterRejectedPush = git(['--git-dir', bare, 'for-each-ref', '--sort=refname', '--format=%(refname)', 'refs/heads/'])
+      .split('\n').filter(Boolean);
+    expect(refsAfterRejectedPush).toEqual(refsAtLimit);
+    expect(refsAfterRejectedPush).not.toContain(branchOverLimit);
   });
 });

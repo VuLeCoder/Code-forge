@@ -73,3 +73,46 @@ describe('RepositoriesService Git authorization recheck', () => {
     expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('RepositoriesService public clone URLs', () => {
+  it('uses the configured API base path and emits exactly one slash before Git routes', async () => {
+    const repository = {
+      id: 'repository-public-url',
+      ownerId: 'owner-1',
+      name: 'CodeForge',
+      description: null,
+      visibility: 'PUBLIC',
+      status: 'ACTIVE',
+      deletedAt: null,
+      storageGeneration: 0,
+      defaultBranch: 'main',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      owner: { username: 'VuCoder' },
+    };
+    const findMany = jest.fn().mockResolvedValue([repository]);
+    const db = { repository: { findMany } };
+    const config = {
+      getOrThrow: jest.fn((key: string) => {
+        if (key !== 'GIT_PUBLIC_BASE_URL') throw new Error(`Unexpected config key: ${key}`);
+        return 'https://api.codeforge.test/api/v1/';
+      }),
+    };
+    const service = new RepositoriesService(
+      db as never,
+      config as never,
+      new RepositoryPolicy(),
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+
+    const result = await service.listPublic();
+
+    expect(result.repositories).toHaveLength(1);
+    expect(result.repositories[0]?.cloneUrl).toBe('https://api.codeforge.test/api/v1/git/VuCoder/CodeForge.git');
+    expect(config.getOrThrow).toHaveBeenCalledWith('GIT_PUBLIC_BASE_URL');
+    expect(findMany).toHaveBeenCalledTimes(1);
+  });
+});

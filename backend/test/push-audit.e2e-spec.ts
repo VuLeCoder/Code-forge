@@ -187,6 +187,84 @@ describe('Git push audit HTTP + PostgreSQL + Git', () => {
     expect(JSON.stringify(successAudits[0]!.details)).not.toContain(readOnlyToken.secret);
     expect(JSON.stringify(successAudits[0]!.details)).not.toContain(expectedSha);
 
+    // One receive-pack updates an existing branch and creates another branch.
+    await git(ownerToken.secret, ['-C', work, 'switch', '-c', 'feature/multi-ref-created']);
+    await git(ownerToken.secret, ['-C', work, 'switch', 'feature/audited-push']);
+    await writeFile(join(work, 'multi-ref-update.txt'), 'update one ref while creating another\n');
+    await git(ownerToken.secret, ['-C', work, 'add', 'multi-ref-update.txt']);
+    await git(ownerToken.secret, ['-C', work, 'commit', '-m', 'Update first ref']);
+    const updatedFirstRefSha = (await git(ownerToken.secret, ['-C', work, 'rev-parse', 'HEAD'])).stdout.trim();
+    await git(ownerToken.secret, ['-C', work, 'push', 'origin', 'feature/audited-push', 'feature/multi-ref-created']);
+
+    const refsAfterMultiRefPushOutput = (await git(ownerToken.secret,
+      ['--git-dir', bare, 'for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads/'])).stdout.trim();
+    const refsAfterMultiRefPush = Object.fromEntries(refsAfterMultiRefPushOutput.split('\n').map((line) => {
+      const [name, sha] = line.split(' ');
+      return [name!, sha!];
+    }));
+    expect(refsAfterMultiRefPush['refs/heads/feature/audited-push']).toBe(updatedFirstRefSha);
+    expect(refsAfterMultiRefPush['refs/heads/feature/multi-ref-created']).toBe(expectedSha);
+
+    const afterMultiRefOperations = await db.$queryRaw<{
+      operation_id: string; status: string; changed_ref_count: number | null;
+    }[]>`SELECT operation_id, status, changed_ref_count FROM git_push_operations
+      WHERE repository_id = ${repository.id}::uuid ORDER BY created_at ASC`;
+    expect(afterMultiRefOperations).toHaveLength(2);
+    const multiRefOperation = afterMultiRefOperations.find(({ operation_id }) => operation_id !== operation.operation_id);
+    expect(multiRefOperation).toMatchObject({ status: 'COMPLETED', changed_ref_count: 2 });
+    expect(await db.$queryRaw<{ count: bigint }[]>`SELECT COUNT(*) AS count FROM audit_logs
+      WHERE action = 'GIT_PUSH_COMPLETED' AND details->>'repositoryId' = ${repository.id}`)
+      .toEqual([{ count: 2n }]);
+
+    // A single push also counts both a branch update and deletion as ref changes.
+    await writeFile(join(work, 'delete-ref-update.txt'), 'update the retained branch and delete another ref\n');
+    await git(ownerToken.secret, ['-C', work, 'add', 'delete-ref-update.txt']);
+    await git(ownerToken.secret, ['-C', work, 'commit', '-m', 'Update branch while deleting another']);
+    const updatedRetainedRefSha = (await git(ownerToken.secret, ['-C', work, 'rev-parse', 'HEAD'])).stdout.trim();
+    await git(ownerToken.secret, ['-C', work, 'push', 'origin', 'feature/audited-push', ':feature/multi-ref-created']);
+
+    const refsAfterUpdateAndDeleteOutput = (await git(ownerToken.secret,
+      ['--git-dir', bare, 'for-each-ref', '--format=%(refname) %(objectname)', 'refs/'])).stdout.trim();
+    const refsAfterUpdateAndDelete = Object.fromEntries(refsAfterUpdateAndDeleteOutput.split('\n').map((line) => {
+      const [name, sha] = line.split(' ');
+      return [name!, sha!];
+    }));
+    expect(refsAfterUpdateAndDelete['refs/heads/feature/audited-push']).toBe(updatedRetainedRefSha);
+    expect(refsAfterUpdateAndDelete['refs/heads/feature/multi-ref-created']).toBeUndefined();
+
+    const afterDeleteOperations = await db.$queryRaw<{
+      operation_id: string; status: string; changed_ref_count: number | null;
+    }[]>`SELECT operation_id, status, changed_ref_count FROM git_push_operations
+      WHERE repository_id = ${repository.id}::uuid ORDER BY created_at ASC`;
+    expect(afterDeleteOperations).toHaveLength(3);
+    const updateDeleteOperation = afterDeleteOperations.find(({ operation_id }) =>
+      !afterMultiRefOperations.some((previous) => previous.operation_id === operation_id));
+    expect(updateDeleteOperation).toMatchObject({ status: 'COMPLETED', changed_ref_count: 2 });
+    const successAuditsAfterDelete = await db.$queryRaw<{
+      actor_id: string; details: Record<string, unknown>;
+    }[]>`SELECT actor_id, details FROM audit_logs WHERE action = 'GIT_PUSH_COMPLETED'
+      AND details->>'repositoryId' = ${repository.id}`;
+    expect(successAuditsAfterDelete).toHaveLength(3);
+    expect(successAuditsAfterDelete.map(({ details }) => details.operationId).sort()).toEqual(
+      afterDeleteOperations.map(({ operation_id }) => operation_id).sort());
+    const expectedAuditChangeCounts = new Map<string, number>([
+      [operation.operation_id, 1],
+      [multiRefOperation!.operation_id, 2],
+      [updateDeleteOperation!.operation_id, 2],
+    ]);
+    for (const audit of successAuditsAfterDelete) {
+      expect(Object.keys(audit.details).sort()).toEqual(['changedRefCount', 'operationId', 'repositoryId', 'storageGeneration']);
+      expect(audit.actor_id).toBe(owner.id);
+      const operationId = audit.details.operationId as string;
+      expect(expectedAuditChangeCounts.has(operationId)).toBe(true);
+      expect(audit.details.changedRefCount).toBe(expectedAuditChangeCounts.get(operationId));
+      expect(JSON.stringify(audit.details)).not.toContain(ownerToken.secret);
+      expect(JSON.stringify(audit.details)).not.toContain(readOnlyToken.secret);
+      expect(JSON.stringify(audit.details)).not.toContain(expectedSha);
+      expect(JSON.stringify(audit.details)).not.toContain(updatedFirstRefSha);
+      expect(JSON.stringify(audit.details)).not.toContain(updatedRetainedRefSha);
+    }
+
     await git(readOnlyToken.secret, ['-C', work, 'switch', '-c', 'feature/rejected-push']);
     await writeFile(join(work, 'rejected.txt'), 'must not be accepted\n');
     await git(readOnlyToken.secret, ['-C', work, 'add', 'rejected.txt']);
@@ -195,7 +273,7 @@ describe('Git push audit HTTP + PostgreSQL + Git', () => {
 
     const auditsAfterRejectedPush = await db.$queryRaw<{ count: bigint }[]>`SELECT COUNT(*) AS count FROM audit_logs
       WHERE action = 'GIT_PUSH_COMPLETED' AND details->>'repositoryId' = ${repository.id}`;
-    expect(auditsAfterRejectedPush[0]!.count).toBe(1n);
+    expect(auditsAfterRejectedPush[0]!.count).toBe(3n);
     const refsAfterRejectedPush = (await git(ownerToken.secret, ['--git-dir', bare, 'for-each-ref', '--format=%(refname) %(objectname)', 'refs/heads/'])).stdout.trim();
     expect(refsAfterRejectedPush).not.toContain('feature/rejected-push');
 
@@ -230,7 +308,7 @@ describe('Git push audit HTTP + PostgreSQL + Git', () => {
       interruptedOperationId = interruptedRows[0]!.operation_id;
       expect(interruptedRows[0]).toMatchObject({ status: 'NEEDS_RECONCILIATION',
         storage_generation: storedRepo.storageGeneration, changed_ref_count: null });
-      expect(interruptedRows[0]!.before_refs).toEqual(actualRefsAfterPush);
+      expect(interruptedRows[0]!.before_refs).toEqual(refsAfterUpdateAndDelete);
       const auditsBeforeReconcile = await db.$queryRaw<{ count: bigint }[]>`SELECT COUNT(*) AS count FROM audit_logs
         WHERE action = 'GIT_PUSH_COMPLETED' AND details->>'repositoryId' = ${repository.id}
           AND details->>'operationId' = ${interruptedOperationId}`;
@@ -243,7 +321,7 @@ describe('Git push audit HTTP + PostgreSQL + Git', () => {
       expect(refsAfterBlockedPush).toBe(refsBeforeBlockedPush);
       const operationsWhileBlocked = await db.$queryRaw<{ count: bigint }[]>`SELECT COUNT(*) AS count FROM git_push_operations
         WHERE repository_id = ${repository.id}::uuid`;
-      expect(operationsWhileBlocked[0]!.count).toBe(2n);
+      expect(operationsWhileBlocked[0]!.count).toBe(4n);
     } finally {
       await admin.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "${triggerName}" ON "${schema}"."audit_logs"`);
       await admin.$executeRawUnsafe(`DROP FUNCTION IF EXISTS "${schema}"."${functionName}"()`);

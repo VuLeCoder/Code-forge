@@ -35,6 +35,7 @@ describe('MaintenanceJobsService PostgreSQL cleanup and purge', () => {
   let db: PrismaClient | undefined;
   let locks: RepositoryLockService | undefined;
   let maintenance: MaintenanceJobsService | undefined;
+  let purgeService: RepositoryPurgeService | undefined;
   let originalUrl: string | undefined;
   let originalUnpooledUrl: string | undefined;
   let originalStorage: string | undefined;
@@ -77,8 +78,8 @@ describe('MaintenanceJobsService PostgreSQL cleanup and purge', () => {
     jest.spyOn(storage, 'cleanupOrphanedTemporaryDirectories').mockResolvedValue(0);
     locks = new RepositoryLockService(config);
     const pushJournal = new GitPushJournalService(db as never, storage, locks);
-    const purge = new RepositoryPurgeService(db as never, storage, locks, pushJournal);
-    maintenance = new MaintenanceJobsService(db as never, locks, storage, purge, pushJournal);
+    purgeService = new RepositoryPurgeService(db as never, storage, locks, pushJournal);
+    maintenance = new MaintenanceJobsService(db as never, locks, storage, purgeService, pushJournal);
   }, 60_000);
 
   afterAll(async () => {
@@ -201,34 +202,235 @@ describe('MaintenanceJobsService PostgreSQL cleanup and purge', () => {
     const repository = await db.repository.create({ data: {
       ownerId: owner.id, name: 'MergeGrace', normalizedName: 'mergegrace', storageKey: `${randomUUID()}.git`,
     } });
+    const bare = join(storageRoot!, repository.storageKey);
+    execFileSync('git', ['init', '--bare', '--quiet', bare], { stdio: 'pipe' });
+    const emptyTree = execFileSync('git', ['--git-dir', bare, 'mktree'], { encoding: 'utf8', input: '', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    const targetSha = execFileSync('git', ['--git-dir', bare, '-c', 'user.name=Maintenance test', '-c',
+      'user.email=maintenance@example.test', 'commit-tree', emptyTree, '-m', 'Merge grace target'],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    const sourceSha = execFileSync('git', ['--git-dir', bare, '-c', 'user.name=Maintenance test', '-c',
+      'user.email=maintenance@example.test', 'commit-tree', emptyTree, '-p', targetSha, '-m', 'Merge grace source'],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    execFileSync('git', ['--git-dir', bare, 'update-ref', 'refs/heads/main', targetSha], { stdio: 'pipe' });
+    execFileSync('git', ['--git-dir', bare, 'update-ref', 'refs/heads/feature/recovery', sourceSha], { stdio: 'pipe' });
     const pullRequest = await db.pullRequest.create({ data: {
       repositoryId: repository.id, number: 1, authorId: owner.id, title: 'Recovery grace',
       sourceBranch: 'feature/recovery', targetBranch: 'main', storageGeneration: repository.storageGeneration,
-      sourceSha: 'a'.repeat(40), targetSha: 'b'.repeat(40),
+      sourceSha, targetSha,
     } });
     const operation = await db.pullRequestMergeOperation.create({ data: {
       operationId: randomUUID(), repositoryId: repository.id, pullRequestId: pullRequest.id, actorId: owner.id,
-      storageGeneration: repository.storageGeneration, expectedSourceSha: pullRequest.sourceSha,
-      expectedTargetSha: pullRequest.targetSha, oldTargetSha: pullRequest.targetSha,
+      storageGeneration: repository.storageGeneration, expectedSourceSha: sourceSha,
+      expectedTargetSha: targetSha, oldTargetSha: targetSha,
       createdAt: new Date(Date.now() - 30_000),
     } });
     const immediateOperation = await db.pullRequestMergeOperation.create({ data: {
       operationId: randomUUID(), repositoryId: repository.id, pullRequestId: pullRequest.id, actorId: owner.id,
-      storageGeneration: repository.storageGeneration, expectedSourceSha: pullRequest.sourceSha,
-      expectedTargetSha: pullRequest.targetSha, oldTargetSha: pullRequest.targetSha,
+      storageGeneration: repository.storageGeneration, expectedSourceSha: sourceSha,
+      expectedTargetSha: targetSha, oldTargetSha: targetSha,
       status: 'NEEDS_RECONCILIATION', errorCode: 'RECONCILIATION_UNAVAILABLE', createdAt: new Date(),
     } });
+    expect(Date.now() - operation.createdAt.getTime()).toBeGreaterThanOrEqual(0);
+    expect(Date.now() - operation.createdAt.getTime()).toBeLessThan(120_000);
+    expect(Date.now() - immediateOperation.createdAt.getTime()).toBeGreaterThanOrEqual(0);
+    expect(Date.now() - immediateOperation.createdAt.getTime()).toBeLessThan(120_000);
 
     await maintenance.runOnce();
     expect((await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId: operation.operationId } }))
       .status).toBe('PENDING');
     expect(await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId: immediateOperation.operationId } }))
-      .toMatchObject({ status: 'NEEDS_RECONCILIATION', errorCode: 'REF_OUTCOME_UNKNOWN' });
+      .toMatchObject({ status: 'FAILED', errorCode: 'REF_NOT_UPDATED' });
 
     await db.pullRequestMergeOperation.update({ where: { operationId: operation.operationId },
       data: { createdAt: new Date(Date.now() - 121_000) } });
     await maintenance.runOnce();
     expect(await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId: operation.operationId } }))
-      .toMatchObject({ status: 'NEEDS_RECONCILIATION', errorCode: 'REF_OUTCOME_UNKNOWN' });
+      .toMatchObject({ status: 'FAILED', errorCode: 'REF_NOT_UPDATED' });
+  });
+
+  it('keeps a cross-type ambiguous merge fail-closed across repeated maintenance runs', async () => {
+    if (!db || !maintenance || !storageRoot) throw new Error('Maintenance test fixture was not initialized.');
+    const owner = await db.user.create({ data: {
+      username: 'CrossTypeOwner', normalizedUsername: 'crosstypeowner',
+      email: 'cross-type-owner@example.test', normalizedEmail: 'cross-type-owner@example.test', passwordHash: 'test-hash',
+    } });
+    const repositoryId = randomUUID();
+    const storageKey = `${repositoryId}.git`;
+    const repository = await db.repository.create({ data: {
+      id: repositoryId, ownerId: owner.id, name: 'CrossType', normalizedName: 'crosstype', storageKey,
+    } });
+    const bare = join(storageRoot, storageKey);
+    execFileSync('git', ['init', '--bare', '--quiet', bare], { stdio: 'pipe' });
+    const git = (args: string[], input = '') => execFileSync('git', ['--git-dir', bare, ...args], {
+      encoding: 'utf8', input, stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    const emptyTree = git(['mktree']);
+    const makeCommit = (message: string, parents: string[] = []) => git([
+      '-c', 'user.name=Maintenance test', '-c', 'user.email=maintenance@example.test', 'commit-tree', emptyTree,
+      ...parents.flatMap((parent) => ['-p', parent]), '-m', message,
+    ]);
+    const baseSha = makeCommit('base');
+    const targetSha = makeCommit('target', [baseSha]);
+    const sourceSha = makeCommit('source', [baseSha]);
+    const candidateSha = makeCommit('ambiguous merge candidate', [targetSha, sourceSha]);
+    git(['update-ref', 'refs/heads/main', candidateSha]);
+    git(['update-ref', 'refs/heads/feature/ambiguous', sourceSha]);
+
+    const pullRequest = await db.pullRequest.create({ data: {
+      repositoryId: repository.id, number: 1, authorId: owner.id, title: 'Ambiguous merge remains fenced',
+      sourceBranch: 'feature/ambiguous', targetBranch: 'main', storageGeneration: repository.storageGeneration,
+      sourceSha, targetSha,
+    } });
+    const pushOperationId = randomUUID();
+    await db.gitPushOperation.create({ data: {
+      operationId: pushOperationId, repositoryId: repository.id, actorId: owner.id,
+      storageGeneration: repository.storageGeneration, beforeRefs: { 'refs/heads/main': targetSha },
+      status: 'NEEDS_RECONCILIATION', errorCode: 'GIT_CHILD_FAILED',
+    } });
+    const operationId = randomUUID();
+    await db.pullRequestMergeOperation.create({ data: {
+      operationId, repositoryId: repository.id, pullRequestId: pullRequest.id, actorId: owner.id,
+      status: 'NEEDS_RECONCILIATION', storageGeneration: repository.storageGeneration,
+      expectedSourceSha: sourceSha, expectedTargetSha: targetSha, oldTargetSha: targetSha, candidateSha,
+      errorCode: 'RECONCILIATION_UNAVAILABLE',
+    } });
+    const refsBefore = git(['for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)']);
+
+    await maintenance.runOnce();
+
+    expect(await db.gitPushOperation.findUniqueOrThrow({ where: { operationId: pushOperationId } }))
+      .toMatchObject({ status: 'NEEDS_RECONCILIATION', errorCode: 'GIT_CHILD_FAILED' });
+    expect(await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId } }))
+      .toMatchObject({ status: 'NEEDS_RECONCILIATION', errorCode: 'CROSS_TYPE_OPERATION_UNRESOLVED',
+        candidateSha, resultingSha: null });
+    expect(await db.pullRequest.findUniqueOrThrow({ where: { id: pullRequest.id } }))
+      .toMatchObject({ status: 'OPEN', version: 1, mergeCommitSha: null, mergedById: null });
+    expect(git(['for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)'])).toBe(refsBefore);
+    expect(await db.auditLog.count({ where: { targetId: pullRequest.id,
+      action: { in: ['PULL_REQUEST_MERGED', 'PULL_REQUEST_MERGE_RECONCILED'] } } })).toBe(0);
+
+    await maintenance.runOnce();
+
+    expect(await db.gitPushOperation.findUniqueOrThrow({ where: { operationId: pushOperationId } }))
+      .toMatchObject({ status: 'NEEDS_RECONCILIATION', errorCode: 'GIT_CHILD_FAILED' });
+    expect(await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId } }))
+      .toMatchObject({ status: 'NEEDS_RECONCILIATION', errorCode: 'CROSS_TYPE_OPERATION_UNRESOLVED',
+        candidateSha, resultingSha: null });
+    expect(await db.pullRequest.findUniqueOrThrow({ where: { id: pullRequest.id } }))
+      .toMatchObject({ status: 'OPEN', version: 1, mergeCommitSha: null, mergedById: null });
+    expect(git(['for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)'])).toBe(refsBefore);
+    expect(await db.auditLog.count({ where: { targetId: pullRequest.id,
+      action: { in: ['PULL_REQUEST_MERGED', 'PULL_REQUEST_MERGE_RECONCILED'] } } })).toBe(0);
+  });
+
+  it('retains expired repository storage while a merge journal needs reconciliation', async () => {
+    if (!db || !purgeService || !storageRoot) throw new Error('Maintenance test fixture was not initialized.');
+    const owner = await db.user.create({ data: {
+      username: 'PurgeJournalOwner', normalizedUsername: 'purgejournalowner',
+      email: 'purge-journal-owner@example.test', normalizedEmail: 'purge-journal-owner@example.test', passwordHash: 'test-hash',
+    } });
+    const repositoryId = randomUUID();
+    const storageKey = `${repositoryId}.git`;
+    const repository = await db.repository.create({ data: {
+      id: repositoryId, ownerId: owner.id, name: 'PurgeJournal', normalizedName: 'purgejournal', storageKey,
+      status: 'DELETED', deletedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+      purgeAfter: new Date(Date.now() - 1000),
+    } });
+    const pullRequest = await db.pullRequest.create({ data: {
+      repositoryId: repository.id, number: 1, authorId: owner.id, title: 'Unresolved merge',
+      sourceBranch: 'feature/recovery', targetBranch: 'main', storageGeneration: repository.storageGeneration,
+      sourceSha: 'a'.repeat(40), targetSha: 'b'.repeat(40),
+    } });
+    const operationId = randomUUID();
+    await db.pullRequestMergeOperation.create({ data: {
+      operationId, repositoryId: repository.id, pullRequestId: pullRequest.id, actorId: owner.id,
+      storageGeneration: repository.storageGeneration, expectedSourceSha: pullRequest.sourceSha,
+      expectedTargetSha: pullRequest.targetSha, oldTargetSha: pullRequest.targetSha,
+      status: 'NEEDS_RECONCILIATION', errorCode: 'MERGE_OUTCOME_UNKNOWN',
+    } });
+    const storagePath = join(storageRoot, storageKey);
+    await mkdir(storagePath);
+
+    expect(await purgeService.purgeDue()).toBe(0);
+    expect(await db.repository.findUnique({ where: { id: repository.id } })).not.toBeNull();
+    expect(await pathExists(storagePath)).toBe(true);
+
+    await db.pullRequestMergeOperation.update({ where: { operationId }, data: { status: 'FAILED' } });
+    expect(await purgeService.purgeDue()).toBe(1);
+    expect(await db.repository.findUnique({ where: { id: repository.id } })).toBeNull();
+    expect(await pathExists(storagePath)).toBe(false);
+  });
+
+  it('retains expired repository storage while a push journal is unresolved', async () => {
+    if (!db || !purgeService || !storageRoot) throw new Error('Maintenance test fixture was not initialized.');
+    const owner = await db.user.create({ data: {
+      username: 'PurgePushJournalOwner', normalizedUsername: 'purgepushjournalowner',
+      email: 'purge-push-journal-owner@example.test', normalizedEmail: 'purge-push-journal-owner@example.test', passwordHash: 'test-hash',
+    } });
+    const repositoryId = randomUUID();
+    const storageKey = `${repositoryId}.git`;
+    const repository = await db.repository.create({ data: {
+      id: repositoryId, ownerId: owner.id, name: 'PurgePushJournal', normalizedName: 'purgepushjournal', storageKey,
+      status: 'DELETED', deletedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+      purgeAfter: new Date(Date.now() - 1000),
+    } });
+    const pendingOperationId = randomUUID();
+    const reconciliationOperationId = randomUUID();
+    await db.gitPushOperation.createMany({ data: [
+      { operationId: pendingOperationId, repositoryId: repository.id, actorId: owner.id,
+        storageGeneration: repository.storageGeneration, beforeRefs: {}, status: 'PENDING' },
+      { operationId: reconciliationOperationId, repositoryId: repository.id, actorId: owner.id,
+        storageGeneration: repository.storageGeneration, beforeRefs: {},
+        status: 'NEEDS_RECONCILIATION', errorCode: 'GIT_CHILD_OUTCOME_UNKNOWN' },
+    ] });
+    const storagePath = join(storageRoot, storageKey);
+    await mkdir(storagePath);
+
+    expect(await purgeService.purgeDue()).toBe(0);
+    expect(await db.repository.findUnique({ where: { id: repository.id } })).not.toBeNull();
+    expect(await db.gitPushOperation.findMany({ where: { repositoryId: repository.id }, orderBy: { operationId: 'asc' } }))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ operationId: pendingOperationId, status: 'PENDING' }),
+        expect.objectContaining({ operationId: reconciliationOperationId,
+          status: 'NEEDS_RECONCILIATION', errorCode: 'GIT_CHILD_OUTCOME_UNKNOWN' }),
+      ]));
+    expect(await pathExists(storagePath)).toBe(true);
+
+    await db.gitPushOperation.update({ where: { operationId: reconciliationOperationId }, data: { status: 'FAILED' } });
+    expect(await purgeService.purgeDue()).toBe(0);
+    expect(await db.repository.findUnique({ where: { id: repository.id } })).not.toBeNull();
+    expect(await pathExists(storagePath)).toBe(true);
+
+    await db.gitPushOperation.update({ where: { operationId: pendingOperationId }, data: { status: 'FAILED' } });
+    expect(await purgeService.purgeDue()).toBe(1);
+    expect(await db.repository.findUnique({ where: { id: repository.id } })).toBeNull();
+    expect(await pathExists(storagePath)).toBe(false);
+
+    const needsOnlyRepositoryId = randomUUID();
+    const needsOnlyStorageKey = `${needsOnlyRepositoryId}.git`;
+    const needsOnlyRepository = await db.repository.create({ data: {
+      id: needsOnlyRepositoryId, ownerId: owner.id, name: 'PurgeNeedsOnly', normalizedName: 'purgeneedsonly',
+      storageKey: needsOnlyStorageKey, status: 'DELETED', deletedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000),
+      purgeAfter: new Date(Date.now() - 1000),
+    } });
+    const needsOnlyOperationId = randomUUID();
+    await db.gitPushOperation.create({ data: {
+      operationId: needsOnlyOperationId, repositoryId: needsOnlyRepository.id, actorId: owner.id,
+      storageGeneration: needsOnlyRepository.storageGeneration, beforeRefs: {},
+      status: 'NEEDS_RECONCILIATION', errorCode: 'GIT_CHILD_OUTCOME_UNKNOWN',
+    } });
+    const needsOnlyStoragePath = join(storageRoot, needsOnlyStorageKey);
+    await mkdir(needsOnlyStoragePath);
+
+    expect(await purgeService.purgeDue()).toBe(0);
+    expect(await db.repository.findUnique({ where: { id: needsOnlyRepository.id } })).not.toBeNull();
+    expect(await db.gitPushOperation.findUnique({ where: { operationId: needsOnlyOperationId } }))
+      .toMatchObject({ status: 'NEEDS_RECONCILIATION', errorCode: 'GIT_CHILD_OUTCOME_UNKNOWN' });
+    expect(await pathExists(needsOnlyStoragePath)).toBe(true);
+
+    await db.gitPushOperation.update({ where: { operationId: needsOnlyOperationId }, data: { status: 'FAILED' } });
+    expect(await purgeService.purgeDue()).toBe(1);
+    expect(await db.repository.findUnique({ where: { id: needsOnlyRepository.id } })).toBeNull();
+    expect(await pathExists(needsOnlyStoragePath)).toBe(false);
   });
 });

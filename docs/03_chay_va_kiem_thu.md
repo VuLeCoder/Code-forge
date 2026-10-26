@@ -1,6 +1,6 @@
 # 03 — Chạy và kiểm thử
 
-Các lệnh chạy từ thư mục gốc repository, trừ khi có chỉ dẫn khác. Hosted CI `40138087574` trên `7e0aa27` đã chạy toàn bộ gate; báo cáo hiện tại và giới hạn còn mở nằm trong [ledger](docs/implementation-status.md) và [deployment guide](docs/deployment/README.md).
+Các lệnh chạy từ thư mục gốc repository, trừ khi có chỉ dẫn khác. Hosted CI `40138087574` trên `7e0aa27` đã chạy toàn bộ gate; báo cáo hiện tại và giới hạn còn mở nằm trong [ledger](implementation-status.md) và [deployment guide](deployment/README.md).
 
 ## Chuẩn bị
 
@@ -87,7 +87,7 @@ Readiness kiểm tra database, Git executable và storage; nếu 503, xem từng
 | RATE_LIMIT_PROXY_SECRET | ≥32 ký tự; local Compose có giá trị `local-only-*`, production phải inject cùng secret qua secret manager |
 | APP_ORIGIN | Origin người dùng mở, phải đồng bộ FRONTEND_ORIGIN |
 
-Nguồn: [backend mẫu](backend/.env.example), [frontend mẫu](frontend/.env.example). Khởi động lại service sau khi sửa env. Không dùng tiền tố public cho secret/backend credential. Secret thật bàn giao qua kênh riêng, không chép vào markdown.
+Nguồn: [backend mẫu](../backend/.env.example), [frontend mẫu](../frontend/.env.example). Khởi động lại service sau khi sửa env. Không dùng tiền tố public cho secret/backend credential. Secret thật bàn giao qua kênh riêng, không chép vào markdown.
 
 ## Kịch bản tự kiểm tra khi nhận dự án
 
@@ -105,7 +105,7 @@ git -C demo fetch origin
 5. Thu hồi token rồi fetch lại: request kế tiếp bị từ chối. Nếu Git tự dùng credential cũ, kiểm tra credential helper.
 6. Trên repo thử nghiệm, kiểm tra owner đổi visibility, soft-delete và restore từ hồ sơ. Không thử xóa trên dữ liệu cần bảo toàn.
 
-Hành trình Git push đã hỗ trợ qua PAT (`repo:write`), invitation/member UI có tại Settings và `/invitations`; PR create/compare/diff/merge và admin dashboard cũng đã có. Với smoke local, dùng repository/tài khoản fixture riêng và chạy test E2E trên PostgreSQL cô lập; không dùng `backend/.env` chứa database phát triển. Hosted CI bao phủ owner mời WRITE → accept → push → PR → owner merge, và các race regression được ghi trong [ledger](docs/implementation-status.md).
+Hành trình Git push đã hỗ trợ qua PAT (`repo:write`), invitation/member UI có tại Settings và `/invitations`; PR create/compare/diff/merge và admin dashboard cũng đã có. Với smoke local, dùng repository/tài khoản fixture riêng và chạy test E2E trên PostgreSQL cô lập; không dùng `backend/.env` chứa database phát triển. Hosted CI bao phủ owner mời WRITE → accept → push → PR → owner merge, và các race regression được ghi trong [ledger](implementation-status.md).
 
 ## Các tầng kiểm thử
 

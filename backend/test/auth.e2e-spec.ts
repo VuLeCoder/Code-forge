@@ -8,6 +8,33 @@ import { PrismaClient } from '@prisma/client';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import cookieParser = require('cookie-parser');
 
+const assertLoopbackTestDatabase = (connectionString: string, variableName: string): URL => {
+  let url: URL;
+  try {
+    url = new URL(connectionString);
+  } catch {
+    throw new Error(`${variableName} must be a valid PostgreSQL URL for a loopback *_test database.`);
+  }
+  const hostname = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  const databaseName = decodeURIComponent(url.pathname.slice(1));
+  if (!['postgres:', 'postgresql:'].includes(url.protocol)
+    || !['localhost', '127.0.0.1', '::1'].includes(hostname)
+    || !databaseName.endsWith('_test')) {
+    throw new Error(`${variableName} must target a loopback PostgreSQL database whose name ends in _test.`);
+  }
+  return url;
+};
+
+const assertSameDatabase = (first: URL, second: URL): void => {
+  const firstHost = first.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  const secondHost = second.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  const firstPort = first.port || '5432';
+  const secondPort = second.port || '5432';
+  if (firstHost !== secondHost || firstPort !== secondPort || first.pathname !== second.pathname) {
+    throw new Error('DATABASE_URL and DATABASE_URL_UNPOOLED must target the same loopback *_test database.');
+  }
+};
+
 // Each run owns a fresh schema. Never reset or truncate the development schema.
 describe('Milestone 1 HTTP + PostgreSQL', () => {
   const schema = `m1_test_${randomBytes(8).toString('hex')}`;
@@ -32,15 +59,21 @@ describe('Milestone 1 HTTP + PostgreSQL', () => {
     await ConfigModule.forRoot({ envFilePath: '.env' });
     originalDatabaseUrl = process.env.DATABASE_URL;
     originalDatabaseUrlUnpooled = process.env.DATABASE_URL_UNPOOLED;
-    if (!originalDatabaseUrl) throw new Error('DATABASE_URL is required for integration tests');
-    admin = new PrismaClient({ datasourceUrl: originalDatabaseUrl });
+    if (!originalDatabaseUrl) throw new Error('DATABASE_URL is required for integration tests.');
+    if (!originalDatabaseUrlUnpooled) throw new Error('DATABASE_URL_UNPOOLED is required for integration tests.');
+    const pooledUrl = assertLoopbackTestDatabase(originalDatabaseUrl, 'DATABASE_URL');
+    const unpooledUrl = assertLoopbackTestDatabase(originalDatabaseUrlUnpooled, 'DATABASE_URL_UNPOOLED');
+    assertSameDatabase(pooledUrl, unpooledUrl);
+    admin = new PrismaClient({ datasourceUrl: unpooledUrl.toString() });
     await admin.$executeRawUnsafe(`CREATE SCHEMA "${schema}"`);
-    const isolatedUrl = new URL(originalDatabaseUrl);
+    const isolatedUrl = new URL(pooledUrl);
     isolatedUrl.searchParams.set('schema', schema);
+    const isolatedUnpooledUrl = new URL(unpooledUrl);
+    isolatedUnpooledUrl.searchParams.set('schema', schema);
     process.env.DATABASE_URL = isolatedUrl.toString();
-    process.env.DATABASE_URL_UNPOOLED = isolatedUrl.toString();
+    process.env.DATABASE_URL_UNPOOLED = isolatedUnpooledUrl.toString();
     execFileSync(process.execPath, [require.resolve('prisma/build/index.js'), 'migrate', 'deploy'], {
-      env: { ...process.env, DATABASE_URL: isolatedUrl.toString(), DATABASE_URL_UNPOOLED: isolatedUrl.toString() }, stdio: 'pipe', timeout: 30_000,
+      env: { ...process.env, DATABASE_URL: isolatedUrl.toString(), DATABASE_URL_UNPOOLED: isolatedUnpooledUrl.toString() }, stdio: 'pipe', timeout: 30_000,
     });
     db = new PrismaClient({ datasourceUrl: isolatedUrl.toString() });
     const { AppModule } = await import('../src/app.module');
@@ -135,6 +168,32 @@ describe('Milestone 1 HTTP + PostgreSQL', () => {
     const family = await db.session.findMany({ where: { familyId: oldSession.familyId } });
     expect(family.length).toBeGreaterThanOrEqual(2);
     expect(family.every((session) => session.revokedAt !== null)).toBe(true);
+    expect((await call('auth/me', undefined, cookie(rotated))).status).toBe(401);
+  });
+
+  it('revokes a rotated successor when logout races after refresh used the old cookie', async () => {
+    const loggedIn = await call('auth/login', { login: 'alice', password: account.password });
+    expect(loggedIn.status).toBe(200);
+    const oldCookie = cookie(loggedIn);
+    const rotated = await call('auth/refresh', {}, oldCookie);
+    expect(rotated.status).toBe(200);
+
+    const oldRefreshToken = refreshToken(loggedIn);
+    const rotatedRefreshToken = refreshToken(rotated);
+    expect(oldRefreshToken).toBeTruthy();
+    expect(rotatedRefreshToken).toBeTruthy();
+    const oldSession = await db.session.findUniqueOrThrow({ where: {
+      tokenHash: createHash('sha256').update(oldRefreshToken!).digest('hex'),
+    } });
+    const rotatedSession = await db.session.findUniqueOrThrow({ where: {
+      tokenHash: createHash('sha256').update(rotatedRefreshToken!).digest('hex'),
+    } });
+    expect(rotatedSession.familyId).toBe(oldSession.familyId);
+
+    expect((await call('auth/logout', {}, oldCookie)).status).toBe(204);
+
+    const loggedOutSuccessor = await db.session.findUniqueOrThrow({ where: { id: rotatedSession.id } });
+    expect(loggedOutSuccessor.revokedAt).not.toBeNull();
     expect((await call('auth/me', undefined, cookie(rotated))).status).toBe(401);
   });
 

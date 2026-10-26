@@ -60,16 +60,19 @@ describe('Admin bootstrap CLI + PostgreSQL', () => {
   it('creates an active admin with the password supplied only on stdin', async () => {
     const password = 'Admin-Password-123!';
     const result = runBootstrap(`RootAdmin\nroot-admin@example.test\n${password}\n${password}\n`);
+    const safeStdout = (result.stdout ?? '').replaceAll(password, '[REDACTED]');
+    const safeStderr = (result.stderr ?? '').replaceAll(password, '[REDACTED]');
 
-    expect(result.error).toBeUndefined();
+    expect(result.error === undefined).toBe(true);
+    expect(result.error?.message.includes(password) ?? false).toBe(false);
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('Đã tạo tài khoản ADMIN RootAdmin.');
-    expect(result.stderr).toBe('');
-    expect(result.args.join('\0')).not.toContain(password);
-    expect(result.stdout).not.toContain(password);
+    expect(safeStdout).toContain('Đã tạo tài khoản ADMIN RootAdmin.');
+    expect(safeStderr).toBe('');
+    expect(result.args.join('\0').includes(password)).toBe(false);
+    expect((result.stdout ?? '').includes(password)).toBe(false);
     const user = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'rootadmin' } });
     expect(user).toMatchObject({ systemRole: 'ADMIN', status: 'ACTIVE', lockedAt: null });
-    expect(user.passwordHash).not.toBe(password);
+    expect(user.passwordHash === password).toBe(false);
     expect(await argon2.verify(user.passwordHash, password)).toBe(true);
     await expect(db.auditLog.findMany({ where: { targetId: user.id } })).resolves.toEqual([
       expect.objectContaining({ actorId: null, action: 'SYSTEM_ADMIN_CREATED', details: { channel: 'bootstrap_cli' } }),
@@ -95,6 +98,31 @@ describe('Admin bootstrap CLI + PostgreSQL', () => {
     await expect(db.auditLog.findMany({ where: { targetId: user.id } })).resolves.toEqual([
       expect.objectContaining({ actorId: null, action: 'SYSTEM_ADMIN_PROMOTED', details: { channel: 'bootstrap_cli' } }),
     ]);
+  });
+
+  it('is idempotent when the matching account already has ADMIN role', async () => {
+    const passwordHash = await argon2.hash('Existing-Admin-Password-123!', { type: argon2.argon2id, memoryCost: 4_096, timeCost: 1, parallelism: 1 });
+    const lockedAt = new Date('2026-10-01T00:00:00.000Z');
+    const user = await db.user.create({ data: {
+      username: 'AlreadyAdmin', normalizedUsername: 'alreadyadmin', email: 'already-admin@example.test',
+      normalizedEmail: 'already-admin@example.test', passwordHash, systemRole: 'ADMIN', status: 'LOCKED', lockedAt,
+    } });
+    await db.auditLog.create({ data: {
+      actorId: null, action: 'SYSTEM_ADMIN_CREATED', targetId: user.id, details: { channel: 'bootstrap_cli' },
+    } });
+    const auditBefore = await db.auditLog.findMany({ where: { targetId: user.id } });
+
+    const result = runBootstrap('AlreadyAdmin\nalready-admin@example.test\n');
+
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Tài khoản AlreadyAdmin đã có quyền ADMIN.');
+    expect(result.stdout).not.toContain('Mật khẩu mới:');
+    expect(result.stderr).toBe('');
+    await expect(db.user.findUniqueOrThrow({ where: { id: user.id } })).resolves.toMatchObject({
+      systemRole: 'ADMIN', status: 'LOCKED', lockedAt, passwordHash,
+    });
+    await expect(db.auditLog.findMany({ where: { targetId: user.id } })).resolves.toEqual(auditBefore);
   });
 
   it('does not promote an existing user when the supplied username and email do not match', async () => {

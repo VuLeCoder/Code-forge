@@ -188,6 +188,36 @@ describe('InvitationsService', () => {
       await expect(service.decline(userId, invitationId)).rejects.toThrow(ConflictException);
     });
 
+    it('marks an expired pending invitation EXPIRED before rejecting and releases the repository lock', async () => {
+      db.invitation.findFirst.mockResolvedValue({
+        id: invitationId,
+        inviteeId: userId,
+        status: 'PENDING',
+        expiresAt: new Date(Date.now() - 1000),
+      });
+      const release = jest.fn();
+      locks.acquire.mockResolvedValue({ signal: new AbortController().signal, release });
+      let transactionResult: unknown;
+      db.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) => {
+        transactionResult = await callback(db);
+        return transactionResult;
+      });
+
+      await expect(service.decline(userId, invitationId)).rejects.toMatchObject({
+        response: { error: { code: 'INVITATION_EXPIRED' } },
+      });
+
+      expect(transactionResult).toEqual({ expired: true });
+      expect(db.invitation.updateMany).toHaveBeenCalledWith({
+        where: { id: invitationId, status: 'PENDING' },
+        data: { status: 'EXPIRED' },
+      });
+      expect(db.invitation.updateMany).toHaveBeenCalledTimes(1);
+      expect(db.auditLog.create).not.toHaveBeenCalled();
+      expect(db.repositoryMember.upsert).not.toHaveBeenCalled();
+      expect(release).toHaveBeenCalledTimes(1);
+    });
+
     it('declines successfully and creates audit log', async () => {
       db.invitation.findFirst.mockResolvedValue({
         id: invitationId,

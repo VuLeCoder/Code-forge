@@ -38,7 +38,8 @@ describe('Git HTTP process lifecycle', () => {
       { provide: RepositoriesService, useValue: { prepareGit, recheckGit: jest.fn(() => Promise.resolve(access)) } },
       { provide: RepositoryLockService, useValue: { acquire: jest.fn(() => Promise.resolve({ signal: new AbortController().signal, release: jest.fn() })) } },
       { provide: GitStorageService, useValue: { openPack: start } },
-      { provide: GitPushJournalService, useValue: { begin: jest.fn(), finish: jest.fn(), fail: jest.fn(), markNeedsReconciliation: jest.fn() } },
+      { provide: GitPushJournalService, useValue: { begin: jest.fn(), recordChildSuccess: jest.fn(), finish: jest.fn(),
+        fail: jest.fn(), markChildFailed: jest.fn(), markNeedsReconciliation: jest.fn() } },
       { provide: ConfigService, useValue: { getOrThrow: (key: string) => key === 'MAX_PUSH_BYTES' ? 1024 * 1024 : undefined } },
     ] }).compile();
     app = module.createNestApplication();
@@ -83,11 +84,40 @@ describe('Git HTTP process lifecycle', () => {
   });
 
   it('times out stalled CGI before headers and rejects malformed CGI', async () => {
-    jest.replaceProperty(service, 'timeoutMs', 80);
-    script = 'setInterval(() => {}, 1000);';
-    expect((await fetch(`${url}/info/refs?service=git-upload-pack`)).status).toBe(504);
-    script = 'process.stdout.write("x".repeat(9000)); setInterval(() => {}, 1000);';
-    expect((await fetch(`${url}/info/refs?service=git-upload-pack`)).status).toBe(503);
+    const timeout = jest.replaceProperty(service, 'timeoutMs', 60_000);
+    const controllers = Array.from({ length: 3 }, () => new AbortController());
+    try {
+      for (const controller of controllers) {
+        expect((await fetch(`${url}/info/refs?service=git-upload-pack`, { signal: controller.signal })).status).toBe(200);
+      }
+
+      timeout.replaceValue(80);
+      script = 'setInterval(() => {}, 1000);';
+      let timedOutChildClose: Promise<[number | null, NodeJS.Signals | null]> | undefined;
+      start.mockImplementationOnce(() => {
+        const child = spawn(process.execPath, ['-e', script], { detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
+        children.push(child);
+        timedOutChildClose = new Promise((resolve) => child.once('close', (code, signal) => resolve([code, signal])));
+        return child;
+      });
+      const timeoutResponse = await fetch(`${url}/info/refs?service=git-upload-pack`);
+      expect(timeoutResponse.status).toBe(504);
+      expect(await timeoutResponse.text()).toBe('Git request unavailable.\n');
+      expect(timedOutChildClose).toBeDefined();
+      expect(await timedOutChildClose!).toEqual([null, 'SIGKILL']);
+
+      script = `process.stdout.end(${JSON.stringify(header + '0000')});`;
+      const recoveredResponse = await fetch(`${url}/info/refs?service=git-upload-pack`);
+      expect(recoveredResponse.status).toBe(200);
+      expect(await recoveredResponse.text()).toBe('0000');
+
+      script = 'process.stdout.write("x".repeat(9000)); setInterval(() => {}, 1000);';
+      expect((await fetch(`${url}/info/refs?service=git-upload-pack`)).status).toBe(503);
+    } finally {
+      const blockersClosed = children.slice(0, 3).map((child) => once(child, 'close'));
+      controllers.forEach((controller) => controller.abort());
+      await Promise.all(blockersClosed);
+    }
   });
 
   it('limits concurrent processes and releases capacity after cancellation', async () => {
@@ -138,5 +168,139 @@ describe('Git HTTP process lifecycle', () => {
     expect(start).toHaveBeenCalledWith('key', 'main', 'git-receive-pack', true, undefined, true);
     const raw = logs.mock.calls.map(([value]) => String(value)).find((value) => value.includes('"event":"git_write"'))!;
     expect(JSON.parse(raw)).toMatchObject({ event: 'git_write', operation: 'receive-pack-discovery', status: 200 });
+  });
+
+  it.each([
+    ['nonzero child exit', 'Content-Type: application/x-git-receive-pack-result\r\n\r\n0000', 17, 'failed'],
+    ['incomplete CGI headers', 'Content-Type: application/x-git-receive-pack-result', 0, 'failed'],
+    ['invalid CGI content type', 'Content-Type: text/plain\r\n\r\n0000', 0, 'failed'],
+    ['successful child and complete CGI', 'Content-Type: application/x-git-receive-pack-result\r\n\r\n0000', 0, 'succeeded'],
+    ['child-success proof write fails', 'Content-Type: application/x-git-receive-pack-result\r\n\r\n0000', 0, 'unknown'],
+  ])('journals receive-pack only after known success: %s', async (_name, payload, exitCode, outcome) => {
+    const access = { storageKey: 'key', defaultBranch: 'main', repositoryId: 'repository-id', userId: 'actor-id',
+      actorIsOwner: true, operation: 'write' as const, storageGeneration: 3 };
+    const repositories = app.get<RepositoriesService, {
+      prepareGit: jest.Mock; recheckGit: jest.Mock;
+    }>(RepositoriesService);
+    repositories.prepareGit.mockResolvedValue(access);
+    repositories.recheckGit.mockResolvedValue(access);
+
+    const storage = app.get<GitStorageService, { snapshotRefs: jest.Mock }>(GitStorageService);
+    const beforeRefs = { 'refs/heads/main': 'a'.repeat(40) };
+    const afterRefs = { 'refs/heads/main': 'b'.repeat(40) };
+    storage.snapshotRefs = jest.fn().mockResolvedValueOnce(beforeRefs).mockResolvedValue(afterRefs);
+    const journal = app.get<GitPushJournalService, {
+      begin: jest.Mock; recordChildSuccess: jest.Mock; finish: jest.Mock;
+      markChildFailed: jest.Mock; markNeedsReconciliation: jest.Mock;
+    }>(GitPushJournalService);
+    journal.begin.mockResolvedValue({ operationId: 'push-operation-id' });
+    let startProof!: () => void;
+    let commitProof!: (value: boolean) => void;
+    const proofStarted = new Promise<void>((resolve) => { startProof = resolve; });
+    const proofCommitted = new Promise<boolean>((resolve) => { commitProof = resolve; });
+    journal.recordChildSuccess.mockImplementation(() => {
+      startProof();
+      return outcome === 'unknown' ? Promise.reject(new Error('isolated proof persistence failure')) : proofCommitted;
+    });
+    const finalized = new Promise<void>((resolve) => {
+      journal.finish.mockImplementation(() => { resolve(); return Promise.resolve(true); });
+      journal.markChildFailed.mockImplementation(() => { resolve(); return Promise.resolve(); });
+      journal.markNeedsReconciliation.mockImplementation(() => { resolve(); return Promise.resolve(); });
+    });
+
+    script = `process.stdin.resume(); process.stdin.on('end', () => { process.stdout.end(${JSON.stringify(payload)}); process.exitCode = ${exitCode}; });`;
+    const response = fetch(`${url}/git-receive-pack`, {
+      method: 'POST',
+      headers: { Authorization: 'Basic test', 'Content-Type': 'application/x-git-receive-pack-request' },
+      body: '0000',
+    }).then((response) => response.text()).catch(() => undefined);
+    if (outcome === 'succeeded') {
+      await proofStarted;
+      expect(storage.snapshotRefs).toHaveBeenCalledTimes(1);
+      expect(journal.finish).not.toHaveBeenCalled();
+      commitProof(true);
+    }
+    await response;
+    await finalized;
+
+    expect(journal.begin).toHaveBeenCalledWith('repository-id', 'actor-id', 3, beforeRefs);
+    if (outcome === 'succeeded') {
+      expect(journal.recordChildSuccess).toHaveBeenCalledWith('push-operation-id');
+      expect(storage.snapshotRefs).toHaveBeenCalledTimes(2);
+      expect(journal.finish).toHaveBeenCalledTimes(1);
+      expect(journal.finish).toHaveBeenCalledWith('push-operation-id', afterRefs);
+      expect(journal.markNeedsReconciliation).not.toHaveBeenCalled();
+      expect(journal.markChildFailed).not.toHaveBeenCalled();
+    } else {
+      expect(storage.snapshotRefs).toHaveBeenCalledTimes(1);
+      expect(journal.finish).not.toHaveBeenCalled();
+      if (outcome === 'failed') {
+        expect(journal.recordChildSuccess).not.toHaveBeenCalled();
+        expect(journal.markChildFailed).toHaveBeenCalledWith('push-operation-id');
+        expect(journal.markNeedsReconciliation).not.toHaveBeenCalled();
+      } else {
+        expect(journal.recordChildSuccess).toHaveBeenCalledWith('push-operation-id');
+        expect(journal.markNeedsReconciliation).toHaveBeenCalledWith('push-operation-id');
+        expect(journal.markChildFailed).not.toHaveBeenCalled();
+      }
+    }
+  });
+
+  it('terminates receive-pack and journals child failure when the client aborts after streaming starts', async () => {
+    const receiveResult = 'Content-Type: application/x-git-receive-pack-result\r\n\r\n0000';
+    const access = { storageKey: 'key', defaultBranch: 'main', repositoryId: 'repository-id', userId: 'actor-id',
+      actorIsOwner: true, operation: 'write' as const, storageGeneration: 3 };
+    const repositories = app.get<RepositoriesService, {
+      prepareGit: jest.Mock; recheckGit: jest.Mock;
+    }>(RepositoriesService);
+    repositories.prepareGit.mockResolvedValue(access);
+    repositories.recheckGit.mockResolvedValue(access);
+
+    const storage = app.get<GitStorageService, { snapshotRefs: jest.Mock }>(GitStorageService);
+    const beforeRefs = { 'refs/heads/main': 'a'.repeat(40) };
+    storage.snapshotRefs = jest.fn().mockResolvedValue(beforeRefs);
+    const journal = app.get<GitPushJournalService, {
+      begin: jest.Mock; recordChildSuccess: jest.Mock; finish: jest.Mock;
+      markChildFailed: jest.Mock; markNeedsReconciliation: jest.Mock;
+    }>(GitPushJournalService);
+    journal.begin.mockResolvedValue({ operationId: 'push-operation-id' });
+    journal.markChildFailed.mockResolvedValue(undefined);
+
+    script = `process.stdin.resume(); process.stdin.on('end', () => { process.stdout.write(${JSON.stringify(receiveResult)}); setInterval(() => {}, 1000); });`;
+    const authorizationCanary = 'receive-pack-auth-canary';
+    const controller = new AbortController();
+    const response = await fetch(`${url}/git-receive-pack`, {
+      method: 'POST',
+      headers: { Authorization: `Basic ${authorizationCanary}`, 'Content-Type': 'application/x-git-receive-pack-request' },
+      body: '0000',
+      signal: controller.signal,
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('application/x-git-receive-pack-result');
+    expect(start).toHaveBeenCalledTimes(1);
+
+    const child = children[0]!;
+    const closed = once(child, 'close');
+    controller.abort();
+    await response.text().catch(() => undefined);
+    expect((await closed)[1]).toBe('SIGKILL');
+
+    expect(journal.begin).toHaveBeenCalledWith('repository-id', 'actor-id', 3, beforeRefs);
+    expect(journal.markChildFailed).toHaveBeenCalledWith('push-operation-id');
+    expect(journal.recordChildSuccess).not.toHaveBeenCalled();
+    expect(journal.markNeedsReconciliation).not.toHaveBeenCalled();
+    expect(journal.finish).not.toHaveBeenCalled();
+    expect(storage.snapshotRefs).toHaveBeenCalledTimes(1);
+
+    const requestId = response.headers.get('x-request-id');
+    expect(requestId).toMatch(/^[a-f0-9-]{36}$/);
+    const writeEvent = logs.mock.calls.map(([value]) => String(value))
+      .map((raw) => { try { return JSON.parse(raw) as Record<string, unknown>; } catch { return undefined; } })
+      .find((event) => event?.event === 'git_write' && event.requestId === requestId);
+    expect(writeEvent).toMatchObject({ event: 'git_write', operation: 'receive-pack', outcome: 'aborted' });
+    const writeLogs = logs.mock.calls.map(([value]) => String(value))
+      .filter((raw) => raw.includes(`"requestId":"${requestId}"`) && raw.includes('"event":"git_write"'));
+    expect(writeLogs).toHaveLength(1);
+    expect(writeLogs.join('\n')).not.toContain(authorizationCanary);
   });
 });

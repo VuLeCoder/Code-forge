@@ -134,9 +134,20 @@ export class AuthService {
 
   async logout(rawToken: string | undefined): Promise<void> {
     if (!rawToken) return;
-    await this.prisma.session.updateMany({
-      where: { tokenHash: this.hashToken(rawToken), revokedAt: null },
-      data: { revokedAt: new Date() },
+    const session = await this.prisma.session.findUnique({
+      where: { tokenHash: this.hashToken(rawToken) },
+      select: { userId: true, familyId: true },
+    });
+    if (!session) return;
+
+    await this.prisma.$transaction(async (tx) => {
+      // Refresh takes this same user lock before rotating. Once acquired, revoke
+      // every active successor in the family as well as the supplied session.
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${session.userId}::uuid FOR UPDATE`;
+      await tx.session.updateMany({
+        where: { familyId: session.familyId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
     });
   }
 
