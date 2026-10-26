@@ -1143,3 +1143,10 @@ snapshots, not current status. Current acceptance state is in the task board.
 - On a separate private Render fixture, owner `btlown653b1a6a` invited `btlcol653b1a6a` with role `WRITE`; collaborator listed and accepted the invitation, cloned the repository via temporary PAT, pushed `collaborator-feature`, and created PR #1. Owner fetched the compare/files snapshot and verified `canMerge`; owner merged, then collaborator fetched `main`.
 - Fetched target points to merge SHA `481d75d44f2ad2855bab853cb55d28c96235877b`; Git inspection confirmed two parents. PAT revoke and owner/collaborator logout succeeded. Fixture repo `collab-smoke` contains only a smoke file; no project source or credentials were written to the repo or log.
 - This does not test admin/audit, stale/conflict cloud behavior, payload/quota limits, migration, backup/restore or restart/source-loss recovery. No deployment or migration occurred.
+
+## T20-BTL FINAL STATUS RECHECK — latest source CI and two focused checks
+
+- Current `origin/thviet` and worktree HEAD are `97db5ff38ce3fba79968ffcd22f8e9a5140a4f8a`; GitHub Actions run #133 (`40271694208`) completed successfully on that exact SHA. Render remains on the older verified deployment `388c584`.
+- Read-only live check: Render `/api/v1/health/ready` returned HTTP 200. This confirms current deployed readiness only, not migration/recovery or latest-source deployment.
+- Local focused checks: admin bootstrap CLI/PostgreSQL E2E passed 5/5 on an isolated loopback test DB and left zero `admin_bootstrap_*` schemas; homepage demo-storage warning was visible at 375×812 with no horizontal overflow.
+- No application code, cloud data, deployment, migration, Docker volume, or generated untracked helper file was changed. CI, local checks, and cloud evidence remain distinguished; recovery, migration, payload-boundary and admin/audit cloud gates remain open for full P0–P8 completion.

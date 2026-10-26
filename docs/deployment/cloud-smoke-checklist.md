@@ -6,13 +6,13 @@
 
 | Trường | Kết quả |
 | --- | --- |
-| Source tip trước cập nhật bằng chứng này | `ab93f38` trên `thviet` (exact SHA `ab93f38d8df48ee44bbbd77e767b1459aaa1a122`) |
-| Code CI evidence | Actions #128 (`40269234926`) passed on exact SHA `df77e2b`; #129–#130 passed on their respective SHAs |
-| Latest CI at check | Actions #131 (`40270542690`) passed on `6910cdd`; #132 (`40270908433`) was in progress on `ab93f38` |
+| Source tip | `97db5ff` on `thviet` (exact SHA `97db5ff38ce3fba79968ffcd22f8e9a5140a4f8a`) |
+| Code CI evidence | Actions `MVP verification` #133 (`40271694208`) passed on the exact source SHA; #129–#132 also passed on their respective SHAs |
+| Latest CI at check | #133 (`40271694208`): completed successfully |
 | Render commit đang chạy | `388c584` theo Render Dashboard; chưa phải source tip hiện tại |
 | Frontend URL | Chưa có; Vercel deferred/out of scope |
 | Backend URL | `https://code-forge-api-thviet.onrender.com` |
-| Readiness probe | 2026-10-26: `GET /api/v1/health/ready` → HTTP 200; database/Git/storage đều `up` trên deployed `388c584` |
+| Readiness probe | 2026-10-26: `GET /api/v1/health/ready` → HTTP 200; database/Git/storage đều `up` trên deployed `388c584` (Render vẫn chưa ở source tip `97db5ff`) |
 | Public repository API | 2026-10-26: HTTP 200 sau cold start; initial wake requests returned `503 hibernate-pending-wake` |
 | Git/PR HTTPS smoke | 2026-10-26: anonymous public clone/fetch; private PAT clone/push/fetch; owner PR merge/fetch `f8468c6063a70aea4306f6ab6de7a1c58cafb7bd`; WRITE invitation→accept→collaborator push/PR→owner merge/fetch `481d75d44f2ad2855bab853cb55d28c96235877b`. Both merge commits have two parents. Temporary PATs revoked and sessions logged out. Payload/quota, admin and recovery not tested. |
 | Người nghiệm thu | Codex; Render API/Git/PR integration smoke, not visual browser or full release acceptance |
