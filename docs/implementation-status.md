@@ -4,21 +4,21 @@
 
 For detailed evidence and residual acceptance cases, use [the acceptance board](operations/acceptance-task-board-2026-10-25.md), [next actions](next-actions.md), and [the cloud checklist](deployment/cloud-smoke-checklist.md). Historical snapshots below are not current status.
 
-- Pushed source `origin/thviet` is `7588c0a4306abf5309de2fe0cb8c6e0c93dac0e2`; hosted Actions `MVP verification` #138 (`40276491886`) passed on that exact SHA. The local `codex/pr-operation-id-reuse` branch has subsequent unpushed commits and a focused additional test; local evidence must not be presented as hosted CI.
+- Integration source `origin/thviet` remains `7588c0a4306abf5309de2fe0cb8c6e0c93dac0e2` (CI #138). Separate feature candidate `codex/push-crash-proof` is pushed at `200c22da92d72536b585d66769154283325d41e3`; hosted `MVP verification` #139 (`40340975441`) passed all gates on that exact SHA. It includes T27–T34; it is not merged to `thviet`/`main` or deployed to Render.
 - BTL cloud evidence: Render `388c584` readiness, direct public/private Git, owner PR merge, and WRITE collaborator invitation→push→PR→owner merge smoke passed. Migration, backup/restore, admin/audit cloud, quota-boundary cloud tests, and source-loss recovery remain unverified. The historical `4407e7d` P1001 cause remains unknown; no deploy/restart should be inferred from CI.
-- P3/P4 remain partial. Local commit `a9ac678` on `codex/push-crash-proof` (based on `700e346`) adds a POSIX-only PostgreSQL/Git E2E that kills the API after a real push moves its ref but while `GIT_CHILD_SUCCEEDED` is blocked before commit. It passed 1/1 in a disposable Linux Docker/PostgreSQL 15 environment and verifies the unknown journal stays unaudited and write-fenced after maintenance. This is local evidence only; hosted CI is pending. Earlier local E2E at `86fe49e` covers simulated unknown outcome after Nest recreation, not a hard process crash. Local commit `5b232dc` verifies push reconciliation idempotence (focused E2E 1/1); `56cfb3d` verifies global merge-operation-ID collision handling (PR service suite 22/22). These checks do not close the broad recovery matrix or issue #5.
+- P3/P4 remain partial. Commit `a9ac678` adds the POSIX-only push process-crash E2E; review fix `200c22d` narrows its waiter observation to the exact barrier lock. The corrected test passed locally on Linux/PostgreSQL 17, the affected PR/push-audit/admin suites passed 21/21, backend unit passed 195/195, and CI #139 passed on `200c22d`. It verifies an unknown journal remains unaudited and write-fenced, not successful recovery of an unknown outcome. Earlier `86fe49e` models Nest recreation without a hard crash; `5b232dc` and `56cfb3d` cover reconciliation idempotence and operation-ID collision. Broad recovery and issue #5 remain open.
 - Issue #6 operator resolution remains fail-closed pending the owner policy. Vercel is out of scope. P0–P8 completion is not claimed.
 
 | Package | Current state |
 | --- | --- |
-| P0 baseline/CI | Hosted CI #138 passed on exact pushed SHA `7588c0a`; later local branch commits are unpushed. |
+| P0 baseline/CI | Integration CI #138 passed on `7588c0a`; feature CI #139 passed on pushed `200c22d`. No feature integration or cloud deploy is implied. |
 | P1 auth/invitation/contracts | Implemented with unit/HTTP integration evidence; full P0–P8 acceptance remains open. |
 | P2 direct cloud Git | Partial: direct Git and owner/collaborator smoke passed on Render `388c584`; migration, backup/recovery, quota and release checks remain open. |
-| P3 repository write coordination | Partial: merge→delete, valid-pack lock-loss, and push child-success process-crash tests have evidence; the new push-crash case is local Linux only and hosted CI is pending. The broader Git/PostgreSQL race matrix remains open. |
+| P3 repository write coordination | Partial: merge→delete, valid-pack lock-loss and corrected pre-proof push crash tests have evidence; CI #139 passed on `200c22d`. Broader Git/PostgreSQL recovery remains open. |
 | P4 PR/compare/merge | Partial: core flows and merge→delete ordering covered; other matrix/cloud acceptance remains open. |
 | P5 PR/admin UI | Partial: browser checks exist; manual screen-reader/device verification is not established here. |
 | P6 admin/audit/jobs | Partial: core paths are covered; issue #6 resolution remains deliberately fail-closed. |
-| P7 regression | Partial: Actions #138 passed on pushed SHA; later local focused tests are not in hosted CI; manual screen-reader/device checks remain. |
+| P7 regression | Feature Actions #139 passed on `200c22d`, including T27–T34; integration branch remains at #138/`7588c0a`. Cloud and manual screen-reader/device checks remain separate. |
 | P8 release/handoff | Partial/open: owner/collaborator Git/PR smoke passed; no cloud migration, backup/restore, write-freeze rehearsal, or source-loss recovery is claimed as passed. |
 
 The snapshots and package tables below are retained as historical execution records; where their SHA, run number, or state differs, this section is authoritative.
