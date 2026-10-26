@@ -2095,10 +2095,17 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       let barrierWaiters = 0;
       while (Date.now() < waiterDeadline) {
         const result = await barrier.query<{ count: number }>(`SELECT COUNT(*)::int AS count
-          FROM pg_stat_activity AS activity JOIN pg_locks AS lock ON lock.pid = activity.pid
+          FROM pg_stat_activity AS activity
+          JOIN pg_locks AS waiting_lock ON waiting_lock.pid = activity.pid
+          JOIN pg_locks AS held_lock ON held_lock.locktype = 'advisory'
+            AND held_lock.database = waiting_lock.database
+            AND held_lock.classid = waiting_lock.classid
+            AND held_lock.objid = waiting_lock.objid
+            AND held_lock.objsubid = waiting_lock.objsubid
+            AND held_lock.pid = pg_backend_pid() AND held_lock.granted
           WHERE activity.application_name = $1 AND activity.pid <> pg_backend_pid()
             AND activity.wait_event_type = 'Lock' AND activity.wait_event = 'advisory'
-            AND lock.locktype = 'advisory' AND NOT lock.granted`, [childApplicationName]);
+            AND waiting_lock.locktype = 'advisory' AND NOT waiting_lock.granted`, [childApplicationName]);
         barrierWaiters = result.rows[0]?.count ?? 0;
         if (barrierWaiters > 0) break;
         await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
