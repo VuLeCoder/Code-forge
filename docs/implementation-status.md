@@ -1,6 +1,8 @@
 # MVP implementation ledger
 
-## Current verified snapshot (2026-10-26; older status snapshots below are history)
+## Historical verified snapshot (2026-10-26; superseded)
+
+For the latest acceptance and cloud evidence, use [the current acceptance board](operations/acceptance-task-board-2026-10-25.md) and [next actions](next-actions.md). The snapshot below predates Render Git/PR smoke and is retained as history.
 
 - `thviet` and `origin/thviet` match at `23cb1c7`. Latest code commit `b6411ad` passed hosted Actions [#118 / `40262580445`](https://github.com/VuLeCoder/Code-forge/actions/runs/40262580445); docs-only run #119 for `23cb1c7` was in progress at the time of this update.
 - Merge→delete is now deterministically covered: merge pauses before ref CAS, DELETE is observed waiting on the same PostgreSQL advisory lock, then merge completes before soft-delete. Local PR E2E file passed 14 runnable cases / 2 intentional crash-case skips; backend lint and typecheck passed. The full workflow on `b6411ad` passed backend unit/E2E, frontend browser/full-stack, Docker image smoke, migration checks, lint/typecheck/build.

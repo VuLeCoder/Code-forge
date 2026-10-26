@@ -2,12 +2,11 @@
 
 ## Current release gates (2026-10-26; older “Current” blocks below are historical)
 
-- Source/CI: `origin/thviet` is `2d124b3`; hosted run #129 (`40270158604`) is running on that exact SHA. Previous run #128 (`40269234926`) passed on `df77e2b`.
-- Completed for the BTL demo: local backend/frontend and hosted workflow gates are green on prior code; Render readiness and local-frontend→Render API checks passed; public anonymous clone/fetch and private authenticated clone/push/fetch passed against the direct Render Git route. Test PAT was revoked. The current evidence is in `docs/operations/acceptance-task-board-2026-10-25.md` and the execution log.
-- Cloud/release still partial: no invitation/PR/admin cloud journey, migration, backup/restore, restart/source-loss recovery, or production-scale persistence is claimed. Render free storage may lose Git source on restart; historical P1001 cause remains unknown. Do not redeploy/restart as a “fix” without a source recovery plan.
-- Remaining for course-demo scope: review the current hosted run, keep the demo limitation visible, and decide whether a short PR cloud smoke is worth doing. Broader P3/P4 matrix and issue #6's operator-resolution policy remain open; Vercel is out of scope.
+- Source/CI at last check: `origin/thviet` is `6910cdd`; run #131 (`40270542690`) is in progress on that SHA. Runs #129 and #130 passed on their recorded commits.
+- Completed for the BTL demo: local full-stack owner/collaborator/PR journey, hosted CI #128, Render readiness/local-frontend→Render API, public anonymous clone/fetch, private PAT clone/push/fetch, and private fixture PR compare/diff/owner merge/fetch. Temporary PATs were revoked. Evidence is in the acceptance board, cloud checklist and task log.
+- Cloud/release still partial: collaborator invitation/admin cloud, payload/quota boundaries, migration, backup/restore and restart/source-loss recovery are unverified. Render Free storage may lose Git source on restart; historical P1001 cause remains unknown. Do not redeploy/restart as a “fix” without a source recovery plan.
+- Remaining for course-demo scope: verify current hosted CI and run a short browser/UI PR journey if presentation requires it. Broader P3/P4 recovery matrix and issue #6's operator-resolution policy remain open; Vercel is out of scope.
 - Do not mark P0–P8 complete from a green CI run alone; the BTL demo is usable before every production/recovery gate is closed.
-- Do not mark P0–P8 complete from a green CI run alone.
 
 Older “Current” paragraphs below are historical snapshots and must not override this section.
 

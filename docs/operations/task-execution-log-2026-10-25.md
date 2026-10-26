@@ -1131,3 +1131,9 @@ snapshots, not current status. Current acceptance state is in the task board.
 - Updated `docs/deployment/cloud-smoke-checklist.md` and `docs/deployment/render-neon-free-operator-runbook.md` to record the verified public clone/fetch and private PAT clone/push/fetch, plus the revoked PAT and explicit untested boundaries. Updated `docs/next-actions.md` and the acceptance snapshot to current `thviet` tip `fca4839`; no code, environment values, migration, or cloud state changed.
 - `git diff --check` passed. The earlier successful CI evidence remains #128 on `df77e2b`; runs #129 (`2d124b3`) and #130 (`fca4839`) were still running when checked. No claim is made that those pending workflows passed.
 - Remaining course-demo gap: one cloud PR→compare/diff→owner merge→fetch check. Render restart/source-loss recovery, backup/restore and migration remain untested and are recorded as free-tier/release limitations rather than silently passed.
+
+## T18-BTL RENDER PR/MERGE SMOKE — passed
+
+- On the deployed Render API, a new synthetic account/repository `btlclouda930e3db/pr-smoke` completed a bounded private flow: create a source branch with one test-only file, push by temporary PAT, create PR #1, compare and inspect files/diff, verify owner merge permission, merge, then fetch `main`.
+- Fetched `main` resolved to merge commit `f8468c6063a70aea4306f6ab6de7a1c58cafb7bd`; Git inspection confirmed exactly two parents. PAT deletion and session logout requests succeeded. No application repository/source or credential was included.
+- This proves direct API/Git cloud integration for the owner PR journey; it is not visual/browser acceptance and does not cover collaborator invitation, admin, stale/conflict cloud cases, quota boundary, migration, backup/restore or restart/source-loss recovery. No deployment or migration occurred.

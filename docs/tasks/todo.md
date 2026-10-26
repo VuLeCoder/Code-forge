@@ -1,6 +1,8 @@
 # Code Forge completion checklist
 
-## Current open release gates (2026-10-26; older snapshots below are history)
+## Historical open release gates (2026-10-26; superseded)
+
+For current acceptance and remaining tasks, see [the acceptance board](../operations/acceptance-task-board-2026-10-25.md) and [next actions](../next-actions.md). The checklist below predates the latest Render Git/PR smoke and is retained as history.
 
 - Current source tip: `thviet` = `origin/thviet` = `23cb1c7`. Code commit `b6411ad` passed full hosted CI #118 (`40262580445`); docs-only run #119 on `23cb1c7` was in progress at this snapshot.
 - [x] Deterministic P3/P4 merge→delete ordering E2E, backend typecheck/lint, full PR E2E file, and hosted code workflow #118.

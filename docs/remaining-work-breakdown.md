@@ -1,6 +1,8 @@
 # Code Forge — remaining work breakdown
 
-## Current execution state (2026-10-26; supersedes older snapshots below)
+## Historical execution state (2026-10-26; superseded)
+
+For current acceptance evidence, use [the acceptance board](operations/acceptance-task-board-2026-10-25.md) and [next actions](next-actions.md). The snapshot below predates Render Git/PR smoke and is retained as history.
 
 - `thviet` = `origin/thviet` = `23cb1c7`; code commit `b6411ad` passed hosted Actions [#118 / `40262580445`](https://github.com/VuLeCoder/Code-forge/actions/runs/40262580445). Docs-only workflow #119 on `23cb1c7` was in progress at this snapshot.
 - Deterministic merge→delete ordering is now verified locally and in #118: merge is paused before ref CAS, DELETE is observed waiting on the repository advisory lock, and the merge commit/metadata/audit complete before soft-delete. This closes that acceptance case only.

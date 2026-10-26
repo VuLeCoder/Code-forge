@@ -1,6 +1,8 @@
 # Code Forge: completion and release plan
 
-## Current verified state (2026-10-26; older snapshots below are history)
+## Historical verified state (2026-10-26; superseded)
+
+For current acceptance and remaining tasks, see [the acceptance board](../operations/acceptance-task-board-2026-10-25.md) and [next actions](../next-actions.md). The snapshot below predates the latest Render Git/PR smoke and is retained as history.
 
 - `origin/thviet` and the current worktree are at `db37ba17c24473c505bb8fb10aa7c8aea9b9ec03` (`db37ba1`) on `codex/pr-operation-id-reuse`. Code commit `b6411ad` passed hosted Actions [#118 / `40262580445`](https://github.com/VuLeCoder/Code-forge/actions/runs/40262580445), docs reconciliation `de76447` passed #120, duplicate-OPEN-PR E2E `ccff002` passed #121, and restore-vs-purge E2E `b51ae23` passed Actions [#122 / `40265483751`](https://github.com/VuLeCoder/Code-forge/actions/runs/40265483751). Scheduled janitor E2E `db37ba1` is under Actions #123 (`40265797091`).
 - Merge→delete ordering is now deterministic and verified: PostgreSQL confirms DELETE queued on the repository advisory lock while merge pauses before ref CAS; merge commit, journal, PR metadata and audit complete before soft-delete. The full PR E2E file passed 14 runnable / 2 intentional skips; #118 passed the full CI workflow.

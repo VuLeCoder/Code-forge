@@ -9,7 +9,7 @@
 - `GIT_PUBLIC_BASE_URL` cấu hình clone URL trực tiếp tới backend. Frontend dùng `BACKEND_URL`, `APP_ORIGIN` và `RATE_LIMIT_PROXY_SECRET` server-side.
 - Render Free dùng filesystem ephemeral; Git source có thể mất sau spin-down/restart/redeploy. Neon giữ metadata riêng, nhưng metadata còn lại không chứng minh Git objects còn tồn tại.
 - Maintenance jobs trong code không phải chế độ maintenance cho toàn ứng dụng. Tôi không thấy cờ/API được hỗ trợ để chặn toàn bộ mutation và drain request trước migration; phải xác minh cách đóng băng ghi trước release.
-- Readiness gần nhất được xác minh là HTTP 200 trên deploy `388c584`. Ngày 2026-10-26, anonymous public clone/fetch và private PAT clone/push/fetch đã qua smoke test trực tiếp tới Render; điều này chưa kiểm chứng invitation/PR/admin, payload lớn, migration cloud, backup/restore hoặc khôi phục sau restart. Deploy `4407e7d` từng gặp `P1001`; nguyên nhân lịch sử vẫn chưa được xác minh. Chi tiết có trong [cloud checklist](./cloud-smoke-checklist.md).
+- Readiness gần nhất được xác minh là HTTP 200 trên deploy `388c584`. Ngày 2026-10-26, anonymous public clone/fetch, private PAT clone/push/fetch và private fixture PR create/compare/diff/owner merge/fetch đã qua smoke test trực tiếp tới Render. Collaborator invitation, admin, payload quota, migration cloud, backup/restore hoặc khôi phục sau restart chưa được kiểm chứng. Deploy `4407e7d` từng gặp `P1001`; nguyên nhân lịch sử vẫn chưa được xác minh. Chi tiết có trong [cloud checklist](./cloud-smoke-checklist.md).
 - **Khôi phục source sau khi storage mất chưa được diễn tập.** Không coi khả năng có clone local là bằng chứng khôi phục thành công.
 
 ## Điều kiện dừng bắt buộc

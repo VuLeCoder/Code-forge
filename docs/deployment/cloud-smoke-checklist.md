@@ -6,18 +6,18 @@
 
 | Trường | Kết quả |
 | --- | --- |
-| Source tip hiện tại | `fca4839` trên `thviet` (exact SHA `fca48391e988ec73c9795345802fd7036c23512c`) |
-| Code CI evidence | Actions #128 (`40269234926`) passed on exact SHA `df77e2b`; earlier #118–#127 passed on their respective SHAs |
-| Latest CI | Actions #129 (`40270158604`) on `2d124b3` and #130 (`40270270878`) on current `fca4839` were in progress when checked |
+| Source tip trước cập nhật bằng chứng này | `6910cdd` trên `thviet` (exact SHA `6910cdd82b954e6a46803220e24e090844c4ad60`) |
+| Code CI evidence | Actions #128 (`40269234926`) passed on exact SHA `df77e2b`; earlier #118–#129 passed on their respective SHAs |
+| Latest CI at check | Actions #130 (`40270270878`) passed on `fca4839`; #131 (`40270542690`) was in progress on `6910cdd` |
 | Render commit đang chạy | `388c584` theo Render Dashboard; chưa phải source tip hiện tại |
 | Frontend URL | Chưa có; Vercel deferred/out of scope |
 | Backend URL | `https://code-forge-api-thviet.onrender.com` |
 | Readiness probe | 2026-10-26: `GET /api/v1/health/ready` → HTTP 200; database/Git/storage đều `up` trên deployed `388c584` |
 | Public repository API | 2026-10-26: HTTP 200 sau cold start; initial wake requests returned `503 hibernate-pending-wake` |
-| Git HTTPS smoke | 2026-10-26: anonymous public clone/fetch passed; private PAT clone/push/fetch passed and fetched SHA matched pushed SHA; temporary PAT revoked. Payload/quota boundaries not tested. |
-| Người nghiệm thu | Codex; Render/API/Git smoke, không phải nghiệm thu PR/admin/recovery |
+| Git/PR HTTPS smoke | 2026-10-26: anonymous public clone/fetch; private PAT clone/push/fetch; private fixture PR #1 create/compare/files/diff/owner merge/fetch passed. Merge SHA `f8468c6063a70aea4306f6ab6de7a1c58cafb7bd`, two parents. PAT revoke/logout succeeded. Payload/quota, collaborator/admin and recovery not tested. |
+| Người nghiệm thu | Codex; Render API/Git/PR integration smoke, not visual browser or full release acceptance |
 
-Readiness implementation chạy `SELECT 1` qua Prisma và ghi/xóa file tạm trong Git storage (có thể tạo thư mục nếu thiếu). Public/private Git HTTPS clone/fetch và private push đã được smoke-test, nhưng login UI, PR/invitation/admin cloud flows, migration, backup/restore, payload quota và source recovery sau restart chưa được nghiệm thu. Render Dashboard vẫn cho thấy last verified successful deploy là `388c584`; không deploy/restart trước khi có kế hoạch sao lưu/khôi phục Git vì storage Free có thể mất dữ liệu.
+Readiness implementation chạy `SELECT 1` qua Prisma và ghi/xóa file tạm trong Git storage (có thể tạo thư mục nếu thiếu). Public/private Git HTTPS, private PR create/compare/diff/owner merge/fetch đã được smoke-test qua API/Git; UI browser, collaborator invitation, admin, migration, backup/restore, payload quota và source recovery sau restart chưa được nghiệm thu. Render Dashboard vẫn cho thấy last verified successful deploy là `388c584`; không deploy/restart trước khi có kế hoạch sao lưu/khôi phục Git vì storage Free có thể mất dữ liệu.
 
 ## Tài khoản và quyền truy cập
 
@@ -41,8 +41,9 @@ Readiness implementation chạy `SELECT 1` qua Prisma và ghi/xóa file tạm tr
 ## Cộng tác, pull request, quản trị
 
 - [ ] Owner mời collaborator WRITE; collaborator chấp nhận invitation và push source branch.
-- [ ] Collaborator tạo PR; đọc commits/files/diff cùng snapshot; stale compare yêu cầu refresh.
-- [ ] Conflict không cập nhật target; merge thành công tạo commit có hai parent và fetch thấy commit đó.
+- [x] Owner tạo PR trên private fixture; compare trả `READY`, files/diff đọc được và owner permission đúng (2026-10-26). Đây là API/Git smoke, không phải browser UI test.
+- [x] Owner merge PR fixture; fetch xác nhận target có merge commit hai parent (2026-10-26).
+- [ ] Collaborator tạo PR; stale compare yêu cầu refresh; conflict không cập nhật target.
 - [ ] Retry cùng operation ID không merge lần hai; trường hợp metadata đang đối soát hiển thị trạng thái tương ứng.
 - [ ] Admin khóa/mở user hoặc repo, restore repository còn hạn và xem audit; admin không được tự đọc private source hoặc merge.
 - [ ] Audit không chứa token, cookie, Authorization, source code hoặc raw diff.
