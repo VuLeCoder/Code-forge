@@ -147,6 +147,18 @@ describe('MaintenanceJobsService', () => {
     expect(fixture.lock.release).toHaveBeenCalledTimes(2);
   });
 
+  it('clears the shared run after an unexpected batch rejection so a later run can retry', async () => {
+    const fixture = makeFixture();
+    const run = jest.spyOn(fixture.internals, 'runScheduled')
+      .mockRejectedValueOnce(new Error('unexpected maintenance failure'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(fixture.service.runOnce()).rejects.toThrow('unexpected maintenance failure');
+    await fixture.service.runOnce();
+
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
   it('retries a later run after the process-wide lock release fails', async () => {
     const fixture = makeFixture();
     fixture.lock.release.mockRejectedValueOnce(new Error('unlock failed')).mockResolvedValueOnce(undefined);
