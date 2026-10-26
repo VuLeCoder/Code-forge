@@ -1280,3 +1280,9 @@ snapshots, not current status. Current acceptance state is in the task board.
 
 - After review, local tests, T37–T40 evidence and hosted CI #142 success on `20d6d3d`, the feature tip was fast-forwarded to `origin/thviet` as `d8dd9bff1f4d2945a0b861dac4f8d74302142b5f`; no force-push or new branch was created.
 - GitHub Actions [MVP verification #143](https://github.com/VuLeCoder/Code-forge/actions/runs/40354036920) is queued/in progress for the exact `thviet` SHA. Render is configured to deploy after CI checks; no current Render deployment at this SHA is claimed. Cloud migration, backup/restore, source-loss recovery and write-freeze gates remain open.
+
+## T42-BTL FULL BACKEND E2E — local disposable PostgreSQL/Git regression checkpoint
+
+- First invocation was safely blocked before test setup because the shell had no `DATABASE_URL`; no test ran against a database. The rerun used a newly created, loopback-only `postgres:17-alpine` container (`codeforge-full-e2e-20261026`) with tmpfs storage, database `code_forge_test`, all 7 Prisma migrations, process-only JWT/proxy secrets, and a temporary Git root. No existing Docker volume, cloud database, or repository file was used.
+- Verification on 2026-10-26: `corepack pnpm --filter backend test:e2e` passed **10/10 suites, 64 passed, 5 skipped, 69 total** in 142.533s. The skips are the existing Windows-incompatible POSIX crash cases. Expected maintenance warnings exercised fail-closed retry paths; they did not fail the suite.
+- Cleanup removed exactly the labeled disposable container after the run. The temporary Git root is task-owned; no named volume was created or removed. This closes the local full backend regression checkpoint only; hosted CI, Render/Neon migration, encrypted backup, source-loss recovery and P0–P8 release acceptance remain separate gates.
