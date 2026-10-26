@@ -1164,6 +1164,191 @@ process.exit(result.status ?? 1);
     }
   }, 60_000);
 
+  it('rejects a queued receive-pack after membership downgrade', async () => {
+    const created = await call('POST', 'repositories', ownerCookie, { name: 'QueuedMemberDowngrade', initializeReadme: true });
+    expect(created.status).toBe(201);
+    const { repository } = await created.json() as { repository: { id: string } };
+    const stored = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
+    const other = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'other' } });
+    const inviteResponse = await call('POST', 'repos/owner/queuedmemberdowngrade/invitations', ownerCookie,
+      { username: 'Other', role: 'WRITE' });
+    expect(inviteResponse.status).toBe(201);
+    const { invitation } = await inviteResponse.json() as { invitation: { id: string } };
+    expect((await call('POST', `invitations/${invitation.id}/accept`, otherCookie)).status).toBe(201);
+
+    const tokenResponse = await call('POST', 'tokens', otherCookie, {
+      name: 'Queued member downgrade', scopes: ['repo:read', 'repo:write'],
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    expect(tokenResponse.status).toBe(201);
+    const { secret, token } = await tokenResponse.json() as { secret: string; token: { id: string } };
+    const local = join(storageRoot, 'queued-member-downgrade-source');
+    await mkdir(local, { recursive: true });
+    const run = promisify(execFile);
+    const git = (args: string[], input?: string) => run('git', args, {
+      timeout: 10_000,
+      env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(storageRoot, 'empty-git-config') },
+      ...(input === undefined ? {} : { input }),
+    });
+    await git(['init', '--initial-branch=main', local]);
+    await git(['-C', local, 'config', 'user.name', 'Queued Downgrade Tester']);
+    await git(['-C', local, 'config', 'user.email', 'queued-downgrade@example.test']);
+    await writeFile(join(local, 'queued.txt'), 'this pack must be rejected after downgrade\n');
+    await git(['-C', local, 'add', 'queued.txt']);
+    await git(['-C', local, 'commit', '-m', 'Queued push rejected after downgrade']);
+    const newSha = (await git(['-C', local, 'rev-parse', 'HEAD'])).stdout.trim();
+    const pack = await new Promise<Buffer>((resolve, reject) => {
+      const child = spawn('git', ['-C', local, 'pack-objects', '--stdout', '--revs'], {
+        env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(storageRoot, 'empty-git-config') },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      const chunks: Buffer[] = [];
+      let stderr = '';
+      child.stdout.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+      child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+      child.once('error', reject);
+      child.once('close', (code) => code === 0
+        ? resolve(Buffer.concat(chunks))
+        : reject(new Error(`git pack-objects exited ${code}: ${stderr}`)));
+      child.stdin.end(`${newSha}\n`);
+    });
+    const command = `${'0'.repeat(40)} ${newSha} refs/heads/feature/queued-downgrade\0report-status side-band-64k ofs-delta\n`;
+    // Build the pkt-line header separately to keep its length byte-accurate.
+    const commandBytes = Buffer.from(command, 'utf8');
+    const pktHeader = Buffer.from((commandBytes.byteLength + 4).toString(16).padStart(4, '0'), 'ascii');
+    const receivePackBody = Buffer.concat([pktHeader, commandBytes, Buffer.from('0000', 'ascii'), pack]);
+
+    const bare = join(storageRoot, stored.storageKey);
+    const refsBefore = execFileSync('git', ['--git-dir', bare, 'for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)', 'refs/'], { encoding: 'utf8' });
+    const operationsBefore = await db.gitPushOperation.findMany({ where: { repositoryId: stored.id }, select: { operationId: true } });
+    const auditsBefore = await db.auditLog.findMany({ where: { targetId: stored.id, action: 'GIT_PUSH_COMPLETED' }, select: { id: true } });
+    const barrier = new Client({ connectionString: originalUrl });
+    let barrierHeld = false;
+    let downgradePromise: Promise<Response> | undefined;
+    let pushPromise: Promise<Response> | undefined;
+    let downgradeResponse: Response | undefined;
+    let pushResponse: Response | undefined;
+    let primaryFailed = false;
+    const url = `${base}/git/Owner/QueuedMemberDowngrade.git/git-receive-pack`;
+    const unlockBarrier = async () => {
+      if (!barrierHeld) return;
+      const result = await barrier.query<{ pg_advisory_unlock: boolean }>(
+        'SELECT pg_advisory_unlock(hashtextextended($1, 0))', [stored.id]);
+      if (!result.rows[0]?.pg_advisory_unlock) throw new Error('The member-downgrade barrier lock was not held.');
+      barrierHeld = false;
+    };
+    const waitForQueuedRequests = async () => {
+      const deadline = Date.now() + 5_000;
+      do {
+        const waiters = await admin.$queryRawUnsafe<{ waiting: number }[]>(`
+          WITH lock_key AS (SELECT hashtextextended($2, 0) AS value)
+          SELECT COUNT(DISTINCT activity.pid)::int AS waiting
+          FROM pg_stat_activity AS activity
+          JOIN pg_locks AS pg_lock ON pg_lock.pid = activity.pid
+          CROSS JOIN lock_key
+          WHERE activity.application_name = $1
+            AND activity.wait_event_type = 'Lock'
+            AND activity.wait_event = 'advisory'
+            AND pg_lock.locktype = 'advisory'
+            AND pg_lock.granted = false
+            AND pg_lock.classid = ((lock_key.value >> 32) & 4294967295)::oid
+            AND pg_lock.objid = (lock_key.value & 4294967295)::oid
+            AND pg_lock.objsubid = 1`, lockApplicationName, stored.id);
+        if ((waiters[0]?.waiting ?? 0) === 2) return;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      } while (Date.now() < deadline);
+      throw new Error('Timed out waiting for role downgrade and receive-pack to queue on the repository advisory lock.');
+    };
+
+    try {
+      await barrier.connect();
+      await barrier.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [stored.id]);
+      barrierHeld = true;
+      downgradePromise = call('PATCH', 'repos/owner/queuedmemberdowngrade/members/' + other.id, ownerCookie, { role: 'READ' });
+      const deadline = Date.now() + 5_000;
+      let firstWaiter = 0;
+      do {
+        const waiters = await admin.$queryRawUnsafe<{ waiting: number }[]>(`
+          WITH lock_key AS (SELECT hashtextextended($2, 0) AS value)
+          SELECT COUNT(DISTINCT activity.pid)::int AS waiting
+          FROM pg_stat_activity AS activity
+          JOIN pg_locks AS pg_lock ON pg_lock.pid = activity.pid
+          CROSS JOIN lock_key
+          WHERE activity.application_name = $1
+            AND activity.wait_event_type = 'Lock'
+            AND activity.wait_event = 'advisory'
+            AND pg_lock.locktype = 'advisory'
+            AND pg_lock.granted = false
+            AND pg_lock.classid = ((lock_key.value >> 32) & 4294967295)::oid
+            AND pg_lock.objid = (lock_key.value & 4294967295)::oid
+            AND pg_lock.objsubid = 1`, lockApplicationName, stored.id);
+        firstWaiter = waiters[0]?.waiting ?? 0;
+        if (firstWaiter === 1) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      } while (Date.now() < deadline);
+      expect(firstWaiter).toBe(1);
+
+      pushPromise = fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${Buffer.from(`Other:${secret}`).toString('base64')}`,
+          'content-type': 'application/x-git-receive-pack-request',
+        },
+        body: receivePackBody,
+      });
+      await waitForQueuedRequests();
+      await unlockBarrier();
+      [downgradeResponse, pushResponse] = await Promise.all([downgradePromise, pushPromise]);
+
+      expect(downgradeResponse.status).toBe(200);
+      expect((await downgradeResponse.json()).member.role).toBe('READ');
+      expect(pushResponse.status).toBe(404);
+      expect(await db.repositoryMember.findUniqueOrThrow({
+        where: { repositoryId_userId: { repositoryId: stored.id, userId: other.id } },
+        select: { role: true },
+      })).toEqual({ role: 'READ' });
+      expect(execFileSync('git', ['--git-dir', bare, 'for-each-ref', '--sort=refname', '--format=%(refname)%09%(objectname)', 'refs/'], { encoding: 'utf8' }))
+        .toBe(refsBefore);
+      expect(await db.gitPushOperation.findMany({ where: { repositoryId: stored.id }, select: { operationId: true } }))
+        .toEqual(operationsBefore);
+      expect(await db.auditLog.findMany({ where: { targetId: stored.id, action: 'GIT_PUSH_COMPLETED' }, select: { id: true } }))
+        .toEqual(auditsBefore);
+
+      const lockProbe = await barrier.query<{ acquired: boolean }>(
+        'SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS acquired', [stored.id]);
+      expect(lockProbe.rows[0]?.acquired).toBe(true);
+      const probeUnlock = await barrier.query<{ pg_advisory_unlock: boolean }>(
+        'SELECT pg_advisory_unlock(hashtextextended($1, 0))', [stored.id]);
+      expect(probeUnlock.rows[0]?.pg_advisory_unlock).toBe(true);
+    } catch (error) {
+      primaryFailed = true;
+      throw error;
+    } finally {
+      const cleanupErrors: string[] = [];
+      const attemptCleanup = async (name: string, action: () => Promise<unknown>) => {
+        try {
+          await action();
+        } catch (error) {
+          cleanupErrors.push(`${name}:${error instanceof Error ? error.name : typeof error}`);
+        }
+      };
+      await attemptCleanup('advisory unlock', unlockBarrier);
+      // Closing the session also releases its session-level lock if explicit unlock failed.
+      await attemptCleanup('barrier close', () => barrier.end());
+      if (downgradePromise || pushPromise) {
+        await attemptCleanup('request settlement', () => Promise.allSettled(
+          [downgradePromise, pushPromise].filter(Boolean) as Promise<Response>[]));
+      }
+      await attemptCleanup('PAT deletion', () => db.personalAccessToken.deleteMany({ where: { id: token.id, userId: other.id } }));
+      await attemptCleanup('repository deletion', () => db.repository.deleteMany({ where: { id: stored.id } }));
+      if (cleanupErrors.length > 0) {
+        const message = `Queued member-downgrade cleanup had ${cleanupErrors.length} failure(s): ${cleanupErrors.join(', ')}`;
+        if (primaryFailed) console.error(`${message}; preserving the primary test error.`);
+        else throw new Error(message);
+      }
+    }
+  }, 60_000);
+
   it('serializes a valid Git push before repository soft-delete and rejects later writes', async () => {
     const created = await call('POST', 'repositories', ownerCookie, { name: 'PushDeleteRace', initializeReadme: true });
     expect(created.status).toBe(201);
