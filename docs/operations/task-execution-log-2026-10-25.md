@@ -7,7 +7,11 @@ or private cloud values.
 This is a chronological log: entries labeled **historical/superseded** are
 snapshots, not current status. Current acceptance state is in the task board.
 
-## T-CURRENT-RELEASE — latest verified release snapshot
+## T-CURRENT-RELEASE — historical/superseded snapshot
+
+The current evidence is recorded in T41–T44 below. This older entry names the
+former `4407e7d`/CI #92 state and must not be used as the current branch or
+cloud status.
 
 - Owner: Codex release lead.
 - Status: incomplete; this entry supersedes older current-state claims below.
@@ -43,6 +47,11 @@ snapshots, not current status. Current acceptance state is in the task board.
   `docs/operations/task-execution-log-2026-10-25.md`, `docs/tasks/plan.md`,
   `docs/tasks/todo.md`, and `docs/remaining-work-breakdown.md`. No secrets,
   database URLs, or private cloud values are included.
+
+## T-CURRENT-RELEASE-2026-10-26 — current evidence pointer
+
+- Last CI-verified runtime candidate: `50f4ee432d868a065c287cf948dab6f0ea8e3dd3` on `thviet`; hosted CI #147 (`40356177128`) passed all 28/28 workflow steps. The remote branch later received documentation-only follow-up `aada694`; CI #148 (`40357459570`) also passed all 28/28 steps.
+- Render remains at the separately observed deploy `388c584`; no Render deploy/restart, Neon migration, provider setting, or cloud backup/restore was performed. P0–P8 and cloud release remain incomplete.
 
 ## T-BASE — historical baseline snapshot (superseded)
 
@@ -1289,5 +1298,10 @@ snapshots, not current status. Current acceptance state is in the task board.
 
 ## T43-BTL HOSTED CI TERMINAL CHECKPOINT — runtime candidate accepted
 
-- Read-only CI monitoring verified [MVP verification #145](https://github.com/VuLeCoder/Code-forge/actions/runs/40355040474) success on `31b727d`, [#146](https://github.com/VuLeCoder/Code-forge/actions/runs/40355807041) success on `b1ba6d8`, and [#147](https://github.com/VuLeCoder/Code-forge/actions/runs/40356177128) success on exact runtime candidate `50f4ee432d868a065c287cf948dab6f0ea8e3dd3`. Each run completed all 28 workflow steps; backend/frontend tests, typecheck, build, Docker/migration image checks, disposable migration and whitespace gates passed.
+- Read-only CI monitoring verified [MVP verification #145](https://github.com/VuLeCoder/Code-forge/actions/runs/40355040474) success on `31b727d`, [#146](https://github.com/VuLeCoder/Code-forge/actions/runs/40355807041) success on `b1ba6d8`, [#147](https://github.com/VuLeCoder/Code-forge/actions/runs/40356177128) success on exact runtime candidate `50f4ee432d868a065c287cf948dab6f0ea8e3dd3`, and [#148](https://github.com/VuLeCoder/Code-forge/actions/runs/40357459570) success on docs-only `aada694`. Each run completed all 28 workflow steps; backend/frontend tests, typecheck, build, Docker/migration image checks, disposable migration and whitespace gates passed.
 - These are hosted CI results only. No Render deploy/restart, Neon migration, cloud backup/restore, Git source-loss recovery or provider setting changed. A subsequent documentation-only follow-up may trigger another CI run; do not reinterpret it as a cloud release.
+
+## T44-BTL STORAGE-RECOVERY LOCK ORDER — local acceptance
+
+- On a new loopback-only `postgres:17-alpine` tmpfs database with all 7 migrations and a task-owned temporary Git root, the focused test `corepack pnpm --filter backend exec jest --config test/jest-e2e.json --runInBand --runTestsByPath test/repositories.e2e-spec.ts --testNamePattern "serializes completed push before missing-storage recovery and reinitializes the default repository"` passed **1/1** (20 unrelated tests skipped by the name filter).
+- The test verified completed-push serialization before missing-storage recovery, advisory-lock ordering, storage generation reset, hidden/private boundary behavior and idempotent recovery. The labeled container `codeforge-recovery-e2e-20261026` was removed; no named volume, cloud resource or repository file was changed. The temporary Git root was empty after the run; its directory remains as a cleanup candidate because recursive deletion is policy-blocked.

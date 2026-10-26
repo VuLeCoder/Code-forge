@@ -8,7 +8,7 @@
 | --- | --- |
 | Last CI-verified runtime candidate | `thviet`: `50f4ee432d868a065c287cf948dab6f0ea8e3dd3` |
 | Code CI evidence | `MVP verification` #147 (`40356177128`) passed all 28/28 steps on the exact runtime candidate. A later docs-only follow-up is not treated as a runtime change. |
-| Latest CI at check | #147: success on `50f4ee432d868a065c287cf948dab6f0ea8e3dd3` |
+| Latest CI at check | Runtime #147 (`40356177128`) success on `50f4ee432d868a065c287cf948dab6f0ea8e3dd3`; docs-only #148 (`40357459570`) also success on `aada694` |
 | Render commit đang chạy | `388c584` theo Render Dashboard; chưa phải source tip hiện tại |
 | Render auto-deploy | `After CI Checks Pass`; pushes to `thviet` may redeploy. Do not push until the documented source-recovery preflight is satisfied. |
 | Render service limits | Dashboard read-only check: `code-forge-api-thviet`, Free plan, no persistent disk; Live `388c584`; source can be lost on restart/redeploy. |
