@@ -69,6 +69,7 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
   let originalCwd: string | undefined;
   let storageRoot: string;
   let schemaCreated = false;
+  let preserveArtifacts = false;
 
   const cookie = (response: Response) => response.headers.getSetCookie()
     .map((value) => value.split(';')[0]).join('; ');
@@ -134,11 +135,11 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     await app?.close();
     await db?.$disconnect();
     if (admin) {
-      if (schemaCreated) await admin.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+      if (schemaCreated && !preserveArtifacts) await admin.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
       await admin.$disconnect();
     }
     if (originalCwd) process.chdir(originalCwd);
-    if (storageRoot) await rm(storageRoot, { recursive: true, force: true });
+    if (storageRoot && !preserveArtifacts) await rm(storageRoot, { recursive: true, force: true });
     for (const [key, value] of Object.entries({
       DATABASE_URL: originalUrl,
       DATABASE_URL_UNPOOLED: originalUnpooledUrl,
@@ -1932,6 +1933,276 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
   }, 60_000);
 
   const processCrashTest = process.platform === 'win32' ? it.skip : it;
+  processCrashTest('keeps a push outcome unknown when the API dies before durable child-success proof', async () => {
+    const registered = await call('POST', 'auth/register', {
+      username: 'PushCrashOwner', email: 'push-crash-owner@example.test', password: 'test-password-123',
+    });
+    expect(registered.status).toBe(201);
+    const pushCrashCookie = cookie(registered);
+    const createdRepo = await call('POST', 'repositories', {
+      name: 'PushCrash', visibility: 'PRIVATE', initializeReadme: true,
+    }, pushCrashCookie);
+    expect(createdRepo.status).toBe(201);
+    const { repository } = await responseJson<{ repository: { id: string } }>(createdRepo);
+    const storedRepo = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
+    const tokenResponse = await call('POST', 'tokens', {
+      name: 'Push crash proof E2E', scopes: ['repo:read', 'repo:write'],
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+    }, pushCrashCookie);
+    expect(tokenResponse.status).toBe(201);
+    const { secret } = await responseJson<{ secret: string }>(tokenResponse);
+
+    const bare = join(storageRoot, storedRepo.storageKey);
+    const work = join(storageRoot, 'push-crash-clone');
+    const gitSync = (args: string[]) => execFileSync('git', args, {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
+    });
+    gitSync(['clone', '--quiet', bare, work]);
+    gitSync(['-C', work, 'config', 'user.name', 'Push Crash Owner']);
+    gitSync(['-C', work, 'config', 'user.email', 'push-crash-owner@example.test']);
+    gitSync(['-C', work, 'switch', '-c', 'feature/crash-proof']);
+    await writeFile(join(work, 'push-crash.txt'), 'ref updated before durable child-success proof\n');
+    gitSync(['-C', work, 'add', 'push-crash.txt']);
+    gitSync(['-C', work, 'commit', '-m', 'Add push crash proof fixture']);
+    const pushedSha = gitSync(['-C', work, 'rev-parse', 'HEAD']).trim();
+    const targetRef = 'refs/heads/feature/crash-proof';
+
+    const triggerName = `pause_push_proof_${schema.slice(-12)}`;
+    const functionName = `${triggerName}_fn`;
+    const barrierKey = `push-child-proof-barrier-${schema.slice(-12)}`;
+    const childApplicationName = `push-child-proof-${schema.slice(-12)}`;
+    const childScript = `
+      require('reflect-metadata');
+      const { NestFactory } = require('@nestjs/core');
+      const { ValidationPipe } = require('@nestjs/common');
+      const cookieParser = require('cookie-parser');
+      (async () => {
+        const { AppModule } = require(process.env.CODE_FORGE_TEST_APP_MODULE);
+        const app = await NestFactory.create(AppModule, { logger: false });
+        app.use(cookieParser());
+        app.setGlobalPrefix('api/v1');
+        app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+        await app.listen(0, '127.0.0.1');
+        process.stdout.write('CODE_FORGE_TEST_READY:' + await app.getUrl() + '\\n');
+      })().catch(() => process.exit(2));
+    `;
+    const backendRoot = resolve(__dirname, '..');
+    const databaseUrl = new URL(process.env.DATABASE_URL!);
+    databaseUrl.searchParams.set('application_name', childApplicationName);
+    const child = spawn(process.execPath, ['-r', requireFromBackend.resolve('ts-node/register'), '-e', childScript], {
+      detached: true,
+      cwd: backendRoot,
+      env: { ...process.env, DATABASE_URL: databaseUrl.toString(), DATABASE_URL_UNPOOLED: databaseUrl.toString(),
+        GIT_STORAGE_PATH: storageRoot, CODE_FORGE_TEST_APP_MODULE: join(backendRoot, 'src', 'app.module.ts') },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let childClosed = false;
+    let childBase = '';
+    let errorOutput = '';
+    let barrier: Client | undefined;
+    let barrierHeld = false;
+    let triggerCreated = false;
+    let functionCreated = false;
+    let pushClient: ReturnType<typeof spawn> | undefined;
+    const gitEnv = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(storageRoot, 'empty-git-config'),
+      GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: join(storageRoot, 'push-crash-askpass.sh'),
+      TEST_GIT_USER: 'PushCrashOwner', TEST_GIT_PAT: secret };
+    const waitForChildExit = async () => {
+      if (child.exitCode !== null || child.signalCode !== null) { childClosed = true; return; }
+      await new Promise<void>((resolveClosed, rejectClosed) => {
+        const timeout = setTimeout(() => rejectClosed(new Error('Push crash API process did not stop.')), 5_000);
+        child.once('close', () => { clearTimeout(timeout); childClosed = true; resolveClosed(); });
+        child.once('error', () => { clearTimeout(timeout); rejectClosed(new Error('Push crash API process could not be stopped.')); });
+        killChildProcessTree(child);
+      });
+    };
+    const waitForChildSessions = async () => {
+      const deadline = Date.now() + 15_000;
+      while (Date.now() < deadline) {
+        const result = await barrier!.query<{ count: number }>(
+          'SELECT COUNT(*)::int AS count FROM pg_stat_activity WHERE application_name = $1 AND pid <> pg_backend_pid()',
+          [childApplicationName]);
+        if (result.rows[0]?.count === 0) return true;
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+      }
+      return false;
+    };
+
+    let testFailure: unknown;
+    try {
+      await writeFile(gitEnv.GIT_ASKPASS,
+        '#!/bin/sh\ncase "$1" in *Username*) printf "%s\\n" "$TEST_GIT_USER" ;; *) printf "%s\\n" "$TEST_GIT_PAT" ;; esac\n',
+        { mode: 0o700 });
+      const ready = new Promise<string>((resolveReady, rejectReady) => {
+        let output = '';
+        const timeout = setTimeout(() => rejectReady(new Error(`Push crash API did not become ready. ${errorOutput.slice(-1000)}`)), 15_000);
+        child.stdout.setEncoding('utf8');
+        child.stdout.on('data', (chunk: string) => {
+          output += chunk;
+          const match = output.match(/CODE_FORGE_TEST_READY:(http:\/\/127\.0\.0\.1:\d+)/);
+          if (match) { clearTimeout(timeout); resolveReady(`${match[1]}/api/v1`); }
+        });
+        child.stderr.setEncoding('utf8');
+        child.stderr.on('data', (chunk: string) => { errorOutput += chunk; });
+        child.once('error', (error) => { clearTimeout(timeout); rejectReady(error); });
+        child.once('close', () => { clearTimeout(timeout); rejectReady(new Error(`Push crash API exited before ready. ${errorOutput.slice(-1000)}`)); });
+      });
+
+      const barrierUrl = new URL(process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL!);
+      barrierUrl.searchParams.set('application_name', `${childApplicationName}-barrier`);
+      barrier = new Client({ connectionString: barrierUrl.toString(), connectionTimeoutMillis: 5_000 });
+      await barrier.connect();
+      await barrier.query("SET statement_timeout = '30s'");
+      await barrier.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [barrierKey]);
+      barrierHeld = true;
+      await admin.$executeRawUnsafe(`CREATE FUNCTION "${schema}"."${functionName}"() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.repository_id = '${storedRepo.id}' AND NEW.error_code = 'GIT_CHILD_SUCCEEDED' THEN
+            PERFORM set_config('client_connection_check_interval', '50', true);
+            PERFORM pg_advisory_lock(hashtextextended('${barrierKey}', 0));
+            PERFORM pg_advisory_unlock(hashtextextended('${barrierKey}', 0));
+          END IF;
+          RETURN NEW;
+        END $$`);
+      functionCreated = true;
+      await admin.$executeRawUnsafe(`CREATE TRIGGER "${triggerName}" BEFORE UPDATE ON "${schema}"."git_push_operations"
+        FOR EACH ROW EXECUTE FUNCTION "${schema}"."${functionName}"()`);
+      triggerCreated = true;
+      childBase = await ready;
+
+      const runGit = promisify(execFile);
+      await runGit('git', ['-C', work, 'remote', 'set-url', 'origin', `${childBase}/git/PushCrashOwner/PushCrash.git`], {
+        timeout: 5_000, env: gitEnv,
+      });
+      pushClient = spawn('git', ['-c', 'credential.helper=', '-C', work, 'push', 'origin', `HEAD:${targetRef}`], {
+        env: gitEnv, stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      pushClient.stdout?.resume();
+      pushClient.stderr?.resume();
+
+      const refDeadline = Date.now() + 20_000;
+      let actualSha = '';
+      while (Date.now() < refDeadline) {
+        try { actualSha = gitSync(['--git-dir', bare, 'rev-parse', targetRef]).trim(); }
+        catch { actualSha = ''; }
+        if (actualSha === pushedSha) break;
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+      }
+      expect(actualSha).toBe(pushedSha);
+
+      const waiterDeadline = Date.now() + 10_000;
+      let barrierWaiters = 0;
+      while (Date.now() < waiterDeadline) {
+        const result = await barrier.query<{ count: number }>(`SELECT COUNT(*)::int AS count
+          FROM pg_stat_activity AS activity JOIN pg_locks AS lock ON lock.pid = activity.pid
+          WHERE activity.application_name = $1 AND activity.pid <> pg_backend_pid()
+            AND activity.wait_event_type = 'Lock' AND activity.wait_event = 'advisory'
+            AND lock.locktype = 'advisory' AND NOT lock.granted`, [childApplicationName]);
+        barrierWaiters = result.rows[0]?.count ?? 0;
+        if (barrierWaiters > 0) break;
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 25));
+      }
+      expect(barrierWaiters).toBeGreaterThan(0);
+      const operation = await db.gitPushOperation.findFirstOrThrow({ where: { repositoryId: storedRepo.id } });
+      expect(operation.status).toBe('PENDING');
+      expect(operation.errorCode).toBe('GIT_CHILD_OUTCOME_UNKNOWN');
+      expect(operation.changedRefCount).toBeNull();
+      expect(operation.beforeRefs).toBeTruthy();
+      expect(typeof operation.beforeRefs).toBe('object');
+      expect(operation.beforeRefs).not.toHaveProperty(targetRef);
+
+      await waitForChildExit();
+      if (pushClient.exitCode === null && pushClient.signalCode === null) pushClient.kill('SIGKILL');
+      await new Promise<void>((resolveClosed, rejectClosed) => {
+        if (pushClient!.exitCode !== null || pushClient!.signalCode !== null) { resolveClosed(); return; }
+        const timeout = setTimeout(() => rejectClosed(new Error('Git push client did not close after API process termination.')), 5_000);
+        pushClient!.once('close', () => { clearTimeout(timeout); resolveClosed(); });
+        pushClient!.once('error', () => { clearTimeout(timeout); rejectClosed(new Error('Git push client could not be closed.')); });
+      });
+      expect(pushClient.exitCode === 0).toBe(false);
+
+      const unlocked = await barrier.query<{ pg_advisory_unlock: boolean }>(
+        'SELECT pg_advisory_unlock(hashtextextended($1, 0))', [barrierKey]);
+      expect(unlocked.rows[0]?.pg_advisory_unlock).toBe(true);
+      barrierHeld = false;
+      expect(await waitForChildSessions()).toBe(true);
+      const durableOperation = await db.gitPushOperation.findUniqueOrThrow({ where: { operationId: operation.operationId } });
+      expect(durableOperation.status).toBe('PENDING');
+      expect(durableOperation.errorCode).toBe('GIT_CHILD_OUTCOME_UNKNOWN');
+      expect(durableOperation.changedRefCount).toBeNull();
+      expect(durableOperation.beforeRefs).toBeTruthy();
+      expect(typeof durableOperation.beforeRefs).toBe('object');
+      expect(durableOperation.beforeRefs).not.toHaveProperty(targetRef);
+      expect(await db.auditLog.count({ where: { targetId: storedRepo.id, action: 'GIT_PUSH_COMPLETED' } })).toBe(0);
+
+      const agedUnknown = await db.gitPushOperation.updateMany({ where: { operationId: operation.operationId,
+        status: 'PENDING', errorCode: 'GIT_CHILD_OUTCOME_UNKNOWN' }, data: { createdAt: new Date(Date.now() - 121_000) } });
+      expect(agedUnknown.count).toBe(1);
+      await app.get(MaintenanceJobsService).runOnce();
+      expect(await db.gitPushOperation.findUniqueOrThrow({ where: { operationId: operation.operationId } }))
+        .toMatchObject({ status: 'PENDING', errorCode: 'GIT_CHILD_OUTCOME_UNKNOWN', changedRefCount: null });
+
+      await runGit('git', ['-C', work, 'remote', 'set-url', 'origin', `${base}/git/PushCrashOwner/PushCrash.git`], {
+        timeout: 5_000, env: gitEnv,
+      });
+      await writeFile(join(work, 'post-crash.txt'), 'a later write must be fenced\n');
+      gitSync(['-C', work, 'add', 'post-crash.txt']);
+      gitSync(['-C', work, 'commit', '-m', 'Attempt push while prior outcome is unknown']);
+      const refBeforeRetry = gitSync(['--git-dir', bare, 'rev-parse', targetRef]).trim();
+      await expect(runGit('git', ['-c', 'credential.helper=', '-C', work, 'push', 'origin', `HEAD:${targetRef}`], {
+        timeout: 15_000, env: gitEnv,
+      })).rejects.toThrow();
+      expect(gitSync(['--git-dir', bare, 'rev-parse', targetRef]).trim()).toBe(refBeforeRetry);
+      expect((await db.gitPushOperation.findUniqueOrThrow({ where: { operationId: operation.operationId } }))
+        .errorCode).toBe('GIT_CHILD_OUTCOME_UNKNOWN');
+    } catch (error) {
+      testFailure = error;
+    } finally {
+      let cleanupFailure: unknown;
+      if (!childClosed) {
+        try { await waitForChildExit(); }
+        catch (error) { cleanupFailure = error; }
+      }
+      if (pushClient && pushClient.exitCode === null && pushClient.signalCode === null) {
+        pushClient.kill('SIGKILL');
+        try {
+          await new Promise<void>((resolveClosed, rejectClosed) => {
+            if (pushClient!.exitCode !== null || pushClient!.signalCode !== null) { resolveClosed(); return; }
+            const timeout = setTimeout(() => rejectClosed(new Error('Git push client cleanup timed out.')), 5_000);
+            pushClient!.once('close', () => { clearTimeout(timeout); resolveClosed(); });
+            pushClient!.once('error', () => { clearTimeout(timeout); rejectClosed(new Error('Git push client cleanup failed.')); });
+          });
+        } catch (error) { cleanupFailure ??= error; }
+      }
+      if (barrierHeld && barrier) {
+        await barrier.query<{ pg_advisory_unlock: boolean }>(
+          'SELECT pg_advisory_unlock(hashtextextended($1, 0))', [barrierKey]).then((result) => {
+          if (!result.rows[0]?.pg_advisory_unlock) throw new Error('Push crash barrier was not released.');
+          barrierHeld = false;
+        }).catch((error) => { cleanupFailure ??= error; });
+      }
+      let sessionsClosed = false;
+      if (barrier && childClosed) {
+        try { sessionsClosed = await waitForChildSessions(); }
+        catch (error) { cleanupFailure ??= error; }
+      }
+      if (childClosed && sessionsClosed) {
+        if (triggerCreated) await admin.$executeRawUnsafe(
+          `DROP TRIGGER IF EXISTS "${triggerName}" ON "${schema}"."git_push_operations"`).catch((error) => { cleanupFailure ??= error; });
+        if (functionCreated) await admin.$executeRawUnsafe(
+          `DROP FUNCTION IF EXISTS "${schema}"."${functionName}"()`).catch((error) => { cleanupFailure ??= error; });
+      } else {
+        preserveArtifacts = true;
+        cleanupFailure ??= new Error(`Preserving isolated crash-test schema ${schema} and storage ${storageRoot}; child exit/session closure was not confirmed.`);
+      }
+      await barrier?.end().catch((error) => { cleanupFailure ??= error; });
+      testFailure ??= cleanupFailure;
+    }
+    if (testFailure instanceof Error) throw testFailure;
+    if (testFailure) throw new Error('Push crash test failed during cleanup.');
+  }, 120_000);
+
   processCrashTest('keeps a pre-CAS merge pending during the grace period, then fails it without moving refs', async () => {
     const registration = await call('POST', 'auth/register', {
       username: 'BeforeCasOwner', email: 'before-cas-owner@example.test', password: 'test-password-123',
