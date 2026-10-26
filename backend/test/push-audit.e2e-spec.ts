@@ -6,11 +6,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
+import { PrismaService } from '../src/database/prisma.service';
 import { MaintenanceJobsService } from '../src/maintenance/maintenance-jobs.service';
+import { GitStorageService } from '../src/repositories/git-storage.service';
 import { GitPushJournalService } from '../src/repositories/git-push-journal.service';
+import { RepositoryLockService } from '../src/repositories/repository-lock.service';
 // cookie-parser is CommonJS; its default import is undefined at runtime in this test runner.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import cookieParser = require('cookie-parser');
@@ -281,6 +284,7 @@ describe('Git push audit HTTP + PostgreSQL + Git', () => {
     const triggerName = `fail_push_audit_${schema.slice(-12)}`;
     const functionName = `${triggerName}_fn`;
     let interruptedOperationId: string | undefined;
+    let interruptedSha: string | undefined;
     try {
       await admin.$executeRawUnsafe(`CREATE FUNCTION "${schema}"."${functionName}"() RETURNS trigger LANGUAGE plpgsql AS $$
         BEGIN
@@ -295,7 +299,7 @@ describe('Git push audit HTTP + PostgreSQL + Git', () => {
       await writeFile(join(work, 'reconcile-audit.txt'), 'ref update survives audit transaction failure\n');
       await git(ownerToken.secret, ['-C', work, 'add', 'reconcile-audit.txt']);
       await git(ownerToken.secret, ['-C', work, 'commit', '-m', 'Exercise push journal reconciliation']);
-      const interruptedSha = (await git(ownerToken.secret, ['-C', work, 'rev-parse', 'HEAD'])).stdout.trim();
+      interruptedSha = (await git(ownerToken.secret, ['-C', work, 'rev-parse', 'HEAD'])).stdout.trim();
       await expect(git(ownerToken.secret, ['-C', work, 'push', '--set-upstream', 'origin', 'feature/reconcile-audit-failure'])).rejects.toBeDefined();
 
       expect((await git(ownerToken.secret, ['--git-dir', bare, 'rev-parse', 'refs/heads/feature/reconcile-audit-failure'])).stdout.trim())
@@ -328,10 +332,44 @@ describe('Git push audit HTTP + PostgreSQL + Git', () => {
       await admin.$executeRawUnsafe(`DROP FUNCTION IF EXISTS "${schema}"."${functionName}"()`);
     }
 
-    if (!interruptedOperationId) throw new Error('Push operation was not journaled for reconciliation.');
+    if (!interruptedOperationId || !interruptedSha) throw new Error('Push operation was not journaled for reconciliation.');
     await db.$executeRaw`UPDATE git_push_operations SET created_at = NOW() - INTERVAL '121 seconds'
       WHERE operation_id = ${interruptedOperationId}::uuid AND repository_id = ${repository.id}::uuid`;
     const maintenance = app.get(MaintenanceJobsService);
+    await maintenance.onModuleDestroy();
+    const primaryLocks = app.get(RepositoryLockService);
+    const secondaryLocks = new RepositoryLockService(app.get(ConfigService));
+    const concurrentJournals = [
+      app.get(GitPushJournalService),
+      new GitPushJournalService(app.get(PrismaService), app.get(GitStorageService), secondaryLocks),
+    ];
+    const blockedReconcilers = await primaryLocks.acquire(repository.id);
+    const reconciliationRuns = concurrentJournals.map((journal) => journal.reconcilePending());
+    let bothReconcilersQueued = false;
+    try {
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const waiters = await db.$queryRaw<{ count: bigint }[]>`SELECT COUNT(*)::bigint AS count FROM pg_stat_activity
+          WHERE wait_event_type = 'Lock' AND wait_event = 'advisory' AND query LIKE '%pg_advisory_lock%'`;
+        if (waiters[0]!.count >= 2n) {
+          bothReconcilersQueued = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    } finally {
+      await blockedReconcilers.release();
+    }
+    try {
+      await Promise.all(reconciliationRuns);
+      expect(bothReconcilersQueued).toBe(true);
+      for (const locks of [primaryLocks, secondaryLocks]) {
+        const reacquired = await locks.acquire(repository.id);
+        await reacquired.release();
+      }
+    } finally {
+      await secondaryLocks.onModuleDestroy();
+    }
+
     let completedAfterReconcile: { status: string; changed_ref_count: number | null }[] = [];
     for (let attempt = 0; attempt < 20; attempt += 1) {
       await maintenance.runOnce();
@@ -341,6 +379,8 @@ describe('Git push audit HTTP + PostgreSQL + Git', () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     expect(completedAfterReconcile).toMatchObject([{ status: 'COMPLETED', changed_ref_count: 1 }]);
+    expect((await git(ownerToken.secret, ['--git-dir', bare, 'rev-parse', 'refs/heads/feature/reconcile-audit-failure'])).stdout.trim())
+      .toBe(interruptedSha);
     const recoveredAudits = await db.$queryRaw<{ actor_id: string; details: Record<string, unknown> }[]>`SELECT actor_id, details FROM audit_logs
       WHERE action = 'GIT_PUSH_COMPLETED' AND details->>'repositoryId' = ${repository.id}
         AND details->>'operationId' = ${interruptedOperationId}`;
