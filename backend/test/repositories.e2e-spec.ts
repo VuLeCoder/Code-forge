@@ -123,15 +123,25 @@ describe('Repository HTTP + PostgreSQL', () => {
   }, 60_000);
 
   afterAll(async () => {
-    await app?.close();
-    await db?.$disconnect();
-    if (storageRoot) await rm(storageRoot, { recursive: true, force: true });
-    if (admin) {
+    const cleanupFailures: Array<{ step: string; error: unknown }> = [];
+    const attemptCleanup = async (step: string, cleanup: () => Promise<unknown> | unknown) => {
       try {
-        if (schemaCreated) await admin.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`);
-      } finally {
-        await admin.$disconnect();
+        await cleanup();
+      } catch (error) {
+        cleanupFailures.push({ step, error });
       }
+    };
+
+    await attemptCleanup('close Nest application', async () => { await app?.close(); });
+    await attemptCleanup('disconnect test Prisma client', async () => { await db?.$disconnect(); });
+    await attemptCleanup('remove temporary Git storage', async () => {
+      if (storageRoot) await rm(storageRoot, { recursive: true, force: true });
+    });
+    if (admin) {
+      await attemptCleanup('drop isolated test schema', async () => {
+        if (schemaCreated) await admin!.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`);
+      });
+      await attemptCleanup('disconnect admin Prisma client', async () => { await admin!.$disconnect(); });
     }
     for (const [key, value] of Object.entries({
       DATABASE_URL: originalUrl, MAX_REPOSITORIES_PER_USER: originalQuota,
@@ -142,8 +152,17 @@ describe('Repository HTTP + PostgreSQL', () => {
       MAX_FILE_BYTES: originalMaxFileBytes,
       MAX_PUSH_BYTES: originalMaxPushBytes,
     })) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
+      await attemptCleanup(`restore ${key}`, () => {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      });
+    }
+
+    if (cleanupFailures.length > 0) {
+      const errors = cleanupFailures.map(({ step, error }) => new Error(`Cleanup failed: ${step}`, { cause: error }));
+      throw new AggregateError(errors, `${cleanupFailures.length} repository E2E cleanup step(s) failed.`, {
+        cause: cleanupFailures[0]?.error,
+      });
     }
   });
 
