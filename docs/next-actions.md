@@ -2,7 +2,7 @@
 
 ## Current release gates (2026-10-26; older “Current” blocks below are historical)
 
-- Source/CI at last check: `origin/thviet` is `97db5ff38ce3fba79968ffcd22f8e9a5140a4f8a`; Actions `MVP verification` #133 (`40271694208`) passed on that exact SHA. Runs #129–#132 also passed on their recorded commits.
+- Source/CI at last check: `origin/thviet` is `2eed94471d4a1d8c3ea80163b26afec0a05ebf1c`; Actions `MVP verification` #135 (`40273582715`) passed on that exact SHA. Runs #129–#134 also passed on their recorded commits.
 - Completed for the BTL demo: local full-stack owner/collaborator/PR journey, hosted CI #128, Render readiness/local-frontend→Render API, public anonymous clone/fetch, private PAT clone/push/fetch, owner PR merge/fetch and collaborator WRITE invite/accept/push/PR/owner-merge/fetch. Temporary PATs were revoked. Evidence is in the acceptance board, cloud checklist and task log.
 - Cloud/release still partial: admin/audit cloud, payload/quota boundaries, migration, backup/restore and restart/source-loss recovery are unverified. Render Free storage may lose Git source on restart; historical P1001 cause remains unknown. Do not redeploy/restart as a “fix” without a source recovery plan.
 - For the BTL demo, core API/Git owner-and-collaborator flow is verified; a local 375×812 check confirmed the storage warning is visible without horizontal overflow, and admin bootstrap CLI E2E passed 5/5 on an isolated DB. Optional browser-driven PR presentation is not claimed. Broader P3/P4 recovery matrix and issue #6's operator-resolution policy remain open; Vercel is out of scope.

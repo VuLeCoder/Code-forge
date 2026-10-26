@@ -6,9 +6,9 @@
 
 | Trường | Kết quả |
 | --- | --- |
-| Source tip | `97db5ff` on `thviet` (exact SHA `97db5ff38ce3fba79968ffcd22f8e9a5140a4f8a`) |
-| Code CI evidence | Actions `MVP verification` #133 (`40271694208`) passed on the exact source SHA; #129–#132 also passed on their respective SHAs |
-| Latest CI at check | #133 (`40271694208`): completed successfully |
+| Source tip | `2eed944` on `thviet` (exact SHA `2eed94471d4a1d8c3ea80163b26afec0a05ebf1c`) |
+| Code CI evidence | Actions `MVP verification` #135 (`40273582715`) passed on the exact source SHA; #129–#134 also passed on their respective SHAs |
+| Latest CI at check | #135 (`40273582715`): completed successfully |
 | Render commit đang chạy | `388c584` theo Render Dashboard; chưa phải source tip hiện tại |
 | Frontend URL | Chưa có; Vercel deferred/out of scope |
 | Backend URL | `https://code-forge-api-thviet.onrender.com` |
@@ -17,7 +17,7 @@
 | Git/PR HTTPS smoke | 2026-10-26: anonymous public clone/fetch; private PAT clone/push/fetch; owner PR merge/fetch `f8468c6063a70aea4306f6ab6de7a1c58cafb7bd`; WRITE invitation→accept→collaborator push/PR→owner merge/fetch `481d75d44f2ad2855bab853cb55d28c96235877b`. Both merge commits have two parents. Temporary PATs revoked and sessions logged out. Payload/quota, admin and recovery not tested. |
 | Người nghiệm thu | Codex; Render API/Git/PR integration smoke, not visual browser or full release acceptance |
 
-Readiness implementation chạy `SELECT 1` qua Prisma và ghi/xóa file tạm trong Git storage (có thể tạo thư mục nếu thiếu). Public/private Git HTTPS và collaborator invitation→accept→push/PR→owner merge/fetch đã được smoke-test qua API/Git; browser UI journey, admin, migration, backup/restore, payload quota và source recovery sau restart chưa được nghiệm thu. Render Dashboard vẫn cho thấy last verified successful deploy là `388c584`; không deploy/restart trước khi có kế hoạch sao lưu/khôi phục Git vì storage Free có thể mất dữ liệu.
+Readiness implementation chạy `SELECT 1` qua Prisma và ghi/xóa file tạm trong Git storage (có thể tạo thư mục nếu thiếu). Public/private Git HTTPS và collaborator invitation→accept→push/PR→owner merge/fetch đã được smoke-test qua API/Git; browser UI journey, admin, migration, backup/restore, payload quota và source recovery sau restart chưa được nghiệm thu. Render Dashboard vẫn cho thấy last verified successful deploy là `388c584` (source tip `2eed944` mới hơn); không deploy/restart trước khi có kế hoạch sao lưu/khôi phục Git vì storage Free có thể mất dữ liệu.
 
 ## Tài khoản và quyền truy cập
 
