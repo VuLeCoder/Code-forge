@@ -4,21 +4,22 @@
 
 For detailed evidence and residual acceptance cases, use [the acceptance board](operations/acceptance-task-board-2026-10-25.md), [next actions](next-actions.md), and [the cloud checklist](deployment/cloud-smoke-checklist.md). Historical snapshots below are not current status.
 
-- Integration source `origin/thviet` remains `7588c0a4306abf5309de2fe0cb8c6e0c93dac0e2` (CI #138). Separate feature candidate `codex/push-crash-proof` is locally at `34ba7b0` (T37); its pushed ancestor `200c22da92d72536b585d66769154283325d41e3` passed hosted `MVP verification` #139 (`40340975441`). T37 is not yet in `thviet`/`main` or deployed to Render.
+- Integration source `origin/thviet` remains `7588c0a4306abf5309de2fe0cb8c6e0c93dac0e2` (CI #138). Separate feature candidate `codex/push-crash-proof` is at `d2494d589a0ee482926af52cf27da09c710c2ce1`; hosted `MVP verification` #141 (`40351375771`) passed on that exact SHA. It is not in `thviet`/`main` or deployed to Render.
 - BTL cloud evidence: Render `388c584` readiness, direct public/private Git, owner PR merge, and WRITE collaborator invitation→push→PR→owner merge smoke passed. Read-only dashboard preflight confirmed `code-forge-api-thviet` tracks `VuLeCoder/Code-forge`/`thviet`, Auto-Deploy is `After CI Checks Pass`, and Free has no persistent disk. Neon `Code Forge` is separate from `BUS Ticket`, with production/Singapore/Free and a 6-hour history window. Migration, backup/restore, admin/audit cloud, quota-boundary cloud tests, and source-loss recovery remain unverified. The historical `4407e7d` P1001 cause remains unknown; no deploy/restart should be inferred from CI.
-- P3/P4 remain partial. T37 (`34ba7b0`) adds a POSIX-only push crash E2E after durable `GIT_CHILD_SUCCEEDED` and before journal finish; isolated Linux/PostgreSQL 17 evidence verifies replacement reconciliation, one audit and a subsequent push. Earlier T32 covers the pre-proof crash, while `86fe49e`, `5b232dc` and `56cfb3d` cover Nest recreation, idempotence and operation-ID collision. Broad recovery, advisory-lock-loss and issue #5 remain open.
+- Local P8 prerequisite: T38 rehearsed metadata `pg_dump`/`pg_restore` successfully between two disposable PostgreSQL 17 tmpfs containers after all 7 migrations, with synthetic user/repository/audit rows preserved. This is not Neon production backup/restore, encrypted backup, Git source backup or cloud recovery evidence.
+- P3/P4 remain partial. T37 (`34ba7b0`, hosted in feature CI #141) adds a POSIX-only push crash E2E after durable `GIT_CHILD_SUCCEEDED` and before journal finish; isolated Linux/PostgreSQL 17 evidence verifies replacement reconciliation, one audit and a subsequent push. Earlier T32 covers the pre-proof crash, while `86fe49e`, `5b232dc` and `56cfb3d` cover Nest recreation, idempotence and operation-ID collision. Broad recovery, advisory-lock-loss and issue #5 remain open.
 - Issue #6 operator resolution remains fail-closed pending the owner policy. Vercel is out of scope. P0–P8 completion is not claimed.
 
 | Package | Current state |
 | --- | --- |
-| P0 baseline/CI | Integration CI #138 passed on `7588c0a`; feature CI #139 passed on pushed `200c22d`. No feature integration or cloud deploy is implied. |
+| P0 baseline/CI | Integration CI #138 passed on `7588c0a`; feature CI #141 passed on `d2494d5`. No feature integration or cloud deploy is implied. |
 | P1 auth/invitation/contracts | Implemented with unit/HTTP integration evidence; full P0–P8 acceptance remains open. |
 | P2 direct cloud Git | Partial: direct Git and owner/collaborator smoke passed on Render `388c584`; migration, backup/recovery, quota and release checks remain open. |
-| P3 repository write coordination | Partial: merge→delete, valid-pack lock-loss, pre-proof push crash and post-durable-child-success push crash tests have evidence; T37 is local-only at `34ba7b0`. Broader Git/PostgreSQL recovery remains open. |
+| P3 repository write coordination | Partial: merge→delete, valid-pack lock-loss, pre-proof push crash and post-durable-child-success push crash tests have evidence; T37 is hosted in feature CI #141. Broader Git/PostgreSQL recovery remains open. |
 | P4 PR/compare/merge | Partial: core flows and merge→delete ordering covered; other matrix/cloud acceptance remains open. |
 | P5 PR/admin UI | Partial: browser checks exist; manual screen-reader/device verification is not established here. |
 | P6 admin/audit/jobs | Partial: core paths are covered; issue #6 resolution remains deliberately fail-closed. |
-| P7 regression | Feature Actions #139 passed on `200c22d`; local T37 at `34ba7b0` passed its isolated Linux gate but is not hosted yet. Integration branch remains at #138/`7588c0a`; cloud and manual screen-reader/device checks remain separate. |
+| P7 regression | Feature Actions #141 passed on `d2494d5`, including T37 and maintenance retry coverage. Integration branch remains at #138/`7588c0a`; cloud and manual screen-reader/device checks remain separate. |
 | P8 release/handoff | Partial/open: owner/collaborator Git/PR smoke passed; no cloud migration, backup/restore, write-freeze rehearsal, or source-loss recovery is claimed as passed. |
 
 The snapshots and package tables below are retained as historical execution records; where their SHA, run number, or state differs, this section is authoritative.

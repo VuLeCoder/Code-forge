@@ -6,21 +6,21 @@
 
 | Trường | Kết quả |
 | --- | --- |
-| Source tip | Integration `thviet`: `7588c0a` (exact SHA `7588c0a4306abf5309de2fe0cb8c6e0c93dac0e2`); feature `codex/push-crash-proof`: `1aa76a8` |
-| Code CI evidence | Actions `MVP verification` #138 (`40276491886`) passed on `thviet`; feature ancestor `200c22d` passed #139 (`40340975441`). T37 at `1aa76a8` has local Linux evidence only. |
-| Latest CI at check | #139 (`40340975441`): completed successfully on feature ancestor; no hosted run yet for T37 tip |
+| Source tip | Integration `thviet`: `7588c0a` (exact SHA `7588c0a4306abf5309de2fe0cb8c6e0c93dac0e2`); feature `codex/push-crash-proof`: `d2494d5` |
+| Code CI evidence | Actions `MVP verification` #138 (`40276491886`) passed on `thviet`; feature #141 (`40351375771`) passed on exact `d2494d5`. |
+| Latest CI at check | #141 (`40351375771`): completed successfully on feature SHA `d2494d589a0ee482926af52cf27da09c710c2ce1` |
 | Render commit đang chạy | `388c584` theo Render Dashboard; chưa phải source tip hiện tại |
 | Render auto-deploy | `After CI Checks Pass`; pushes to `thviet` may redeploy. Do not push until the documented source-recovery preflight is satisfied. |
 | Render service limits | Dashboard read-only check: `code-forge-api-thviet`, Free plan, no persistent disk; Live `388c584`; source can be lost on restart/redeploy. |
 | Neon resource | Dashboard read-only check: project `Code Forge` (`green-mountain-81958216`), branch `production`, Singapore, Free; separate from `BUS Ticket`. |
-| Neon history window | 6 hours; this is time-travel/instant-restore history, not a completed export backup/restore rehearsal. |
+| Neon history window | 6 hours; this is time-travel/instant-restore history, not a completed production export/restore rehearsal. T38 only rehearsed local PostgreSQL metadata backup/restore. |
 | Frontend URL | Chưa có; Vercel deferred/out of scope |
 | Backend URL | `https://code-forge-api-thviet.onrender.com` |
 | Readiness probe | 2026-10-26: `GET /api/v1/health/ready` → HTTP 200; database/Git/storage đều `up` trên deployed `388c584` (Render vẫn chưa ở source tip `7588c0a`) |
 | Live revision endpoint | 2026-10-26: `GET /api/v1/health/live` → HTTP 200, body chỉ có `status` và `timestamp`; `commitSha` chưa có trên deployed `388c584`, nên source change `97d5d34` chưa được xác minh live |
 | Public repository API | 2026-10-26: HTTP 200 sau cold start; initial wake requests returned `503 hibernate-pending-wake` |
 | Git/PR HTTPS smoke | 2026-10-26: anonymous public clone/fetch; private PAT clone/push/fetch; owner PR merge/fetch `f8468c6063a70aea4306f6ab6de7a1c58cafb7bd`; WRITE invitation→accept→collaborator push/PR→owner merge/fetch `481d75d44f2ad2855bab853cb55d28c96235877b`. Both merge commits have two parents. Temporary PATs revoked and sessions logged out. Payload/quota, admin and recovery not tested. |
-| Người nghiệm thu | Codex; Render API/Git/PR integration smoke, not visual browser or full release acceptance |
+| Người nghiệm thu | Codex; Render API/Git/PR integration smoke plus local T-COMPOSE/T37/T38 evidence, not visual browser or full release acceptance |
 
 Local runtime evidence (separate from cloud): T-COMPOSE used project `codeforge-smoke-20261025-b51c88c` with loopback-only ports and new task-owned volumes; all 7 migrations applied, backend healthcheck was healthy, and `/api/v1/health/ready` returned HTTP 200. The containers/network were stopped without `-v`; existing user containers and volumes were not touched. T37's isolated Linux/PostgreSQL process-crash evidence is recorded in the execution log and is not a Render/Neon result.
 
