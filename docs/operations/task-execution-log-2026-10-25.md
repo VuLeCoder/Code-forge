@@ -1179,3 +1179,9 @@ snapshots, not current status. Current acceptance state is in the task board.
 - Read-only request to `GET https://code-forge-api-thviet.onrender.com/api/v1/health/live` returned HTTP 200 at `2026-10-26T06:14:38Z`, with `status` and `timestamp` only; the new `commitSha` field is not present in the live response. Render Dashboard inspection still identifies `388c584` as the Live deploy, older than source tip `7588c0a`.
 - Updated only the current acceptance/next-action/cloud-checklist summaries. Render remains on `388c584`; no deploy, restart, migration, database mutation, backup operation or source recovery rehearsal was performed. Admin/audit cloud, quota-boundary cloud checks, migration, backup/restore and source-loss recovery remain open. Keep T24 as historical source implementation evidence, not live verification.
 - Read-only GitHub API recheck returned issues #5 and #6 both `open`. Corrected `docs/issue-update-drafts.md` to identify `issue-draft-ambiguous-git-journals.md` as the local copy of already-published issue #6; no issue comment or external mutation was made.
+
+## T26-BTL AUTODEPLOY SAFETY CHECK — push deferred
+
+- After the documentation commits `c60feef` and `bf8c6f2`, the pushed code tip remains `origin/thviet`=`7588c0a4306abf5309de2fe0cb8c6e0c93dac0e2`; these commits only reconcile evidence/context and do not change runtime code.
+- Read-only Render Settings inspection showed Auto-Deploy is `After CI Checks Pass`, so pushing to `thviet` may deploy automatically. The current Live deploy is still `388c584`; `/api/v1/health/live` returned HTTP 200 without `commitSha`.
+- Did not push or deploy because Git-source recovery after redeploy has not been rehearsed and the runbook requires that safeguard. No settings, DB, storage, or cloud service were changed.

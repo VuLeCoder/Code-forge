@@ -8,8 +8,9 @@ Tạo image và chuẩn bị hướng dẫn không chứng minh dịch vụ clou
 
 ### Bằng chứng hiện tại
 
-- Source tip trên `thviet`: `23cb1c7` (docs-only after tested code commit `b6411ad`). Hosted CI [#118](https://github.com/VuLeCoder/Code-forge/actions/runs/40262580445) passed on exact code SHA `b6411ad`; docs-only run #119 on `23cb1c7` was in progress at this snapshot.
+- Current pushed code tip `origin/thviet`: `7588c0a` (exact SHA `7588c0a4306abf5309de2fe0cb8c6e0c93dac0e2`). Hosted CI [#138](https://github.com/VuLeCoder/Code-forge/actions/runs/40276491886) passed on that exact SHA. The current worktree contains later documentation-only commits that are not pushed.
 - Render Dashboard xác nhận service `code-forge-api-thviet` đang chạy deploy `388c584`, không phải source tip hiện tại. Probe readiness ngày 2026-10-26 trả HTTP 200 với database/Git/storage `up`; endpoint thực hiện `SELECT 1` qua Prisma và ghi/xóa file tạm trong storage. Đây chỉ là bằng chứng connectivity/readiness trên deploy `388c584`, không phải probe chỉ đọc hay smoke nghiệp vụ.
+- Read-only `GET /api/v1/health/live` returned HTTP 200 but only `status` and `timestamp`, without `commitSha`; the health revision field from source commit `97d5d34` is not live yet. Render Settings shows Auto-Deploy `After CI Checks Pass`; a push to `thviet` may redeploy this service.
 - Lịch sử có deploy `4407e7d` thất bại `P1001`; nguyên nhân gốc chưa được chứng minh. Readiness hiện tại cho thấy kết nối hoạt động tại thời điểm probe, không chứng minh đã xác định hoặc loại trừ nguyên nhân lỗi cũ.
 - Chưa nghiệm thu migration/backup/restore, TLS/proxy, Git HTTP trực tiếp, auth/quyền, cold start, mất source khi restart và khôi phục. Không suy ra cloud acceptance từ CI hay local image smoke.
 

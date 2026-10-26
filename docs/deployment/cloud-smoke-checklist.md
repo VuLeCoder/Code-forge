@@ -10,6 +10,7 @@
 | Code CI evidence | Actions `MVP verification` #138 (`40276491886`) passed on the exact source SHA |
 | Latest CI at check | #138 (`40276491886`): completed successfully |
 | Render commit đang chạy | `388c584` theo Render Dashboard; chưa phải source tip hiện tại |
+| Render auto-deploy | `After CI Checks Pass`; pushes to `thviet` may redeploy. Do not push until the documented source-recovery preflight is satisfied. |
 | Frontend URL | Chưa có; Vercel deferred/out of scope |
 | Backend URL | `https://code-forge-api-thviet.onrender.com` |
 | Readiness probe | 2026-10-26: `GET /api/v1/health/ready` → HTTP 200; database/Git/storage đều `up` trên deployed `388c584` (Render vẫn chưa ở source tip `7588c0a`) |
