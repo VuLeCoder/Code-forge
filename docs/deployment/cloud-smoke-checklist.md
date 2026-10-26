@@ -6,13 +6,14 @@
 
 | Trường | Kết quả |
 | --- | --- |
-| Source tip hiện tại | `23cb1c7` trên `thviet` (docs-only after tested code SHA `b6411ad`) |
-| Code CI evidence | Actions #118 (`40262580445`) passed on exact SHA `b6411ad` |
-| Latest docs CI | Actions #119 for `23cb1c7` was in progress at this snapshot |
+| Source tip hiện tại | `8d6141e` trên `thviet` (exact SHA `8d6141ef2b1e2c92525a300fcc5aa1eb5b44118a`) |
+| Code CI evidence | Actions #118 (`40262580445`) passed on exact SHA `b6411ad`; acceptance CI #121–#123 also passed on their exact SHAs |
+| Latest CI | Actions #124 (`40266111595`) passed on exact SHA `8d6141e` |
 | Render commit đang chạy | `388c584` theo Render Dashboard; chưa phải source tip hiện tại |
 | Frontend URL | Chưa có; Vercel deferred/out of scope |
 | Backend URL | `https://code-forge-api-thviet.onrender.com` |
 | Readiness probe | 2026-10-26: `GET /api/v1/health/ready` → HTTP 200; database/Git/storage đều `up` |
+| Public repository API | 2026-10-26: after Render cold start, `GET /api/v1/repositories?page=1` → HTTP 200, empty list. Initial wake requests returned Render `503 hibernate-pending-wake`; this is cold-start evidence only, not Git/auth/business smoke. |
 | Người nghiệm thu | Codex; probe qua endpoint public, không phải kiểm thử nghiệp vụ |
 
 Readiness implementation chạy `SELECT 1` qua Prisma và ghi/xóa file tạm trong Git storage (có thể tạo thư mục nếu thiếu), nhưng probe đơn lẻ không chứng minh login, migration, backup/restore, Git HTTP hoặc quyền dữ liệu. Render Dashboard vẫn cho thấy last successful deploy là `388c584`; không deploy/restart để cập nhật source trước khi có kế hoạch sao lưu/khôi phục Git vì storage Free có thể mất dữ liệu.
