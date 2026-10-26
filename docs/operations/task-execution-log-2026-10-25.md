@@ -50,7 +50,7 @@ cloud status.
 
 ## T-CURRENT-RELEASE-2026-10-26 — current evidence pointer
 
-- Last CI-verified runtime candidate: `50f4ee432d868a065c287cf948dab6f0ea8e3dd3` on `thviet`; hosted CI #147 (`40356177128`) passed all 28/28 workflow steps. The remote branch later received documentation-only follow-up `aada694`; CI #148 (`40357459570`) also passed all 28/28 steps.
+- Last CI-verified runtime candidate: `70500d849f1d0e31e64618cc51f311161f716459` on `thviet`; hosted CI #150 (`40359823730`) passed all 28/28 workflow steps. Later test/docs follow-ups remain separate exact-SHA checks.
 - Render remains at the separately observed deploy `388c584`; no Render deploy/restart, Neon migration, provider setting, or cloud backup/restore was performed. P0–P8 and cloud release remain incomplete.
 
 ## T-BASE — historical baseline snapshot (superseded)
@@ -1310,4 +1310,4 @@ cloud status.
 
 - Commit `70500d8` updates `backend/src/maintenance/maintenance-jobs.service.ts` so independent maintenance jobs run sequentially under the existing process-wide advisory lock, while a transient failure in one job no longer prevents later purge or temporary-directory cleanup in the same batch. Reconciliation remains fail-closed and retries on a later tick; logs contain only fixed job labels.
 - Focused verification on 2026-10-26: backend typecheck, targeted ESLint and `corepack pnpm --filter backend exec jest src/maintenance/maintenance-jobs.service.spec.ts --runInBand` passed (18/18). Read-only review-agent reported **No findings**; the added test covers an invitation-expiration failure and confirms later jobs plus lock release still run. Independent failure injection for every other job boundary remains optional follow-up coverage.
-- Runtime commit `70500d8` and test commit `5840efb` were pushed to `origin/thviet`; hosted MVP verification [#150](https://github.com/VuLeCoder/Code-forge/actions/runs/40359823730) for the runtime commit remains in progress at the time of this record, and the test tip may trigger a subsequent workflow. No Render/Neon deploy, migration, restart, or data mutation was performed.
+- Runtime commit `70500d8` and test commit `5840efb` were pushed to `origin/thviet`; hosted MVP verification [#150](https://github.com/VuLeCoder/Code-forge/actions/runs/40359823730) passed all 28/28 steps on the runtime commit. The later test/docs tip has follow-up runs still in progress. No Render/Neon deploy, migration, restart, or data mutation was performed.
