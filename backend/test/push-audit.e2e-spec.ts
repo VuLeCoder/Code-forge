@@ -347,6 +347,12 @@ describe('Git push audit HTTP + PostgreSQL + Git', () => {
     expect(recoveredAudits).toHaveLength(1);
     expect(recoveredAudits[0]).toMatchObject({ actor_id: owner.id, details: { operationId: interruptedOperationId,
       repositoryId: repository.id, storageGeneration: storedRepo.storageGeneration, changedRefCount: 1 } });
+    await maintenance.runOnce();
+    expect(await db.gitPushOperation.findUniqueOrThrow({ where: { operationId: interruptedOperationId } }))
+      .toMatchObject({ status: 'COMPLETED', changedRefCount: 1 });
+    const repeatedRecoveryAudits = await db.$queryRaw<{ count: bigint }[]>`SELECT COUNT(*) AS count FROM audit_logs
+      WHERE action = 'GIT_PUSH_COMPLETED' AND details->>'operationId' = ${interruptedOperationId}`;
+    expect(repeatedRecoveryAudits).toEqual([{ count: 1n }]);
 
     const pushJournal = app.get(GitPushJournalService);
     await git(ownerToken.secret, ['-C', work, 'switch', '-c', 'feature/unknown-child-outcome']);
