@@ -24,7 +24,7 @@ Không gửi connection string, password, PAT, cookie hay secret qua chat, issue
 2. Đối chiếu **tên biến** với [bảng deployment](./README.md#biến-môi-trường-backend). Không dán giá trị để chia sẻ. Runtime cần `DATABASE_URL`; `DATABASE_URL_UNPOOLED` phải là direct URL phù hợp advisory lock/migration. Frontend local cần `BACKEND_URL`, `APP_ORIGIN`, và cùng `RATE_LIMIT_PROXY_SECRET` ở server frontend/backend.
 3. Xác nhận commit có CI cần thiết và image build được. Kiểm tra trạng thái migration bằng quy trình read-only được hỗ trợ; không chạy `migrate reset`, `db push`, hoặc lệnh thay schema để “thử kết nối”.
 4. Với clone Git dự phòng: xác minh đúng repository, remote không chứa credential trong URL, branch/tag cần giữ hiện diện và object connectivity đọc được. Không đưa source private vào nơi lưu trữ/chia sẻ không được phép.
-5. Xác minh nguồn backup Neon, phạm vi, thời điểm và cách phục hồi trực tiếp theo tính năng đang có trong tài khoản. Chụp backup metadata trước migration; kiểm tra bản backup đọc/khôi phục được trên bản sao cô lập trước khi release. **Hiện chưa có bằng chứng backup/restore cloud đã chạy.**
+5. Xác minh nguồn backup Neon, phạm vi, thời điểm và cách phục hồi trực tiếp theo tính năng đang có trong tài khoản. Backup export phải được mã hóa bởi provider/KMS hoặc bằng công cụ mã hóa đã phê duyệt trước khi rời máy; khóa chỉ nằm trong secret manager với quyền restore tối thiểu. Ghi checksum, quyền truy cập, thời hạn lưu giữ và xác nhận xóa artifact plaintext/tạm sau rehearsal. Chụp backup metadata trước migration; kiểm tra bản backup đọc/khôi phục được trên bản sao cô lập trước khi release. **Hiện chưa có bằng chứng backup/restore cloud đã chạy.**
 
 ## 2. Cửa sổ ghi và migration
 

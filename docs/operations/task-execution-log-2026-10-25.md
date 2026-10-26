@@ -1268,3 +1268,10 @@ snapshots, not current status. Current acceptance state is in the task board.
 
 - GitHub Actions [MVP verification #141](https://github.com/VuLeCoder/Code-forge/actions/runs/40351375771) completed successfully on exact feature SHA `d2494d589a0ee482926af52cf27da09c710c2ce1` at 2026-10-26. The single `verify` job ran from 15:38:56 to 15:44:31 (local display time) and concluded `success`.
 - This hosted result includes the maintenance retry test and reconciled deployment documentation. It does not imply a `thviet`/`main` update, Render deploy, Neon migration, cloud backup/restore, or source-loss recovery; those remain separate open gates.
+
+## T40-BTL MIGRATION FAILURE/RECOVERY — local disposable PostgreSQL
+
+- Created a temporary Prisma migration copy `codeforge-p8-migration-failure-x7f3b` and used one labeled `postgres:17-alpine` tmpfs container. The seven current migrations applied successfully; `_prisma_migrations` contained 7 finished rows and the probe table did not exist.
+- A deliberately failing migration (`20261026170000_p8_failure_rehearsal`) returned exit 1 with Prisma `P3018` / PostgreSQL `42883`; the seven baseline rows stayed finished, the failed row had no `finished_at` or `rolled_back_at`, and no probe table was created.
+- `prisma migrate resolve --rolled-back 20261026170000_p8_failure_rehearsal` returned 0. Replacing the migration only in the temporary copy with valid SQL and rerunning `prisma migrate deploy` returned 0; the baseline remained 7, the corrected migration finished, and the probe table existed with two columns.
+- Cleanup removed the exact labeled container and temporary Prisma copy. No existing Docker volume, Neon, Render, repository file or secret was touched. This proves local disposable migration failure→resolve→forward recovery only; it does not prove Neon/cloud migration, encrypted backup, write-freeze, application rollback or production recovery.

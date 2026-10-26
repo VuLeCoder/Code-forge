@@ -20,7 +20,7 @@
 | Live revision endpoint | 2026-10-26: `GET /api/v1/health/live` → HTTP 200, body chỉ có `status` và `timestamp`; `commitSha` chưa có trên deployed `388c584`, nên source change `97d5d34` chưa được xác minh live |
 | Public repository API | 2026-10-26: HTTP 200 sau cold start; initial wake requests returned `503 hibernate-pending-wake` |
 | Git/PR HTTPS smoke | 2026-10-26: anonymous public clone/fetch; private PAT clone/push/fetch; owner PR merge/fetch `f8468c6063a70aea4306f6ab6de7a1c58cafb7bd`; WRITE invitation→accept→collaborator push/PR→owner merge/fetch `481d75d44f2ad2855bab853cb55d28c96235877b`. Both merge commits have two parents. Temporary PATs revoked and sessions logged out. Payload/quota, admin and recovery not tested. |
-| Người nghiệm thu | Codex; Render API/Git/PR integration smoke plus local T-COMPOSE/T37/T38 evidence, not visual browser or full release acceptance |
+| Người nghiệm thu | Codex; Render API/Git/PR integration smoke plus local T-COMPOSE/T37/T38/T40 evidence, not visual browser or full release acceptance |
 
 Local runtime evidence (separate from cloud): T-COMPOSE used project `codeforge-smoke-20261025-b51c88c` with loopback-only ports and new task-owned volumes; all 7 migrations applied, backend healthcheck was healthy, and `/api/v1/health/ready` returned HTTP 200. The containers/network were stopped without `-v`; existing user containers and volumes were not touched. T37's isolated Linux/PostgreSQL process-crash evidence is recorded in the execution log and is not a Render/Neon result.
 

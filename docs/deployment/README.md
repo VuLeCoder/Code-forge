@@ -73,7 +73,7 @@ Các biến TTL mặc định hiện tại nằm trong `backend/.env.example`; c
 ### 2. Sao lưu metadata và migrate
 
 1. Trước release, xác định cơ chế operator/provider đã kiểm chứng để chặn mutation mới và xác nhận Git push/merge đang chạy đã drain. Hiện chưa có application-wide write gate được xác minh; maintenance jobs và readiness endpoint không chặn ghi. Nếu chưa có cơ chế thực tế kèm bằng chứng drain, **dừng tại đây: không migrate/deploy và không dùng restart thay cho drain**.
-2. Tạo bản sao Neon/pg_dump có mã hóa và kiểm tra bản sao đọc được. Không đưa dump hoặc connection string vào Git.
+2. Tạo bản sao Neon/pg_dump được mã hóa bởi provider/KMS hoặc công cụ mã hóa đã phê duyệt; giữ khóa trong secret manager, giới hạn quyền restore, ghi checksum/thời hạn lưu giữ và xóa artifact plaintext sau rehearsal. Kiểm tra bản sao đọc/khôi phục được. Không đưa dump, khóa hoặc connection string vào Git.
 3. Build migration image từ cùng commit:
 
    ```powershell
@@ -92,15 +92,16 @@ Hoàn thành mọi mục backend trong [cloud smoke checklist](./cloud-smoke-che
 
 - Nếu API lỗi nhưng migration vẫn tương thích, rollback image ứng dụng về release trước đó, giữ nguyên metadata DB. Không tự revert migration SQL.
 - Nếu migration thất bại trước khi hoàn tất, giữ nguyên cơ chế chặn ghi đã xác minh; lưu nguyên log và `prisma migrate status`, so với backup, sửa migration mới theo quy trình forward-only rồi chạy lại sau khi xác minh trạng thái. Không chạy lặp mù khi kết quả chưa rõ.
-- Nếu source bare repo đã mất, hệ thống sẽ tạo repo rỗng với generation mới và giao diện thông báo lịch sử cũ không còn. Từ máy có clone còn đủ dữ liệu, kiểm tra remote rồi push lại các branch cần thiết:
+- Nếu source bare repo đã mất, hệ thống sẽ tạo repo rỗng với generation mới và giao diện thông báo lịch sử cũ không còn. Từ máy có clone còn đủ dữ liệu, lập allowlist branch/tag đã được đối chiếu với repository đích, kiểm tra remote rồi chỉ push từng ref được phê duyệt:
 
   ```sh
   git remote -v
-  git push --all code-forge-demo
-  git push --tags code-forge-demo
+  git for-each-ref --format='%(refname) %(objectname)' refs/heads refs/tags
+  # Sau khi owner duyệt allowlist, thay <local-ref> và <remote-ref> cho từng ref:
+  git push code-forge-demo <local-ref>:<remote-ref>
   ```
 
-- Trước khi chạy lệnh push, cấu hình `code-forge-demo` thành remote trỏ tới clone URL Render thực tế và kiểm tra `git remote -v`; không nhúng PAT vào URL. Push lại source không khôi phục Git object/ref nào không có trong clone đó. Pull request cũ giữ metadata và được nhận diện bằng storage generation cũ; tạo PR mới sau khi push lại branch.
+- Trước khi chạy từng lệnh push, cấu hình `code-forge-demo` thành remote trỏ tới clone URL Render thực tế và kiểm tra `git remote -v`; không nhúng PAT vào URL. Không dùng `--all`, `--mirror` hoặc `--tags` blanket vì có thể công khai ref stale/nhạy cảm ngoài allowlist. Push lại source không khôi phục Git object/ref nào không có trong clone đó. Pull request cũ giữ metadata và được nhận diện bằng storage generation cũ; tạo PR mới sau khi push lại branch.
 - Nếu database metadata mất, phục hồi từ backup metadata đã kiểm chứng. Không kết luận source được phục hồi chỉ vì PostgreSQL còn user/repository record.
 - Free Render có cold start và có thể ngủ; background job không được đảm bảo đúng thời điểm khi service ngủ. Chạy kiểm tra thủ công sau khi wake.
 
