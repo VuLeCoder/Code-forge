@@ -2,7 +2,7 @@
 
 ## Current release gates (2026-10-26; older “Current” blocks below are historical)
 
-- Current pushed code source/CI: `origin/thviet` is `7588c0a4306abf5309de2fe0cb8c6e0c93dac0e2`; Actions `MVP verification` #138 (`40276491886`) passed on that exact SHA. The worktree contains later documentation-only commits not pushed to `thviet`. This does not claim a Render deployment.
+- Current pushed code source/CI: `origin/thviet` is `7588c0a4306abf5309de2fe0cb8c6e0c93dac0e2`; Actions `MVP verification` #138 (`40276491886`) passed on that exact SHA. Local branch `codex/pr-operation-id-reuse` contains later test-only and documentation commits that are not in #138 and have not been pushed to `thviet`. This does not claim a Render deployment.
 - Completed for the BTL demo: local full-stack owner/collaborator/PR journey, hosted CI #138 on source tip `7588c0a`, Render readiness/local-frontend→Render API, public anonymous clone/fetch, private PAT clone/push/fetch, owner PR merge/fetch and collaborator WRITE invite/accept/push/PR/owner-merge/fetch. Temporary PATs were revoked. Evidence is in the acceptance board, cloud checklist and task log.
 - Cloud/release still partial: admin/audit cloud, payload/quota boundaries, migration, backup/restore and restart/source-loss recovery are unverified. Render Free storage may lose Git source on restart; historical P1001 cause remains unknown. Do not redeploy/restart as a “fix” without a source recovery plan.
 - For the BTL demo, core API/Git owner-and-collaborator flow is verified; a local 375×812 check confirmed the storage warning is visible without horizontal overflow, and admin bootstrap CLI E2E passed 5/5 on an isolated DB. Optional browser-driven PR presentation is not claimed. Broader P3/P4 recovery matrix and issue #6's operator-resolution policy remain open; Vercel is out of scope.
@@ -64,9 +64,10 @@ flowchart TD
 
 ## Current stop conditions
 
-- Run `40166811302` remains FAILED on old pushed SHA `1209bca`. Replacement run `40167861108` succeeded in 5m32s on exact SHA `24e6abc69cb947d575306134c362491bc96c93ad`; hosted CI is green for that code revision. Cloud release and remaining P3/P4 work are still open.
-- Markdown consolidation/status changes remain uncommitted/unpushed and are not included in run `40167861108`'s SHA. Do not claim those documentation changes are hosted or pushed.
-- The separate PR-specific PostgreSQL/Git E2E was refused by its `_test` guard because `backend/.env` points to a non-test database; this is not a test failure or integration result. The independent full-stack Playwright 3/3 passed on the dedicated test DB and isolated test-owned schema/temp Git root.
+- Current hosted CI is Actions `MVP verification` #138 (`40276491886`), successful on exact pushed SHA `7588c0a4306abf5309de2fe0cb8c6e0c93dac0e2`. Older failure `40166811302` and replacement `40167861108` remain historical evidence, not the current baseline.
+- Local commits after `origin/thviet` include push-journal fail-closed/idempotency coverage, cross-repository merge operation-ID coverage, and expired admin-restore boundary coverage; their focused local results are recorded in T27–T30 and are not hosted CI evidence. Do not claim these local changes are pushed or deployed.
+- The latest verified Render deployment remains `388c584`. Do not push/redeploy/migrate until a tested write-freeze/drain and Git-source plus metadata recovery rehearsal are available; the README and operator runbook explicitly hard-stop without those safeguards.
+- Existing local E2E refusals due to a non-test `backend/.env` remain historical; current focused PostgreSQL/Git tests use the isolated `_test` database/schema and temp storage. Keep test, CI, and cloud evidence distinct.
 - Do not resolve ambiguous journals or weaken write fencing before U4 and the security contract are approved.
 - Do not deploy, publish a demo URL, or claim source durability before U2/U3, the cloud smoke checklist, and owner review.
 - Do not post issue comments without U6; first recheck issue state and refresh these drafts against current evidence.

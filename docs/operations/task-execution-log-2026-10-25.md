@@ -1205,3 +1205,9 @@ snapshots, not current status. Current acceptance state is in the task board.
 - Extended the isolated PostgreSQL/Git push audit E2E: after the maintenance job recovers a completed push journal and writes its audit, invoke `runOnce()` again and assert the journal remains `COMPLETED` and exactly one audit exists for that operation.
 - Evidence on 2026-10-26: focused `corepack pnpm --filter backend test:e2e -- test/push-audit.e2e-spec.ts` passed 1/1; targeted ESLint, backend typecheck, and `git diff --check` passed; isolated `git_push_audit_test_*` schema count after teardown was zero. Read-only review found no issue.
 - Local commit: `5b232dc` on `codex/pr-operation-id-reuse`. Test-only change; no production behavior, cloud service, database outside the isolated schema, migration, deployment, or remote branch changed. Existing untracked frontend helper files remain untouched.
+
+## T30-BTL EXPIRED ADMIN RESTORE BOUNDARY
+
+- Added an admin HTTP/PostgreSQL/Git E2E case that attempts to restore a deleted repository after `purgeAfter`; it asserts `409 RESTORE_EXPIRED`, unchanged tombstone state/timestamps, and no `ADMIN_REPOSITORY_RESTORED` audit. This closes a narrow P6 test gap; service behavior and permissions were unchanged.
+- Local evidence on 2026-10-26: `corepack pnpm --filter backend test:e2e -- test/admin.e2e-spec.ts` passed 3/3 on the loopback Docker test database ending `_test`, using a per-run schema and temporary Git root; targeted ESLint passed; backend typecheck passed; `git diff --check` passed. The first attempt was blocked before app initialization because no `JWT_ACCESS_SECRET` was set; rerun used an ephemeral process-only secret, not a file or logged value.
+- Local commit: `c163df4` on `codex/pr-operation-id-reuse`. Not pushed or deployed; no migration, cloud operation, non-test database, or existing Docker volume was changed. The existing untracked frontend helper files remain untouched.
