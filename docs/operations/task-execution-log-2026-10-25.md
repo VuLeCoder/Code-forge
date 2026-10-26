@@ -1117,3 +1117,11 @@ snapshots, not current status. Current acceptance state is in the task board.
 - Started the local Next.js frontend on `http://127.0.0.1:3000` with process-only `BACKEND_URL=https://code-forge-api-thviet.onrender.com` and `APP_ORIGIN=http://localhost:3000`; no environment file or cloud secret was written. Render's CORS preflight allowed the local origin.
 - Observed `/login` and `/` return HTTP 200; proxied `/api/v1/auth/me` returns the expected unauthenticated 401; proxied POST `/api/v1/auth/register` with `{}` returns 400 `INVALID_REQUEST`. This verifies the local-to-cloud path and origin handling without creating a user. No cloud data was changed.
 - The local demo server is left running for manual use. Next dev generated untracked `frontend/AGENTS.md` and `frontend/CLAUDE.md`; neither is staged or committed. CI #127 (`40268514645`) passed on source `2689b6c`. Real account/repository/Git push, migration, backup/restore and restart recovery remain unverified.
+
+## T16-BTL RENDER PUBLIC/PRIVATE GIT SMOKE — passed
+
+- On 2026-10-26, anonymous clone and fetch passed for the public test fixture `btl-demo-873496/btl-demo`.
+- Authenticated clone, push, and fetch passed for private fixture `btl-demo-user-579004/btl-smoke`; branch `cloud-smoke-579004` fetched at the exact pushed SHA `05c7aad9dd6e3bd5fcfcc8a7586de83df3c28935`. This verifies the HTTPS Git path directly to Render beyond the Basic challenge.
+- The temporary PAT was revoked and the test session logged out. Test fixtures contain only generated README content and an empty smoke commit; no application source or secret was committed. The first public-fixture account was created without a retained credential, so it is not offered as a login; the second synthetic account is available for demo login separately from this log.
+- Scope intentionally stays BTL-sized: no migration, backup/restore, redeploy/restart, PR/invitation/admin cloud workflow, or source-loss recovery was attempted. The local Next frontend remains running for manual demo; its two generated untracked helper files remain untouched.
+- CI #128 (`40269234926`) passed on exact pushed source `df77e2b`. These cloud checks occurred after that CI run and are operational smoke evidence, not hosted CI evidence.
