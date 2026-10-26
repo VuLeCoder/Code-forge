@@ -1323,3 +1323,9 @@ cloud status.
 - Normalized three remaining controller-level 400 responses to the shared error envelope: invalid pull-request `status` (`INVALID_PULL_REQUEST_STATUS`), invalid compare `summary` (`INVALID_SUMMARY`), and invalid public repository list query/page (`INVALID_REPOSITORY_LIST_QUERY`). HTTP status and validation behavior are unchanged; valid requests and authorization paths are untouched.
 - Verification after implementation: `git diff --check`, backend typecheck and targeted ESLint for both controllers passed. Read-only review against `ApiExceptionFilter` found no actionable compatibility, security or regression issue. There are no dedicated controller unit tests for these exact codes yet; focused HTTP coverage is a follow-up, not a claim of current test coverage.
 - No cloud deploy, migration, restart, database/storage mutation or destructive cleanup was performed. The slice is ready to commit and push to `thviet`; hosted CI remains the next gate.
+
+## T48-BTL CONTROLLER ERROR CONTRACT TESTS — focused local coverage
+
+- Added only `backend/src/repositories/repositories.controllers.spec.ts`; production controllers and API behavior were not changed. The suite covers invalid PR status, invalid compare summary, and both invalid public repository-list branches, asserting HTTP 400 plus the exact nested `{ error: { code, message, details } }` payload.
+- Leader verification: `corepack pnpm --filter backend exec jest src/repositories/repositories.controllers.spec.ts --runInBand` passed 1 suite/4 tests; targeted ESLint and `git diff --check` passed. Independent read-only review found no actionable finding.
+- No database, Git storage, Docker volume, cloud resource, migration, deploy or restart was touched. The test file is ready to commit/push to `thviet`; CI #158 for the previous commit remains separate and still pending.
