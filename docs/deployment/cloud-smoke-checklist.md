@@ -6,9 +6,9 @@
 
 | Trường | Kết quả |
 | --- | --- |
-| Source tip | Integration `thviet`: `7588c0a` (exact SHA `7588c0a4306abf5309de2fe0cb8c6e0c93dac0e2`); feature `codex/push-crash-proof`: `d2494d5` |
-| Code CI evidence | Actions `MVP verification` #138 (`40276491886`) passed on `thviet`; feature #141 (`40351375771`) passed on exact `d2494d5`. |
-| Latest CI at check | #141 (`40351375771`): completed successfully on feature SHA `d2494d589a0ee482926af52cf27da09c710c2ce1` |
+| Source tip | `thviet`: `d8dd9bff1f4d2945a0b861dac4f8d74302142b5f` (fast-forward from verified feature); previous integration `7588c0a` |
+| Code CI evidence | Feature #141 (`40351375771`) passed on `d2494d5`; `thviet` candidate #143 (`40354036920`) is queued/in progress. |
+| Latest CI at check | #143 (`40354036920`): queued/in progress on `d8dd9bff1f4d2945a0b861dac4f8d74302142b5f` |
 | Render commit đang chạy | `388c584` theo Render Dashboard; chưa phải source tip hiện tại |
 | Render auto-deploy | `After CI Checks Pass`; pushes to `thviet` may redeploy. Do not push until the documented source-recovery preflight is satisfied. |
 | Render service limits | Dashboard read-only check: `code-forge-api-thviet`, Free plan, no persistent disk; Live `388c584`; source can be lost on restart/redeploy. |

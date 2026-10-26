@@ -4,7 +4,7 @@
 
 For detailed evidence and residual acceptance cases, use [the acceptance board](operations/acceptance-task-board-2026-10-25.md), [next actions](next-actions.md), and [the cloud checklist](deployment/cloud-smoke-checklist.md). Historical snapshots below are not current status.
 
-- Integration source `origin/thviet` remains `7588c0a4306abf5309de2fe0cb8c6e0c93dac0e2` (CI #138). Separate feature candidate `codex/push-crash-proof` is at `d2494d589a0ee482926af52cf27da09c710c2ce1`; hosted `MVP verification` #141 (`40351375771`) passed on that exact SHA. It is not in `thviet`/`main` or deployed to Render.
+- Integration source `origin/thviet` is now `d8dd9bff1f4d2945a0b861dac4f8d74302142b5f`; hosted `MVP verification` #143 (`40354036920`) is queued/in progress on that exact SHA. The feature work was reviewed and fast-forwarded; Render has not been observed on this SHA.
 - BTL cloud evidence: Render `388c584` readiness, direct public/private Git, owner PR merge, and WRITE collaborator invitation→push→PR→owner merge smoke passed. Read-only dashboard preflight confirmed `code-forge-api-thviet` tracks `VuLeCoder/Code-forge`/`thviet`, Auto-Deploy is `After CI Checks Pass`, and Free has no persistent disk. Neon `Code Forge` is separate from `BUS Ticket`, with production/Singapore/Free and a 6-hour history window. Migration, backup/restore, admin/audit cloud, quota-boundary cloud tests, and source-loss recovery remain unverified. The historical `4407e7d` P1001 cause remains unknown; no deploy/restart should be inferred from CI.
 - Local P8 prerequisite: T38 rehearsed metadata `pg_dump`/`pg_restore` successfully between two disposable PostgreSQL 17 tmpfs containers after all 7 migrations, with synthetic user/repository/audit rows preserved. This is not Neon production backup/restore, encrypted backup, Git source backup or cloud recovery evidence.
 - Local P8 prerequisite: T40 rehearsed a failed Prisma migration, `migrate resolve --rolled-back`, and forward recovery on a disposable PostgreSQL 17 tmpfs database. Baseline migrations remained intact and the corrected probe table was created; cloud migration/recovery is still unverified.
@@ -13,14 +13,14 @@ For detailed evidence and residual acceptance cases, use [the acceptance board](
 
 | Package | Current state |
 | --- | --- |
-| P0 baseline/CI | Integration CI #138 passed on `7588c0a`; feature CI #141 passed on `d2494d5`. No feature integration or cloud deploy is implied. |
+| P0 baseline/CI | Integration CI #138 passed on `7588c0a`; the fast-forwarded `thviet` candidate `d8dd9bf` is awaiting CI #143. No cloud deploy is claimed. |
 | P1 auth/invitation/contracts | Implemented with unit/HTTP integration evidence; full P0–P8 acceptance remains open. |
 | P2 direct cloud Git | Partial: direct Git and owner/collaborator smoke passed on Render `388c584`; migration, backup/recovery, quota and release checks remain open. |
 | P3 repository write coordination | Partial: merge→delete, valid-pack lock-loss, pre-proof push crash and post-durable-child-success push crash tests have evidence; T37 is hosted in feature CI #141. Broader Git/PostgreSQL recovery remains open. |
 | P4 PR/compare/merge | Partial: core flows and merge→delete ordering covered; other matrix/cloud acceptance remains open. |
 | P5 PR/admin UI | Partial: browser checks exist; manual screen-reader/device verification is not established here. |
 | P6 admin/audit/jobs | Partial: core paths are covered; issue #6 resolution remains deliberately fail-closed. |
-| P7 regression | Feature Actions #141 passed on `d2494d5`, including T37 and maintenance retry coverage. Integration branch remains at #138/`7588c0a`; cloud and manual screen-reader/device checks remain separate. |
+| P7 regression | Feature Actions #141 passed on `d2494d5`; the fast-forwarded `thviet` tip `d8dd9bf` is awaiting #143. Cloud and manual screen-reader/device checks remain separate. |
 | P8 release/handoff | Partial/open: owner/collaborator Git/PR smoke passed; no cloud migration, backup/restore, write-freeze rehearsal, or source-loss recovery is claimed as passed. |
 
 The snapshots and package tables below are retained as historical execution records; where their SHA, run number, or state differs, this section is authoritative.

@@ -1275,3 +1275,8 @@ snapshots, not current status. Current acceptance state is in the task board.
 - A deliberately failing migration (`20261026170000_p8_failure_rehearsal`) returned exit 1 with Prisma `P3018` / PostgreSQL `42883`; the seven baseline rows stayed finished, the failed row had no `finished_at` or `rolled_back_at`, and no probe table was created.
 - `prisma migrate resolve --rolled-back 20261026170000_p8_failure_rehearsal` returned 0. Replacing the migration only in the temporary copy with valid SQL and rerunning `prisma migrate deploy` returned 0; the baseline remained 7, the corrected migration finished, and the probe table existed with two columns.
 - Cleanup removed the exact labeled container and temporary Prisma copy. No existing Docker volume, Neon, Render, repository file or secret was touched. This proves local disposable migration failure→resolve→forward recovery only; it does not prove Neon/cloud migration, encrypted backup, write-freeze, application rollback or production recovery.
+
+## T41-BTL FAST-FORWARD THVIET — release candidate submitted
+
+- After review, local tests, T37–T40 evidence and hosted CI #142 success on `20d6d3d`, the feature tip was fast-forwarded to `origin/thviet` as `d8dd9bff1f4d2945a0b861dac4f8d74302142b5f`; no force-push or new branch was created.
+- GitHub Actions [MVP verification #143](https://github.com/VuLeCoder/Code-forge/actions/runs/40354036920) is queued/in progress for the exact `thviet` SHA. Render is configured to deploy after CI checks; no current Render deployment at this SHA is claimed. Cloud migration, backup/restore, source-loss recovery and write-freeze gates remain open.
