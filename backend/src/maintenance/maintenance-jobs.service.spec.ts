@@ -172,6 +172,19 @@ describe('MaintenanceJobsService', () => {
     expect(fixture.storage.cleanupOrphanedTemporaryDirectories).toHaveBeenCalledTimes(2);
   });
 
+  it('continues independent cleanup after one maintenance job fails', async () => {
+    const fixture = makeFixture();
+    fixture.db.$executeRaw.mockRejectedValueOnce(new Error('temporary database failure'));
+
+    await fixture.internals.runScheduled();
+
+    expect(fixture.db.$executeRaw).toHaveBeenCalledTimes(3);
+    expect(fixture.pushJournal.reconcilePending).toHaveBeenCalledTimes(1);
+    expect(fixture.purge.purgeDue).toHaveBeenCalledWith(50);
+    expect(fixture.storage.cleanupOrphanedTemporaryDirectories).toHaveBeenCalledTimes(1);
+    expect(fixture.lock.release).toHaveBeenCalledTimes(1);
+  });
+
   it('skips an overlapping batch and releases the process-wide job lock once', async () => {
     const fixture = makeFixture();
     let releaseAcquire!: (lock: { release: jest.Mock }) => void;
