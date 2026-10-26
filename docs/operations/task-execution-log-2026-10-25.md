@@ -1111,3 +1111,9 @@ snapshots, not current status. Current acceptance state is in the task board.
 - At 2026-10-26 04:19 UTC, a GET to the Render Git Smart HTTP route for a deliberately nonexistent repository returned `401` with `WWW-Authenticate: Basic realm="Code Forge Git", charset="UTF-8"`. This proves the direct Render route and challenge are reachable, not successful clone/fetch/push for an existing repository.
 - Quick local checks found no listener on `localhost:3000/login` or `localhost:4000/api/v1/health/ready`; both connections were refused. No local server was started, and no cloud account/repository was created.
 - Current acceptance docs now record CI #126 (`40267850619`) passing on exact source `f240e72`, the Render Git challenge, and the remaining demo smoke gaps. `git diff --check` passed; P2/P8 remain open.
+
+## T15-BTL LOCAL FRONTEND → RENDER API SMOKE
+
+- Started the local Next.js frontend on `http://127.0.0.1:3000` with process-only `BACKEND_URL=https://code-forge-api-thviet.onrender.com` and `APP_ORIGIN=http://localhost:3000`; no environment file or cloud secret was written. Render's CORS preflight allowed the local origin.
+- Observed `/login` and `/` return HTTP 200; proxied `/api/v1/auth/me` returns the expected unauthenticated 401; proxied POST `/api/v1/auth/register` with `{}` returns 400 `INVALID_REQUEST`. This verifies the local-to-cloud path and origin handling without creating a user. No cloud data was changed.
+- The local demo server is left running for manual use. Next dev generated untracked `frontend/AGENTS.md` and `frontend/CLAUDE.md`; neither is staged or committed. CI #127 (`40268514645`) passed on source `2689b6c`. Real account/repository/Git push, migration, backup/restore and restart recovery remain unverified.
