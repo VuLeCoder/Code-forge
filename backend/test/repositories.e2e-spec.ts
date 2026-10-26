@@ -1751,6 +1751,76 @@ process.exit(result.status ?? 1);
     expect((await create('RENAMED')).status).toBe(201);
   });
 
+  it('queues restore behind purge and never restores metadata after source removal', async () => {
+    const created = await create('PurgeRace');
+    expect(created.status).toBe(201);
+    const repo = await db.repository.findFirstOrThrow({ where: { ownerId, normalizedName: 'purgerace' } });
+    const bare = join(storageRoot, repo.storageKey);
+    expect(existsSync(bare)).toBe(true);
+
+    expect((await call('DELETE', 'repos/owner/purgerace', ownerCookie)).status).toBe(204);
+    await db.repository.update({ where: { id: repo.id }, data: { purgeAfter: new Date(Date.now() - 1000) } });
+
+    const storage = app.get(GitStorageService);
+    const removeStorage = storage.remove.bind(storage);
+    let signalRemovalStarted!: () => void;
+    let releaseRemoval!: () => void;
+    const removalStarted = new Promise<void>((resolve) => { signalRemovalStarted = resolve; });
+    const removalBarrier = new Promise<void>((resolve) => { releaseRemoval = resolve; });
+    const removeSpy = jest.spyOn(storage, 'remove').mockImplementation(async (storageKey) => {
+      signalRemovalStarted();
+      await removalBarrier;
+      await removeStorage(storageKey);
+    });
+    const purgeService = app.get(RepositoryPurgeService);
+    const purge = purgeService.purgeDue();
+    let restore: Promise<Response> | undefined;
+
+    try {
+      await removalStarted;
+      restore = call('POST', 'repos/owner/purgerace/restore', ownerCookie);
+      const deadline = Date.now() + 5_000;
+      let queuedRestores = 0;
+      do {
+        const waiters = await admin.$queryRawUnsafe<{ waiting: number }[]>(`
+          WITH lock_key AS (SELECT hashtextextended($2, 0) AS value)
+          SELECT COUNT(DISTINCT activity.pid)::int AS waiting
+          FROM pg_stat_activity AS activity
+          JOIN pg_locks AS pg_lock ON pg_lock.pid = activity.pid
+          CROSS JOIN lock_key
+          WHERE activity.application_name = $1
+            AND activity.wait_event_type = 'Lock'
+            AND activity.wait_event = 'advisory'
+            AND pg_lock.locktype = 'advisory'
+            AND pg_lock.granted = false
+            AND pg_lock.classid = ((lock_key.value >> 32) & 4294967295)::oid
+            AND pg_lock.objid = (lock_key.value & 4294967295)::oid
+            AND pg_lock.objsubid = 1`, lockApplicationName, repo.id);
+        queuedRestores = waiters[0]?.waiting ?? 0;
+        if (queuedRestores === 1) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      } while (Date.now() < deadline);
+      expect(queuedRestores).toBe(1);
+
+      releaseRemoval();
+      expect(await purge).toBe(1);
+      expect((await restore).status).toBe(404);
+      expect(await db.repository.findUnique({ where: { id: repo.id } })).toBeNull();
+      expect(existsSync(bare)).toBe(false);
+      expect(await db.auditLog.count({ where: { targetId: repo.id, action: 'REPOSITORY_RESTORED' } })).toBe(0);
+    } finally {
+      releaseRemoval();
+      removeSpy.mockRestore();
+      await purge.catch(() => undefined);
+      await restore?.catch(() => undefined);
+      const remaining = await db.repository.findUnique({ where: { id: repo.id } });
+      if (remaining) {
+        await removeStorage(remaining.storageKey);
+        await db.repository.delete({ where: { id: repo.id } });
+      }
+    }
+  }, 30_000);
+
   it('serializes concurrent creates and counts soft-deleted repositories toward quota', async () => {
     const results = await Promise.all([create('LastOne'), create('LastTwo')]);
     expect(results.map((res) => res.status).sort()).toEqual([201, 403]);
