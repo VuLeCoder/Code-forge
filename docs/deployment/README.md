@@ -8,7 +8,7 @@ Tạo image và chuẩn bị hướng dẫn không chứng minh dịch vụ clou
 
 ### Bằng chứng hiện tại
 
-- Current pushed code tip `origin/thviet`: `7588c0a` (exact SHA `7588c0a4306abf5309de2fe0cb8c6e0c93dac0e2`). Hosted CI [#138](https://github.com/VuLeCoder/Code-forge/actions/runs/40276491886) passed on that exact SHA. The current worktree contains later documentation-only commits that are not pushed.
+- Current pushed integration tip `origin/thviet`: `7588c0a` (exact SHA `7588c0a4306abf5309de2fe0cb8c6e0c93dac0e2`). Hosted CI [#138](https://github.com/VuLeCoder/Code-forge/actions/runs/40276491886) passed on that exact SHA. The separate `codex/push-crash-proof` feature is now pushed at `1aa76a8`; its code ancestor `200c22d` passed hosted CI [#139](https://github.com/VuLeCoder/Code-forge/actions/runs/40340975441), while the T37 test/docs commits are not integrated to `thviet` or deployed.
 - Render Dashboard xác nhận service `code-forge-api-thviet` đang chạy deploy `388c584`, không phải source tip hiện tại. Probe readiness ngày 2026-10-26 trả HTTP 200 với database/Git/storage `up`; endpoint thực hiện `SELECT 1` qua Prisma và ghi/xóa file tạm trong storage. Đây chỉ là bằng chứng connectivity/readiness trên deploy `388c584`, không phải probe chỉ đọc hay smoke nghiệp vụ.
 - Read-only `GET /api/v1/health/live` returned HTTP 200 but only `status` and `timestamp`, without `commitSha`; the health revision field from source commit `97d5d34` is not live yet. Render Settings shows Auto-Deploy `After CI Checks Pass`; a push to `thviet` may redeploy this service.
 - Lịch sử có deploy `4407e7d` thất bại `P1001`; nguyên nhân gốc chưa được chứng minh. Readiness hiện tại cho thấy kết nối hoạt động tại thời điểm probe, không chứng minh đã xác định hoặc loại trừ nguyên nhân lỗi cũ.
@@ -58,7 +58,7 @@ Khi chạy frontend local với backend Render, đặt `BACKEND_URL` server-side
 
 Các biến TTL mặc định hiện tại nằm trong `backend/.env.example`; chỉ override khi có acceptance test cho cấu hình mới. Không copy giá trị secret mẫu sang cloud.
 
-`compose.yaml` chỉ dành cho local: dùng `NODE_ENV=development`, PostgreSQL trực tiếp và các secret đánh dấu `local-only-*`; không dùng các giá trị đó cho cloud hoặc môi trường public. Các port host chỉ bind loopback. Chế độ local cho phép `COOKIE_SECURE=false`; production vẫn bắt buộc `COOKIE_SECURE=true` qua kiểm tra backend. Compose config đã được xác thực, nhưng chưa chạy `docker compose up` hoặc health check runtime; cần nghiệm thu riêng trên máy local trước khi coi stack Compose là đã chạy.
+`compose.yaml` chỉ dành cho local: dùng `NODE_ENV=development`, PostgreSQL trực tiếp và các secret đánh dấu `local-only-*`; không dùng các giá trị đó cho cloud hoặc môi trường public. Các port host chỉ bind loopback. Chế độ local cho phép `COOKIE_SECURE=false`; production vẫn bắt buộc `COOKIE_SECURE=true` qua kiểm tra backend. T-COMPOSE trong `docs/operations/task-execution-log-2026-10-25.md` đã xác minh một project cô lập: 7 migration áp dụng, healthcheck backend healthy và `/api/v1/health/ready` HTTP 200. Chưa có bằng chứng cho việc chạy đồng thời nhiều project Compose hoặc cho cloud release; các volume test của project đó được giữ lại có chủ đích, volume người dùng không bị chạm.
 
 ## Trình tự release
 
