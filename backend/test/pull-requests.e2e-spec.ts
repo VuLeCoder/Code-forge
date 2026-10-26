@@ -71,10 +71,11 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
 
   const cookie = (response: Response) => response.headers.getSetCookie()
     .map((value) => value.split(';')[0]).join('; ');
-  const call = (method: string, path: string, body?: unknown, cookies = ownerCookie) => fetch(`${base}/${path}`, {
+  const call = (method: string, path: string, body?: unknown, cookies = ownerCookie, signal?: AbortSignal) => fetch(`${base}/${path}`, {
     method,
     headers: { 'Content-Type': 'application/json', Origin: origin, ...(cookies ? { Cookie: cookies } : {}) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    ...(signal ? { signal } : {}),
   });
 
   beforeAll(async () => {
@@ -422,6 +423,125 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     expect(await responseJson<{ pullRequest: { status: string; version: number } }>(reopen))
       .toMatchObject({ pullRequest: { status: 'OPEN', version: 5 } });
     expect(await db.auditLog.count({ where: { targetId: pullRequest.id, action: 'PULL_REQUEST_UPDATED' } })).toBe(4);
+  }, 60_000);
+
+  it('rechecks the PR author permission after repository membership is downgraded', async () => {
+    const ownerRegistration = await call('POST', 'auth/register', {
+      username: 'PermissionOwner', email: 'permission-owner@example.test', password: 'test-password-123',
+    }, '');
+    expect(ownerRegistration.status).toBe(201);
+    const permissionOwnerCookie = cookie(ownerRegistration);
+
+    const authorRegistration = await call('POST', 'auth/register', {
+      username: 'PermissionAuthor', email: 'permission-author@example.test', password: 'test-password-123',
+    }, '');
+    expect(authorRegistration.status).toBe(201);
+    const permissionAuthorCookie = cookie(authorRegistration);
+
+    const repositoryResponse = await call('POST', 'repositories', {
+      name: 'PermissionRecheck', visibility: 'PRIVATE', initializeReadme: true,
+    }, permissionOwnerCookie);
+    expect(repositoryResponse.status).toBe(201);
+    const { repository } = await responseJson<{ repository: { id: string } }>(repositoryResponse);
+    const storedRepository = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
+    const author = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'permissionauthor' } });
+
+    const invitationResponse = await call('POST', 'repos/permissionowner/permissionrecheck/invitations', {
+      username: 'PermissionAuthor', role: 'WRITE',
+    }, permissionOwnerCookie);
+    expect(invitationResponse.status).toBe(201);
+    const invitation = await responseJson<{ invitation: { id: string } }>(invitationResponse);
+    const accepted = await call('POST', `invitations/${invitation.invitation.id}/accept`, undefined, permissionAuthorCookie);
+    expect(accepted.status).toBe(201);
+
+    const pullRequest = await db.pullRequest.create({ data: {
+      repositoryId: storedRepository.id,
+      number: 1,
+      authorId: author.id,
+      title: 'Permission recheck',
+      description: 'A former WRITE author must lose edit access after downgrade.',
+      sourceBranch: 'feature/permission-recheck',
+      targetBranch: 'main',
+      storageGeneration: storedRepository.storageGeneration,
+      sourceSha: 'a'.repeat(40),
+      targetSha: 'b'.repeat(40),
+    } });
+    const pullRequestPath = 'repos/permissionowner/permissionrecheck/pulls/1';
+
+    const beforeDowngrade = await call('GET', pullRequestPath, undefined, permissionAuthorCookie);
+    expect(beforeDowngrade.status).toBe(200);
+    expect(await responseJson<{ permissions: { canEdit: boolean } }>(beforeDowngrade))
+      .toMatchObject({ permissions: { canEdit: true } });
+
+    const bare = join(storageRoot, storedRepository.storageKey);
+    const refsBefore = execFileSync('git', ['--git-dir', bare, 'for-each-ref', '--sort=refname',
+      '--format=%(refname)%09%(objectname)', 'refs/'], { encoding: 'utf8' });
+    const prAuditCountBefore = await db.auditLog.count({ where: { targetId: pullRequest.id } });
+
+    const barrierUrl = new URL(process.env.DATABASE_URL_UNPOOLED!);
+    barrierUrl.searchParams.set('application_name', `${lockApplicationName}-permission-barrier`);
+    const barrier = new Client({ connectionString: barrierUrl.toString(), connectionTimeoutMillis: 5_000 });
+    let barrierLockHeld = false;
+    let downgradeRequest: Promise<Response> | undefined;
+    let editRequest: Promise<Response> | undefined;
+    let primaryFailure: unknown;
+    let cleanupError: Error | undefined;
+    try {
+      await barrier.connect();
+      await barrier.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [storedRepository.id]);
+      barrierLockHeld = true;
+
+      downgradeRequest = call('PATCH', `repos/permissionowner/permissionrecheck/members/${author.id}`,
+        { role: 'READ' }, permissionOwnerCookie, AbortSignal.timeout(20_000));
+      await waitForAdvisoryLockWaiter(barrier, lockApplicationName, 10_000);
+
+      // The author's request passes its initial read-permission check while membership is
+      // still WRITE, then queues behind the owner's downgrade on the repository lock.
+      editRequest = call('PATCH', pullRequestPath, { title: 'Must remain unchanged' }, permissionAuthorCookie,
+        AbortSignal.timeout(20_000));
+      await waitForAdvisoryLockWaiter(barrier, lockApplicationName, 10_000, 2);
+
+      const unlocked = await barrier.query<{ pg_advisory_unlock: boolean }>(
+        'SELECT pg_advisory_unlock(hashtextextended($1, 0))', [storedRepository.id]);
+      expect(unlocked.rows[0]?.pg_advisory_unlock).toBe(true);
+      barrierLockHeld = false;
+
+      expect((await downgradeRequest).status).toBe(200);
+      // The API intentionally hides repositories the caller can no longer write to.
+      expect((await editRequest).status).toBe(404);
+    } catch (error) {
+      primaryFailure = error;
+      throw error;
+    } finally {
+      if (barrierLockHeld) {
+        try {
+          const unlocked = await barrier.query<{ pg_advisory_unlock: boolean }>(
+            'SELECT pg_advisory_unlock(hashtextextended($1, 0))', [storedRepository.id]);
+          if (unlocked.rows[0]?.pg_advisory_unlock === true) barrierLockHeld = false;
+          else cleanupError = new Error('PostgreSQL did not confirm advisory-lock release.');
+        } catch (error) {
+          cleanupError = error instanceof Error ? error : new Error(String(error));
+        }
+      }
+      const startedRequests = [downgradeRequest, editRequest]
+        .filter((request): request is Promise<Response> => request !== undefined);
+      try {
+        await barrier.end();
+      } catch (error) {
+        cleanupError ??= error instanceof Error ? error : new Error(String(error));
+      }
+      await Promise.allSettled(startedRequests);
+    }
+    if (cleanupError && primaryFailure === undefined) throw cleanupError;
+
+    expect(await db.repositoryMember.findUniqueOrThrow({ where: { repositoryId_userId: {
+      repositoryId: storedRepository.id, userId: author.id,
+    } } })).toMatchObject({ role: 'READ' });
+    expect(await db.pullRequest.findUniqueOrThrow({ where: { id: pullRequest.id } }))
+      .toMatchObject({ title: 'Permission recheck', status: 'OPEN', version: 1 });
+    expect(await db.auditLog.count({ where: { targetId: pullRequest.id } })).toBe(prAuditCountBefore);
+    expect(execFileSync('git', ['--git-dir', bare, 'for-each-ref', '--sort=refname',
+      '--format=%(refname)%09%(objectname)', 'refs/'], { encoding: 'utf8' })).toBe(refsBefore);
   }, 60_000);
 
   it('retains PR history and rejects a pre-reset merge after normal Git storage recovery', async () => {
