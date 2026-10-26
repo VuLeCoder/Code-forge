@@ -2,21 +2,10 @@
 
 Project documentation lives here, grouped by purpose. Start with the overview documents, then use the acceptance ledger for current evidence and the deployment guides for environment-specific steps.
 
-**Current execution snapshot (2026-10-25; evidence is environment-specific):**
-local branch `thviet` is at `25487b5`; `origin/thviet` matches. The squashed
-MVP commit `e2b5a1a` is on `origin/main`; hosted run `40180253512` failed
-on the narrow admin focus-return test (55 passed, 1 failed). Backend, lint,
-typecheck, and build jobs passed. On the local checkout,
-workspace lint, typecheck, and build passed; backend unit tests passed 18
-suites / 120 tests. Backend E2E reported 9 suites / 38 passed / 2 skipped,
-but Jest remained alive after its open-handle warning and was interrupted; do
-not describe that invocation as a clean exit. The local demo is running.
-Render still fails at Prisma startup with `P1001`; Vercel Git integration is
-waiting on repository-owner access. Neither cloud deployment is accepted.
+**Current execution snapshot (2026-10-26; local, hosted, and cloud evidence are distinct):**
+`thviet` and `origin/thviet` are at `23cb1c7` (latest commit is documentation-only). Code commit `b6411ad` passed hosted Actions [#118 / `40262580445`](https://github.com/VuLeCoder/Code-forge/actions/runs/40262580445); docs-only run #119 for `23cb1c7` was in progress at this snapshot. The merge→delete lock-order E2E passed locally and in the full CI workflow. Render still serves `388c584`; readiness returned HTTP 200 with database/Git/storage up, but no cloud migration or end-to-end smoke is accepted. Historical `P1001` root cause remains unknown. P2/P8 and full P0–P8 acceptance remain open; issue #6 stays fail-closed; Vercel is deferred/out of scope.
 
-Earlier snapshots below are historical evidence, not current state. In
-particular, older commit IDs, test counts, CI failures and pending-review
-statements must not be reused as claims about `25487b5` or `e2b5a1a`.
+Older snapshots below are historical evidence, not current state. Do not reuse their SHAs, test counts, or provider states as present-day evidence.
 
 ## Project overview
 

@@ -8,7 +8,7 @@ Tạo image và chuẩn bị hướng dẫn không chứng minh dịch vụ clou
 
 ### Bằng chứng hiện tại
 
-- Source tip được kiểm tra trên `thviet`: `95a7651` (test/docs; không có thay đổi runtime trong hai commit cuối). Hosted CI [#114](https://github.com/VuLeCoder/Code-forge/actions/runs/40259575032) passed trên code commit `93b356a`; hosted CI [#115](https://github.com/VuLeCoder/Code-forge/actions/runs/40259796538) passed trên exact SHA `95a7651`.
+- Source tip trên `thviet`: `23cb1c7` (docs-only after tested code commit `b6411ad`). Hosted CI [#118](https://github.com/VuLeCoder/Code-forge/actions/runs/40262580445) passed on exact code SHA `b6411ad`; docs-only run #119 on `23cb1c7` was in progress at this snapshot.
 - Render Dashboard xác nhận service `code-forge-api-thviet` đang chạy deploy `388c584`, không phải source tip hiện tại. Probe readiness ngày 2026-10-26 trả HTTP 200 với database/Git/storage `up`; endpoint thực hiện `SELECT 1` qua Prisma và ghi/xóa file tạm trong storage. Đây chỉ là bằng chứng connectivity/readiness trên deploy `388c584`, không phải probe chỉ đọc hay smoke nghiệp vụ.
 - Lịch sử có deploy `4407e7d` thất bại `P1001`; nguyên nhân gốc chưa được chứng minh. Readiness hiện tại cho thấy kết nối hoạt động tại thời điểm probe, không chứng minh đã xác định hoặc loại trừ nguyên nhân lỗi cũ.
 - Chưa nghiệm thu migration/backup/restore, TLS/proxy, Git HTTP trực tiếp, auth/quyền, cold start, mất source khi restart và khôi phục. Không suy ra cloud acceptance từ CI hay local image smoke.

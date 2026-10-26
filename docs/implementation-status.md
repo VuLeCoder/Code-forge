@@ -1,24 +1,23 @@
 # MVP implementation ledger
 
-## Current verified snapshot (2026-10-25; supersedes older status snapshots below)
+## Current verified snapshot (2026-10-26; older status snapshots below are history)
 
-- Branch `thviet` and `origin/thviet` match at `4407e7d2e49d0e43aeb48b1e49ee96e986745a03`. GitHub Actions run [#92 / `40198015346`](https://github.com/VuLeCoder/Code-forge/actions/runs/40198015346) succeeded for this exact SHA.
-- Render deployment of `4407e7d` failed at startup with Prisma `P1001`. The deployed sanitized probe reported DNS and TCP `ok`; Neon UI showed public internet enabled, `Any IP`, and IP allowlisting unavailable. This proves only name resolution and TCP reachability from that probe; it does not prove database authentication or SQL connectivity. No migration or cloud smoke is counted as passed.
-- A local, unpushed change now defaults Prisma `connect_timeout` to 15 seconds while preserving explicit overrides and adds an opt-in bounded PostgreSQL handshake probe after DNS/TCP. Full backend unit tests pass (20 suites / 166 tests), backend lint/typecheck/build pass, and the focused probe suite includes a stalled-server case. A read-only independent review found no actionable issue after checking the installed `pg@8.23.1` timeout semantics; it did not use a live database. The change is not pushed or deployed, so it is not a confirmed Render fix. No post-change cloud probe or health/SQL evidence exists yet.
-- AGY's 120-second static review timed out with no usable result. Codex's static security review reported no actionable finding; it did not run dynamic tests. Neither statement establishes cloud security or full acceptance.
-- P0–P8 are not complete. P2/P8 cloud release and recovery are open; P3/P4 have remaining acceptance cases; P7/handoff evidence still needs reconciliation. Issue #6 stays fail-closed pending the owner's authority/approval decision. Vercel is deferred and out of scope per the latest owner objective.
+- `thviet` and `origin/thviet` match at `23cb1c7`. Latest code commit `b6411ad` passed hosted Actions [#118 / `40262580445`](https://github.com/VuLeCoder/Code-forge/actions/runs/40262580445); docs-only run #119 for `23cb1c7` was in progress at the time of this update.
+- Merge→delete is now deterministically covered: merge pauses before ref CAS, DELETE is observed waiting on the same PostgreSQL advisory lock, then merge completes before soft-delete. Local PR E2E file passed 14 runnable cases / 2 intentional crash-case skips; backend lint and typecheck passed. The full workflow on `b6411ad` passed backend unit/E2E, frontend browser/full-stack, Docker image smoke, migration checks, lint/typecheck/build.
+- Render still serves `388c584`; readiness returned 200 with database/Git/storage up. This is not evidence of migration, backup/restore, Git HTTP, auth, or business smoke. Historical P1001 root cause remains unknown; no post-change deploy was performed because source recovery is not yet verified.
+- P0–P8 are incomplete: P2/P8 cloud release/recovery remain open; P3/P4 still have other acceptance cases; docs/handoff reconciliation continues. Issue #6 remains fail-closed pending owner policy. Vercel is deferred/out of scope.
 
 | Package | Current state |
 | --- | --- |
-| P0 baseline/CI | Partial: exact-SHA hosted CI is green; local dirty docs and acceptance-ledger reconciliation remain. |
-| P1 auth/invitation/contracts | Implemented with prior unit/HTTP integration evidence; full P0–P8 acceptance remains open. |
-| P2 direct cloud Git | Open: Render startup fails with P1001; DNS/TCP success is not DB authentication/SQL evidence. |
-| P3 repository write coordination | Partial: locking and race protections exist; remaining failure-matrix and recovery acceptance are open. |
-| P4 PR/compare/merge | Partial: core flows and current private-read regression tests are covered; remaining matrix/cloud acceptance is open. |
+| P0 baseline/CI | Partial: run #118 passed exact code SHA `b6411ad`; docs-only run #119 was pending for `23cb1c7`. |
+| P1 auth/invitation/contracts | Implemented with unit/HTTP integration evidence; full P0–P8 acceptance remains open. |
+| P2 direct cloud Git | Open: readiness only on Render `388c584`; direct Git transport and full DB/release smoke unverified. |
+| P3 repository write coordination | Partial: deterministic merge→delete test added; remaining failure/recovery matrix is open. |
+| P4 PR/compare/merge | Partial: core flows and merge→delete ordering covered; other matrix/cloud acceptance remains open. |
 | P5 PR/admin UI | Partial: browser checks exist; manual screen-reader/device verification is not established here. |
 | P6 admin/audit/jobs | Partial: core paths are covered; issue #6 resolution remains deliberately fail-closed. |
-| P7 regression | Partial: run #92 is green, but unresolved acceptance cases and cloud behavior are outside that CI run. |
-| P8 release/handoff | Open: no migration, cloud smoke, backup/restore, or release recovery rehearsal is claimed as passed. |
+| P7 regression | Partial: run #118 green on code SHA; unresolved acceptance and cloud behavior remain outside it. |
+| P8 release/handoff | Open: no cloud migration, full smoke, backup/restore, or recovery rehearsal is claimed as passed. |
 
 The snapshots and package tables below are retained as historical execution records; where their SHA, run number, or state differs, this section is authoritative.
 

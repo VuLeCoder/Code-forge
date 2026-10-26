@@ -6,7 +6,9 @@
 
 | Trường | Kết quả |
 | --- | --- |
-| Source tip được kiểm tra | `95a7651` trên `thviet` (test/docs; không có thay đổi runtime trong hai commit cuối) |
+| Source tip hiện tại | `23cb1c7` trên `thviet` (docs-only after tested code SHA `b6411ad`) |
+| Code CI evidence | Actions #118 (`40262580445`) passed on exact SHA `b6411ad` |
+| Latest docs CI | Actions #119 for `23cb1c7` was in progress at this snapshot |
 | Render commit đang chạy | `388c584` theo Render Dashboard; chưa phải source tip hiện tại |
 | Frontend URL | Chưa có; Vercel deferred/out of scope |
 | Backend URL | `https://code-forge-api-thviet.onrender.com` |
