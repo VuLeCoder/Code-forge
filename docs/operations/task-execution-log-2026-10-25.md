@@ -1185,3 +1185,10 @@ snapshots, not current status. Current acceptance state is in the task board.
 - After the documentation commits `c60feef` and `bf8c6f2`, the pushed code tip remains `origin/thviet`=`7588c0a4306abf5309de2fe0cb8c6e0c93dac0e2`; these commits only reconcile evidence/context and do not change runtime code.
 - Read-only Render Settings inspection showed Auto-Deploy is `After CI Checks Pass`, so pushing to `thviet` may deploy automatically. The current Live deploy is still `388c584`; `/api/v1/health/live` returned HTTP 200 without `commitSha`.
 - Did not push or deploy because Git-source recovery after redeploy has not been rehearsed and the runbook requires that safeguard. No settings, DB, storage, or cloud service were changed.
+
+## T27-BTL UNKNOWN PUSH OUTCOME FAIL-CLOSED E2E
+
+- Added a focused case to `backend/test/push-audit.e2e-spec.ts`: simulate `recordChildSuccess()` returning false after Git has moved a ref, age the unresolved journal beyond the reconciliation grace, recreate the Nest app against the same isolated test schema/storage, then run maintenance.
+- The test verifies the journal stays `PENDING / GIT_CHILD_OUTCOME_UNKNOWN`, no success audit is emitted, Git receive-pack discovery is rejected with the documented generic HTTP 503 response, the repository-delete API exposes `409 GIT_PUSH_RECONCILIATION_REQUIRED` without changing repository state, and a retry leaves refs and operation count unchanged.
+- Local evidence on 2026-10-26: focused PostgreSQL/Git E2E passed 1/1 (`corepack pnpm --filter backend test:e2e -- test/push-audit.e2e-spec.ts`); targeted ESLint passed; backend typecheck passed; `git diff --check` passed. The isolated `git_push_audit_test_*` schema count after teardown was zero.
+- Scope is intentionally bounded: this models unknown durable child-success proof plus Nest app recreation; it is not a hard process crash, advisory-lock connection loss, cloud recovery, or issue #5 full acceptance. Test change is committed locally as `86fe49e` on `codex/pr-operation-id-reuse`; no push, deployment, migration, or cloud mutation occurred. Existing untracked `frontend/AGENTS.md` and `frontend/CLAUDE.md` were preserved.
