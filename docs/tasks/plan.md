@@ -2,10 +2,10 @@
 
 ## Current verified state (2026-10-26; older snapshots below are history)
 
-- `origin/thviet` is at `ccff0021d4c05b8e1108bab173053d50a1b93bb4` (`ccff002`); the current review worktree `codex/pr-operation-id-reuse` is at that commit plus a local restore-vs-purge E2E. Code commit `b6411ad` passed hosted Actions [#118 / `40262580445`](https://github.com/VuLeCoder/Code-forge/actions/runs/40262580445), docs reconciliation `de76447` passed Actions #120, duplicate-OPEN-PR E2E commit `ccff002` is under Actions [#121 / `40264984366`](https://github.com/VuLeCoder/Code-forge/actions/runs/40264984366), and restore-vs-purge E2E passed locally but has not yet had hosted verification.
+- `origin/thviet` and the current worktree are at `b51ae232627b182d7485919a65fcb876671b4562` (`b51ae23`) on `codex/pr-operation-id-reuse`. Code commit `b6411ad` passed hosted Actions [#118 / `40262580445`](https://github.com/VuLeCoder/Code-forge/actions/runs/40262580445), docs reconciliation `de76447` passed #120, duplicate-OPEN-PR E2E `ccff002` passed Actions [#121 / `40264984366`](https://github.com/VuLeCoder/Code-forge/actions/runs/40264984366), and restore-vs-purge E2E is committed in `b51ae23` with Actions #122 (`40265483751`) queued.
 - Merge→delete ordering is now deterministic and verified: PostgreSQL confirms DELETE queued on the repository advisory lock while merge pauses before ref CAS; merge commit, journal, PR metadata and audit complete before soft-delete. The full PR E2E file passed 14 runnable / 2 intentional skips; #118 passed the full CI workflow.
 - Render serves `388c584`; readiness 200 is not migration, backup/restore, direct Git, or business smoke. Historical P1001 root cause remains unknown. Do not deploy/restart before Git source recovery is verified.
-- P0–P8 are not complete. P2/P8 and other P3/P4 cases remain open; restore-vs-purge concurrency coverage now passes locally, while scheduled temp-directory cleanup wiring remains uncovered (P6). Issue #6 stays fail-closed pending owner policy; Vercel is deferred/out of scope.
+- P0–P8 are not complete. P2/P8 and other P3/P4 cases remain open; restore-vs-purge concurrency coverage passes locally and is queued for hosted verification. Maintenance scheduled cleanup now has local end-to-end wiring coverage using isolated roots; hosted verification is pending. Issue #6 stays fail-closed pending owner policy; Vercel is deferred/out of scope.
 
 The estimates, dates, and state records below are retained as historical planning context; do not use them as current status.
 

@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { lstat, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, rm, utimes } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -34,6 +34,7 @@ describe('MaintenanceJobsService PostgreSQL cleanup and purge', () => {
   let admin: PrismaClient | undefined;
   let db: PrismaClient | undefined;
   let locks: RepositoryLockService | undefined;
+  let storage: GitStorageService | undefined;
   let maintenance: MaintenanceJobsService | undefined;
   let purgeService: RepositoryPurgeService | undefined;
   let originalUrl: string | undefined;
@@ -73,7 +74,7 @@ describe('MaintenanceJobsService PostgreSQL cleanup and purge', () => {
       getOrThrow: (key: string) => key === 'DATABASE_URL_UNPOOLED' ? isolatedDirectUrl.toString()
         : key === 'GIT_STORAGE_PATH' ? storageRoot : undefined,
     } as unknown as ConfigService;
-    const storage = new GitStorageService(config);
+    storage = new GitStorageService(config);
     // Maintenance calls the OS-temp janitor too; keep this DB fixture scoped to its own Git root.
     jest.spyOn(storage, 'cleanupOrphanedTemporaryDirectories').mockResolvedValue(0);
     locks = new RepositoryLockService(config);
@@ -98,6 +99,41 @@ describe('MaintenanceJobsService PostgreSQL cleanup and purge', () => {
       else process.env[key] = value;
     }
   }, 30_000);
+
+  it('runs the orphan-temp janitor only on test-owned roots and removes stale owned entries', async () => {
+    if (!maintenance || !storage || !storageRoot) throw new Error('Maintenance test fixture was not initialized.');
+    const storageInstance = storage;
+    const gitRoot = join(storageRoot, 'janitor-git-root');
+    const readmeRoot = join(storageRoot, 'janitor-readme-root');
+    await Promise.all([mkdir(gitRoot), mkdir(readmeRoot)]);
+    const staleAt = new Date(Date.now() - 25 * 60 * 60 * 1000);
+    const staleStage = join(gitRoot, `.stage-${randomUUID()}`);
+    const freshStage = join(gitRoot, `.stage-${randomUUID()}`);
+    const unmatchedStage = join(gitRoot, '.stage-not-a-uuid');
+    const staleReadme = join(readmeRoot, `code-forge-readme-${randomBytes(3).toString('hex')}`);
+    const freshReadme = join(readmeRoot, `code-forge-readme-${randomBytes(3).toString('hex')}`);
+    const unmatchedReadme = join(readmeRoot, 'code-forge-readme-not-exact');
+    await Promise.all([staleStage, freshStage, unmatchedStage, staleReadme, freshReadme, unmatchedReadme]
+      .map((path) => mkdir(path)));
+    await Promise.all([utimes(staleStage, staleAt, staleAt), utimes(staleReadme, staleAt, staleAt)]);
+
+    const originalSpy = jest.spyOn(storageInstance, 'cleanupOrphanedTemporaryDirectories');
+    originalSpy.mockRestore();
+    const realCleanup = storageInstance.cleanupOrphanedTemporaryDirectories.bind(storageInstance);
+    const cleanupSpy = jest.spyOn(storageInstance, 'cleanupOrphanedTemporaryDirectories')
+      .mockImplementation(() => realCleanup(gitRoot, readmeRoot));
+    try {
+      await maintenance.runOnce();
+      expect(cleanupSpy).toHaveBeenCalledTimes(1);
+      for (const path of [staleStage, staleReadme]) await expect(pathExists(path)).resolves.toBe(false);
+      for (const path of [freshStage, unmatchedStage, freshReadme, unmatchedReadme]) {
+        await expect(pathExists(path)).resolves.toBe(true);
+      }
+    } finally {
+      cleanupSpy.mockRestore();
+      jest.spyOn(storageInstance, 'cleanupOrphanedTemporaryDirectories').mockResolvedValue(0);
+    }
+  });
 
   it('applies cleanup and purge batches once per eligible row, retains in-window data, and is safe to repeat', async () => {
     if (!db || !maintenance || !storageRoot) throw new Error('Maintenance test fixture was not initialized.');
