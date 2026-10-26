@@ -117,14 +117,13 @@ export default function AdminPage() {
   }
 
   function closeConfirmation() {
+    setPendingAction(null);
     if (confirmation.current?.open) confirmation.current.close();
-    else setPendingAction(null);
   }
 
   function handleConfirmationClose() {
     if (confirmation.current?.open) return;
     const opener = focusReturn.current;
-    setPendingAction(null);
     window.requestAnimationFrame(() => {
       if (!confirmation.current?.open) restoreDialogFocus(opener);
     });
