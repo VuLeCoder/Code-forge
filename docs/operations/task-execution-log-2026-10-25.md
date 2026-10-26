@@ -1150,3 +1150,9 @@ snapshots, not current status. Current acceptance state is in the task board.
 - Read-only live check: Render `/api/v1/health/ready` returned HTTP 200. This confirms current deployed readiness only, not migration/recovery or latest-source deployment.
 - Local focused checks: admin bootstrap CLI/PostgreSQL E2E passed 5/5 on an isolated loopback test DB and left zero `admin_bootstrap_*` schemas; homepage demo-storage warning was visible at 375×812 with no horizontal overflow.
 - No application code, cloud data, deployment, migration, Docker volume, or generated untracked helper file was changed. CI, local checks, and cloud evidence remain distinguished; recovery, migration, payload-boundary and admin/audit cloud gates remain open for full P0–P8 completion.
+
+## T21-P6 PUSH AUDIT CRASH-BOUNDARY REVIEW
+
+- Independent read-only review of open issue #5 at source `5fb8153` confirmed journal creation before receive-pack, actor/generation/ref snapshot binding, atomic idempotent success audit, and isolated DB-failure reconciliation coverage.
+- Boundary: if Git moves refs but the process/database fails before `GIT_CHILD_SUCCEEDED` is durably recorded, the row remains `GIT_CHILD_OUTCOME_UNKNOWN`; reconciliation intentionally does not infer success and further writes stay fenced. Existing E2E covers audit-transaction failure after child-success proof, not this earlier window. This remains unproven against issue #5's broad crash wording; per the owner's fail-closed choice, do not auto-attribute it or modify refs. Operator resolution remains deferred under issue #6.
+- Reconciled the cloud checklist summary so it consistently distinguishes the passed API/Git collaborator invitation→PR→merge smoke from the still-unverified browser UI, admin/audit, quota, migration and recovery checks. No runtime code or cloud state changed.

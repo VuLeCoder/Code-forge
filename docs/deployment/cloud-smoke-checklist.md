@@ -2,7 +2,7 @@
 
 Điền release commit và thời gian chạy. Lưu output không chứa PAT, cookie, access token, Authorization header, mã nguồn private hoặc diff private.
 
-Đã có readiness probe và smoke Git HTTPS trực tiếp tới Render. Đây chưa phải nghiệm thu cloud end-to-end: invitation/PR/admin, quota payload lớn, restart/source recovery, migration và backup/restore vẫn chưa chạy. Readiness endpoint chạy `SELECT 1`, kiểm tra Git và ghi/xóa một file tạm; đây không phải probe chỉ đọc. Vercel nằm ngoài phạm vi; chưa có frontend cloud URL được nghiệm thu.
+Đã có readiness probe, smoke Git HTTPS trực tiếp tới Render, và API/Git smoke cho owner–collaborator invitation→PR→merge. Đây chưa phải nghiệm thu cloud end-to-end: browser UI journey, admin/audit, quota payload lớn, restart/source recovery, migration và backup/restore vẫn chưa được nghiệm thu. Readiness endpoint chạy `SELECT 1`, kiểm tra Git và ghi/xóa một file tạm; đây không phải probe chỉ đọc. Vercel nằm ngoài phạm vi; chưa có frontend cloud URL được nghiệm thu.
 
 | Trường | Kết quả |
 | --- | --- |
@@ -17,7 +17,7 @@
 | Git/PR HTTPS smoke | 2026-10-26: anonymous public clone/fetch; private PAT clone/push/fetch; owner PR merge/fetch `f8468c6063a70aea4306f6ab6de7a1c58cafb7bd`; WRITE invitation→accept→collaborator push/PR→owner merge/fetch `481d75d44f2ad2855bab853cb55d28c96235877b`. Both merge commits have two parents. Temporary PATs revoked and sessions logged out. Payload/quota, admin and recovery not tested. |
 | Người nghiệm thu | Codex; Render API/Git/PR integration smoke, not visual browser or full release acceptance |
 
-Readiness implementation chạy `SELECT 1` qua Prisma và ghi/xóa file tạm trong Git storage (có thể tạo thư mục nếu thiếu). Public/private Git HTTPS, private PR create/compare/diff/owner merge/fetch đã được smoke-test qua API/Git; UI browser, collaborator invitation, admin, migration, backup/restore, payload quota và source recovery sau restart chưa được nghiệm thu. Render Dashboard vẫn cho thấy last verified successful deploy là `388c584`; không deploy/restart trước khi có kế hoạch sao lưu/khôi phục Git vì storage Free có thể mất dữ liệu.
+Readiness implementation chạy `SELECT 1` qua Prisma và ghi/xóa file tạm trong Git storage (có thể tạo thư mục nếu thiếu). Public/private Git HTTPS và collaborator invitation→accept→push/PR→owner merge/fetch đã được smoke-test qua API/Git; browser UI journey, admin, migration, backup/restore, payload quota và source recovery sau restart chưa được nghiệm thu. Render Dashboard vẫn cho thấy last verified successful deploy là `388c584`; không deploy/restart trước khi có kế hoạch sao lưu/khôi phục Git vì storage Free có thể mất dữ liệu.
 
 ## Tài khoản và quyền truy cập
 
