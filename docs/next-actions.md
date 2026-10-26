@@ -65,7 +65,7 @@ flowchart TD
 ## Current stop conditions
 
 - Current hosted CI is Actions `MVP verification` #138 (`40276491886`), successful on exact pushed SHA `7588c0a4306abf5309de2fe0cb8c6e0c93dac0e2`. Older failure `40166811302` and replacement `40167861108` remain historical evidence, not the current baseline.
-- Local commits after `origin/thviet` include push-journal fail-closed/idempotency coverage, cross-repository merge operation-ID coverage, and expired admin-restore boundary coverage; their focused local results are recorded in T27–T30 and are not hosted CI evidence. Do not claim these local changes are pushed or deployed.
+- Local commits after `origin/thviet` include push-journal fail-closed/idempotency and concurrent-reconciliation coverage, cross-repository merge operation-ID coverage, and expired admin-restore boundary coverage; their focused local results are recorded in T27–T31 and are not hosted CI evidence. Do not claim these local changes are pushed or deployed.
 - The latest verified Render deployment remains `388c584`. Do not push/redeploy/migrate until a tested write-freeze/drain and Git-source plus metadata recovery rehearsal are available; the README and operator runbook explicitly hard-stop without those safeguards.
 - Existing local E2E refusals due to a non-test `backend/.env` remain historical; current focused PostgreSQL/Git tests use the isolated `_test` database/schema and temp storage. Keep test, CI, and cloud evidence distinct.
 - Do not resolve ambiguous journals or weaken write fencing before U4 and the security contract are approved.
