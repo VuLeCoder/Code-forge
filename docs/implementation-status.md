@@ -1,25 +1,25 @@
 # MVP implementation ledger
 
-## Historical verified snapshot (2026-10-26; superseded)
+## Current verified snapshot (2026-10-26)
 
-For the latest acceptance and cloud evidence, use [the current acceptance board](operations/acceptance-task-board-2026-10-25.md) and [next actions](next-actions.md). The snapshot below predates Render Git/PR smoke and is retained as history.
+For detailed evidence and residual acceptance cases, use [the acceptance board](operations/acceptance-task-board-2026-10-25.md), [next actions](next-actions.md), and [the cloud checklist](deployment/cloud-smoke-checklist.md). Historical snapshots below are not current status.
 
-- `thviet` and `origin/thviet` match at `23cb1c7`. Latest code commit `b6411ad` passed hosted Actions [#118 / `40262580445`](https://github.com/VuLeCoder/Code-forge/actions/runs/40262580445); docs-only run #119 for `23cb1c7` was in progress at the time of this update.
-- Merge→delete is now deterministically covered: merge pauses before ref CAS, DELETE is observed waiting on the same PostgreSQL advisory lock, then merge completes before soft-delete. Local PR E2E file passed 14 runnable cases / 2 intentional crash-case skips; backend lint and typecheck passed. The full workflow on `b6411ad` passed backend unit/E2E, frontend browser/full-stack, Docker image smoke, migration checks, lint/typecheck/build.
-- Render still serves `388c584`; readiness returned 200 with database/Git/storage up. This is not evidence of migration, backup/restore, Git HTTP, auth, or business smoke. Historical P1001 root cause remains unknown; no post-change deploy was performed because source recovery is not yet verified.
-- P0–P8 are incomplete: P2/P8 cloud release/recovery remain open; P3/P4 still have other acceptance cases; docs/handoff reconciliation continues. Issue #6 remains fail-closed pending owner policy. Vercel is deferred/out of scope.
+- Pushed source `origin/thviet` is `7588c0a4306abf5309de2fe0cb8c6e0c93dac0e2`; hosted Actions `MVP verification` #138 (`40276491886`) passed on that exact SHA. The local `codex/pr-operation-id-reuse` branch has subsequent unpushed commits and a focused additional test; local evidence must not be presented as hosted CI.
+- BTL cloud evidence: Render `388c584` readiness, direct public/private Git, owner PR merge, and WRITE collaborator invitation→push→PR→owner merge smoke passed. Migration, backup/restore, admin/audit cloud, quota-boundary cloud tests, and source-loss recovery remain unverified. The historical `4407e7d` P1001 cause remains unknown; no deploy/restart should be inferred from CI.
+- P3/P4 remain partial. A local isolated PostgreSQL/Git E2E at local commit `86fe49e` verifies a simulated unknown push child-success outcome remains unaudited and write-fenced after Nest app recreation; this is not a hard process crash. Local commit `56cfb3d` adds a unit regression for the global merge-operation-ID collision across repositories; the focused PR service suite passed 22/22 with targeted lint and typecheck. These local checks are not hosted CI and do not close the broad recovery matrix or issue #5.
+- Issue #6 operator resolution remains fail-closed pending the owner policy. Vercel is out of scope. P0–P8 completion is not claimed.
 
 | Package | Current state |
 | --- | --- |
-| P0 baseline/CI | Partial: run #118 passed exact code SHA `b6411ad`; docs-only run #119 was pending for `23cb1c7`. |
+| P0 baseline/CI | Hosted CI #138 passed on exact pushed SHA `7588c0a`; later local branch commits are unpushed. |
 | P1 auth/invitation/contracts | Implemented with unit/HTTP integration evidence; full P0–P8 acceptance remains open. |
-| P2 direct cloud Git | Open: readiness only on Render `388c584`; direct Git transport and full DB/release smoke unverified. |
-| P3 repository write coordination | Partial: deterministic merge→delete test added; remaining failure/recovery matrix is open. |
+| P2 direct cloud Git | Partial: direct Git and owner/collaborator smoke passed on Render `388c584`; migration, backup/recovery, quota and release checks remain open. |
+| P3 repository write coordination | Partial: merge→delete and bounded fail-closed push-journal tests pass; hard-crash/lock-loss and broader race matrix remain open. |
 | P4 PR/compare/merge | Partial: core flows and merge→delete ordering covered; other matrix/cloud acceptance remains open. |
 | P5 PR/admin UI | Partial: browser checks exist; manual screen-reader/device verification is not established here. |
 | P6 admin/audit/jobs | Partial: core paths are covered; issue #6 resolution remains deliberately fail-closed. |
-| P7 regression | Partial: run #118 green on code SHA; unresolved acceptance and cloud behavior remain outside it. |
-| P8 release/handoff | Open: no cloud migration, full smoke, backup/restore, or recovery rehearsal is claimed as passed. |
+| P7 regression | Partial: Actions #138 passed on pushed SHA; later local focused tests are not in hosted CI; manual screen-reader/device checks remain. |
+| P8 release/handoff | Partial/open: owner/collaborator Git/PR smoke passed; no cloud migration, backup/restore, write-freeze rehearsal, or source-loss recovery is claimed as passed. |
 
 The snapshots and package tables below are retained as historical execution records; where their SHA, run number, or state differs, this section is authoritative.
 

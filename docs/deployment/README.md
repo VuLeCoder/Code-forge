@@ -72,7 +72,7 @@ Các biến TTL mặc định hiện tại nằm trong `backend/.env.example`; c
 
 ### 2. Sao lưu metadata và migrate
 
-1. Bật maintenance/chặn mutation, drain Git push và các thao tác ghi đang chạy. Với chỉ một instance demo, không deploy backend mới trong lúc request Git còn mở.
+1. Trước release, xác định cơ chế operator/provider đã kiểm chứng để chặn mutation mới và xác nhận Git push/merge đang chạy đã drain. Hiện chưa có application-wide write gate được xác minh; maintenance jobs và readiness endpoint không chặn ghi. Nếu chưa có cơ chế thực tế kèm bằng chứng drain, **dừng tại đây: không migrate/deploy và không dùng restart thay cho drain**.
 2. Tạo bản sao Neon/pg_dump có mã hóa và kiểm tra bản sao đọc được. Không đưa dump hoặc connection string vào Git.
 3. Build migration image từ cùng commit:
 
@@ -82,7 +82,7 @@ Các biến TTL mặc định hiện tại nằm trong `backend/.env.example`; c
 
 4. Chạy one-shot migration task với `DATABASE_URL_UNPOOLED` và `DATABASE_URL` được inject từ secret manager. Không thêm giá trị secret vào command line. Chỉ mở backend khi `prisma migrate deploy` exit 0 và migration history khớp commit.
 5. Migration phải additive/forward-only. Không sửa migration đã áp dụng và không dùng `migrate reset` trên demo/database đang có dữ liệu.
-6. Deploy Render backend sau backup/rehearsal; frontend host còn deferred. Xác minh API và Git URL thực tế trước khi tắt maintenance; chưa công bố demo frontend.
+6. Deploy Render backend sau backup/rehearsal; frontend host còn deferred. Xác minh API và Git URL thực tế trước khi cho phép mutation trở lại hoặc gỡ cơ chế write-freeze đã xác minh; chưa công bố demo frontend.
 
 ### 3. Smoke test và công bố
 
@@ -91,7 +91,7 @@ Hoàn thành mọi mục backend trong [cloud smoke checklist](./cloud-smoke-che
 ## Rollback và phục hồi
 
 - Nếu API lỗi nhưng migration vẫn tương thích, rollback image ứng dụng về release trước đó, giữ nguyên metadata DB. Không tự revert migration SQL.
-- Nếu migration thất bại trước khi hoàn tất, giữ maintenance bật; lưu nguyên log và `prisma migrate status`, so với backup, sửa migration mới theo quy trình forward-only rồi chạy lại sau khi xác minh trạng thái. Không chạy lặp mù khi kết quả chưa rõ.
+- Nếu migration thất bại trước khi hoàn tất, giữ nguyên cơ chế chặn ghi đã xác minh; lưu nguyên log và `prisma migrate status`, so với backup, sửa migration mới theo quy trình forward-only rồi chạy lại sau khi xác minh trạng thái. Không chạy lặp mù khi kết quả chưa rõ.
 - Nếu source bare repo đã mất, hệ thống sẽ tạo repo rỗng với generation mới và giao diện thông báo lịch sử cũ không còn. Từ máy có clone còn đủ dữ liệu, kiểm tra remote rồi push lại các branch cần thiết:
 
   ```sh
