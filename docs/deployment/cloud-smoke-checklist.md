@@ -2,7 +2,7 @@
 
 Điền release commit và thời gian chạy. Lưu output không chứa PAT, cookie, access token, Authorization header, mã nguồn private hoặc diff private.
 
-Đã có readiness probe, smoke Git HTTPS trực tiếp tới Render, và API/Git smoke cho owner–collaborator invitation→PR→merge. Đây chưa phải nghiệm thu cloud end-to-end: browser UI journey, admin/audit, quota payload lớn, restart/source recovery, migration và backup/restore vẫn chưa được nghiệm thu. Readiness endpoint chạy `SELECT 1`, kiểm tra Git và ghi/xóa một file tạm; đây không phải probe chỉ đọc. Vercel nằm ngoài phạm vi; chưa có frontend cloud URL được nghiệm thu.
+Đã có readiness probe, smoke Git HTTPS trực tiếp tới Render, API/Git smoke cho owner–collaborator invitation→PR→merge, và read-only dashboard preflight cho Render/Neon. Đây chưa phải nghiệm thu cloud end-to-end: browser UI journey, admin/audit, quota payload lớn, restart/source recovery, migration và backup/restore vẫn chưa được nghiệm thu. Readiness endpoint chạy `SELECT 1`, kiểm tra Git và ghi/xóa một file tạm; đây không phải probe chỉ đọc. Vercel nằm ngoài phạm vi; chưa có frontend cloud URL được nghiệm thu.
 
 | Trường | Kết quả |
 | --- | --- |
@@ -11,6 +11,9 @@
 | Latest CI at check | #138 (`40276491886`): completed successfully |
 | Render commit đang chạy | `388c584` theo Render Dashboard; chưa phải source tip hiện tại |
 | Render auto-deploy | `After CI Checks Pass`; pushes to `thviet` may redeploy. Do not push until the documented source-recovery preflight is satisfied. |
+| Render service limits | Dashboard read-only check: `code-forge-api-thviet`, Free plan, no persistent disk; Live `388c584`; source can be lost on restart/redeploy. |
+| Neon resource | Dashboard read-only check: project `Code Forge` (`green-mountain-81958216`), branch `production`, Singapore, Free; separate from `BUS Ticket`. |
+| Neon history window | 6 hours; this is time-travel/instant-restore history, not a completed export backup/restore rehearsal. |
 | Frontend URL | Chưa có; Vercel deferred/out of scope |
 | Backend URL | `https://code-forge-api-thviet.onrender.com` |
 | Readiness probe | 2026-10-26: `GET /api/v1/health/ready` → HTTP 200; database/Git/storage đều `up` trên deployed `388c584` (Render vẫn chưa ở source tip `7588c0a`) |
@@ -19,7 +22,7 @@
 | Git/PR HTTPS smoke | 2026-10-26: anonymous public clone/fetch; private PAT clone/push/fetch; owner PR merge/fetch `f8468c6063a70aea4306f6ab6de7a1c58cafb7bd`; WRITE invitation→accept→collaborator push/PR→owner merge/fetch `481d75d44f2ad2855bab853cb55d28c96235877b`. Both merge commits have two parents. Temporary PATs revoked and sessions logged out. Payload/quota, admin and recovery not tested. |
 | Người nghiệm thu | Codex; Render API/Git/PR integration smoke, not visual browser or full release acceptance |
 
-Readiness implementation chạy `SELECT 1` qua Prisma và ghi/xóa file tạm trong Git storage (có thể tạo thư mục nếu thiếu). Public/private Git HTTPS và collaborator invitation→accept→push/PR→owner merge/fetch đã được smoke-test qua API/Git; browser UI journey, admin, migration, backup/restore, payload quota và source recovery sau restart chưa được nghiệm thu. Render Dashboard vẫn cho thấy last verified successful deploy là `388c584` (source tip `7588c0a` mới hơn); `/api/v1/health/live` chưa trả `commitSha`. Không deploy/restart trước khi có kế hoạch sao lưu/khôi phục Git vì storage Free có thể mất dữ liệu.
+Readiness implementation chạy `SELECT 1` qua Prisma và ghi/xóa file tạm trong Git storage (có thể tạo thư mục nếu thiếu). Public/private Git HTTPS và collaborator invitation→accept→push/PR→owner merge/fetch đã được smoke-test qua API/Git; browser UI journey, admin, migration, backup/restore, payload quota và source recovery sau restart chưa được nghiệm thu. Render Dashboard xác nhận service `code-forge-api-thviet`/`thviet` có Auto-Deploy `After CI Checks Pass`, last verified successful deploy `388c584` (source tip `7588c0a` mới hơn), và Free không có persistent disk; `/api/v1/health/live` chưa trả `commitSha`. Neon `Code Forge` có history window 6 giờ nhưng chưa có export/restore rehearsal. Không deploy/restart trước khi có kế hoạch sao lưu/khôi phục Git và metadata.
 
 ## Tài khoản và quyền truy cập
 
