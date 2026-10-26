@@ -2,10 +2,11 @@
 
 ## Current release gates (2026-10-26; older “Current” blocks below are historical)
 
-- Source/CI: `thviet` = `origin/thviet` = `23cb1c7`; code SHA `b6411ad` passed hosted Actions [#118 / `40262580445`](https://github.com/VuLeCoder/Code-forge/actions/runs/40262580445). Docs-only run #119 for `23cb1c7` was in progress at this snapshot.
-- Completed: deterministic merge→delete lock-order E2E, local full PR E2E file, backend lint/typecheck, and hosted full CI on `b6411ad`.
-- Cloud remains open: Render serves `388c584`; readiness 200 is evidence of readiness only. Historical P1001 cause is unknown. No cloud migration, backup/restore, direct Render Git, or business smoke is accepted; do not deploy/restart until Git source recovery is verified.
-- Remaining: close other P3/P4 acceptance cases; finish P2/P8 cloud smoke and handoff evidence. Keep issue #6 fail-closed until owner policy is chosen. Vercel remains deferred/out of scope.
+- Source/CI: `origin/thviet` is `2d124b3`; hosted run #129 (`40270158604`) is running on that exact SHA. Previous run #128 (`40269234926`) passed on `df77e2b`.
+- Completed for the BTL demo: local backend/frontend and hosted workflow gates are green on prior code; Render readiness and local-frontend→Render API checks passed; public anonymous clone/fetch and private authenticated clone/push/fetch passed against the direct Render Git route. Test PAT was revoked. The current evidence is in `docs/operations/acceptance-task-board-2026-10-25.md` and the execution log.
+- Cloud/release still partial: no invitation/PR/admin cloud journey, migration, backup/restore, restart/source-loss recovery, or production-scale persistence is claimed. Render free storage may lose Git source on restart; historical P1001 cause remains unknown. Do not redeploy/restart as a “fix” without a source recovery plan.
+- Remaining for course-demo scope: review the current hosted run, keep the demo limitation visible, and decide whether a short PR cloud smoke is worth doing. Broader P3/P4 matrix and issue #6's operator-resolution policy remain open; Vercel is out of scope.
+- Do not mark P0–P8 complete from a green CI run alone; the BTL demo is usable before every production/recovery gate is closed.
 - Do not mark P0–P8 complete from a green CI run alone.
 
 Older “Current” paragraphs below are historical snapshots and must not override this section.
