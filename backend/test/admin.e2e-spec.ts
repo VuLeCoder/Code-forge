@@ -71,7 +71,7 @@ describe('Admin HTTP + isolated PostgreSQL + Git', () => {
     const module = await Test.createTestingModule({ imports: [AppModule] })
       // Admin acceptance covers account-lock behavior, not rate limiting;
       // auth.e2e-spec exercises the real throttling behavior separately.
-      .overrideProvider(ThrottlerStorage).useValue({ increment: async (_key: string, ttl: number) => ({
+      .overrideProvider(ThrottlerStorage).useValue({ increment: (_key: string, ttl: number) => Promise.resolve({
         totalHits: 1, timeToExpire: ttl, isBlocked: false, timeToBlockExpire: 0,
       }) }).compile();
     app = module.createNestApplication();
@@ -188,6 +188,29 @@ describe('Admin HTTP + isolated PostgreSQL + Git', () => {
       actorId: admin.userId, targetId: restorable.id, action: 'ADMIN_REPOSITORY_RESTORED',
       details: { equals: { from: 'DELETED', to: 'ACTIVE' } },
     } })).not.toBeNull();
+
+    const expiredRepositoryResponse = await call('POST', 'repositories', repositoryOwner.cookie, {
+      name: 'ExpiredRestore', visibility: 'PRIVATE', initializeReadme: true,
+    });
+    expect(expiredRepositoryResponse.status).toBe(201);
+    const expiredRepository = await db!.repository.findFirstOrThrow({
+      where: { ownerId: repositoryOwner.userId, normalizedName: 'expiredrestore' },
+    });
+    expect((await call('DELETE', 'repos/PrivateOwner/ExpiredRestore', repositoryOwner.cookie)).status).toBe(204);
+    await db!.repository.update({
+      where: { id: expiredRepository.id },
+      data: { purgeAfter: new Date(Date.now() - 1_000) },
+    });
+    const expiredTombstone = await db!.repository.findUniqueOrThrow({ where: { id: expiredRepository.id } });
+    const restoreExpiredResponse = await call('POST', `admin/repositories/${expiredRepository.id}/restore`, admin.cookie);
+    expect(restoreExpiredResponse.status).toBe(409);
+    expect(await restoreExpiredResponse.json()).toMatchObject({ error: { code: 'RESTORE_EXPIRED' } });
+    expect(await db!.repository.findUniqueOrThrow({ where: { id: expiredRepository.id } })).toMatchObject({
+      status: 'DELETED', deletedAt: expiredTombstone.deletedAt, purgeAfter: expiredTombstone.purgeAfter,
+    });
+    expect(await db!.auditLog.count({ where: {
+      actorId: admin.userId, targetId: expiredRepository.id, action: 'ADMIN_REPOSITORY_RESTORED',
+    } })).toBe(0);
 
     const createdRepository = await call('POST', 'repositories', repositoryOwner.cookie, {
       name: 'AdminBoundary', visibility: 'PRIVATE', initializeReadme: true,
