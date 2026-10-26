@@ -212,6 +212,29 @@ describe('PullRequestsService', () => {
     expect(storage.compareAndSwapBranch).not.toHaveBeenCalled();
   });
 
+  it('rejects a concurrent operation ID winner from another repository without side effects', async () => {
+    db.pullRequestMergeOperation.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ operationId, repositoryId: '66666666-6666-4666-8666-666666666666',
+        pullRequestId: '77777777-7777-4777-8777-777777777777', expectedSourceSha: sourceSha,
+        expectedTargetSha: targetSha, storageGeneration: 2, status: 'PENDING', resultingSha: null });
+    db.pullRequestMergeOperation.create.mockRejectedValueOnce(Object.assign(new Error('Unique constraint failed'), { code: 'P2002' }));
+
+    await expect(service.merge('owner', 'repo', ownerId, 4, { operationId, expectedSourceSha: sourceSha,
+      expectedTargetSha: targetSha, storageGeneration: 2, version: 3 })).rejects.toMatchObject({
+      status: 409, response: { error: { code: 'OPERATION_ID_REUSED' } },
+    });
+
+    expect(db.pullRequestMergeOperation.create).toHaveBeenCalledTimes(1);
+    expect(db.pullRequestMergeOperation.update).not.toHaveBeenCalled();
+    expect(db.pullRequestMergeOperation.updateMany).not.toHaveBeenCalled();
+    expect(db.pullRequest.updateMany).not.toHaveBeenCalled();
+    expect(db.auditLog.create).not.toHaveBeenCalled();
+    expect(storage.createMergeCandidate).not.toHaveBeenCalled();
+    expect(storage.compareAndSwapBranch).not.toHaveBeenCalled();
+  });
+
   it('allows only the repository owner to merge a pull request', async () => {
     await expect(service.merge('owner', 'repo', writerId, 4, { operationId, expectedSourceSha: sourceSha,
       expectedTargetSha: targetSha, storageGeneration: 2, version: 3 })).rejects.toBeInstanceOf(ForbiddenException);
