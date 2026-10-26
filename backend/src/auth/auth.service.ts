@@ -94,9 +94,13 @@ export class AuthService {
     const existing = await this.prisma.session.findUnique({ where: { tokenHash }, include: { user: true } });
     if (!existing) this.invalidRefresh();
     if (existing.revokedAt) {
-      await this.prisma.session.updateMany({
-        where: { familyId: existing.familyId, revokedAt: null },
-        data: { revokedAt: new Date() },
+      await this.prisma.$transaction(async (tx) => {
+        // Serialize reuse detection with every refresh in this user's token family.
+        await tx.$queryRaw`SELECT id FROM users WHERE id = ${existing.userId}::uuid FOR UPDATE`;
+        await tx.session.updateMany({
+          where: { familyId: existing.familyId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
       });
       this.invalidRefresh();
     }
@@ -112,7 +116,13 @@ export class AuthService {
         where: { id: existing.id, revokedAt: null },
         data: { revokedAt: now, lastUsedAt: now },
       });
-      if (revoked.count !== 1) return null;
+      if (revoked.count !== 1) {
+        await tx.session.updateMany({
+          where: { familyId: existing.familyId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+        return null;
+      }
       return tx.session.create({
         data: {
           userId: existing.userId,
@@ -122,13 +132,7 @@ export class AuthService {
         },
       });
     });
-    if (!next) {
-      await this.prisma.session.updateMany({
-        where: { familyId: existing.familyId, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
-      this.invalidRefresh();
-    }
+    if (!next) this.invalidRefresh();
     return this.result(existing.user, next, nextRawToken);
   }
 
