@@ -17,7 +17,9 @@ export class PullRequestsController {
   @UseGuards(OptionalAccessTokenGuard)
   list(@Param('owner') owner: string, @Param('repo') repo: string, @Req() request: Request & { user?: AuthPrincipal },
     @Query('page') page?: string, @Query('status') status?: string) {
-    if (status !== undefined && !['OPEN', 'CLOSED', 'MERGED'].includes(status)) throw new BadRequestException('Trạng thái pull request không hợp lệ.');
+    if (status !== undefined && !['OPEN', 'CLOSED', 'MERGED'].includes(status)) {
+      throw new BadRequestException({ error: { code: 'INVALID_PULL_REQUEST_STATUS', message: 'Trạng thái pull request không hợp lệ.', details: {} } });
+    }
     return this.pulls.list(owner, repo, request.user?.id, page, status as PullRequestStatus | undefined);
   }
 
@@ -39,7 +41,9 @@ export class PullRequestsController {
   @UseGuards(OptionalAccessTokenGuard)
   compare(@Param('owner') owner: string, @Param('repo') repo: string, @Param('number', ParseIntPipe) number: number,
     @Req() request: Request & { user?: AuthPrincipal }, @Query('summary') summary?: string) {
-    if (summary !== undefined && summary !== 'true' && summary !== 'false') throw new BadRequestException('summary phải là true hoặc false.');
+    if (summary !== undefined && summary !== 'true' && summary !== 'false') {
+      throw new BadRequestException({ error: { code: 'INVALID_SUMMARY', message: 'summary phải là true hoặc false.', details: {} } });
+    }
     return this.pulls.compare(owner, repo, request.user?.id, number, summary === 'true');
   }
 
