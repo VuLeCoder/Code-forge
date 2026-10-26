@@ -1180,10 +1180,21 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       sourceBranch: 'feature/ui/add-button', targetBranch: 'main',
     });
     expect(created.status).toBe(201);
-    const creation = await responseJson<{ pullRequest: { number: number }; permissions: { canCreate: boolean; canEdit: boolean; canMerge: boolean } }>(created);
+    const creation = await responseJson<{ pullRequest: { id: string; number: number }; permissions: { canCreate: boolean; canEdit: boolean; canMerge: boolean } }>(created);
     expect(creation).toMatchObject({ permissions: { canCreate: true, canEdit: true, canMerge: true } });
     const number = creation.pullRequest.number;
     expect(number).toBe(1);
+
+    const duplicateOpenPair = await call('POST', repoPath, {
+      title: 'Duplicate feature request', description: 'The same source/target pair must have one open PR.',
+      sourceBranch: 'feature/ui/add-button', targetBranch: 'main',
+    });
+    expect(duplicateOpenPair.status).toBe(409);
+    expect(await responseJson<{ error: { code: string } }>(duplicateOpenPair))
+      .toMatchObject({ error: { code: 'OPEN_PULL_REQUEST_EXISTS' } });
+    expect(await db.pullRequest.count({ where: { repositoryId: repository.id,
+      sourceBranch: 'feature/ui/add-button', targetBranch: 'main', status: 'OPEN' } })).toBe(1);
+    expect(await db.auditLog.count({ where: { targetId: creation.pullRequest.id, action: 'PULL_REQUEST_CREATED' } })).toBe(1);
 
     const listed = await call('GET', repoPath);
     expect(listed.status).toBe(200);

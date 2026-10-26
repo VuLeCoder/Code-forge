@@ -2,10 +2,10 @@
 
 ## Current acceptance snapshot (2026-10-26; older records below are historical)
 
-- Source: `thviet` = `origin/thviet` = `23cb1c7`. Code commit `b6411ad` passed Actions [#118 / `40262580445`](https://github.com/VuLeCoder/Code-forge/actions/runs/40262580445); docs-only Actions #119 on `23cb1c7` was in progress at this snapshot.
+- Source: `origin/thviet` is `de764470e92f1fbbb9a32c2ab907fd114f77e5ae` (`de76447`); the current review worktree is on `codex/pr-operation-id-reuse` at that same base. Code commit `b6411ad` passed Actions [#118 / `40262580445`](https://github.com/VuLeCoder/Code-forge/actions/runs/40262580445), and docs reconciliation commit `de76447` passed Actions #120. The current local candidate adds a passing isolated-PostgreSQL E2E assertion for duplicate OPEN PR branch pairs; hosted CI for this candidate is not yet recorded.
 - P3/P4 merge→delete lock-order acceptance: **PASS**. The test pauses merge before ref CAS, observes DELETE queued on the same PostgreSQL advisory lock, then verifies merge commit/ref, COMPLETED journal, MERGED PR and audit before soft-delete. Full PR E2E: 14 runnable passed, 2 intentional crash-case skips; CI #118 passed the complete workflow.
 - Cloud P2/P8: **OPEN**. Render `388c584` readiness returned HTTP 200 with database/Git/storage up; migration, backup/restore, direct Git HTTP, auth/business smoke and recovery remain unverified. Historical P1001 root cause is unknown; do not deploy/restart until source recovery is verified.
-- Remaining P3/P4 matrix and release/handoff evidence: **OPEN**. Issue #6 stays fail-closed pending owner policy. Vercel is deferred/out of scope.
+- Remaining P3/P4 matrix and release/handoff evidence: **OPEN**. A fresh audit identified missing restore-vs-purge race coverage (P3) and maintenance temp-directory cleanup E2E wiring coverage (P6); these are coverage gaps, not confirmed production defects. Issue #6 stays fail-closed pending owner policy. Vercel is deferred/out of scope.
 
 Use this snapshot for current status; older task records and run references below remain historical.
 

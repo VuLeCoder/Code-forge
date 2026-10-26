@@ -2,10 +2,10 @@
 
 ## Current verified state (2026-10-26; older snapshots below are history)
 
-- `thviet` and `origin/thviet` match at `23cb1c7`. Code commit `b6411ad` passed hosted Actions [#118 / `40262580445`](https://github.com/VuLeCoder/Code-forge/actions/runs/40262580445); docs-only run #119 on `23cb1c7` was in progress at this snapshot.
+- `origin/thviet` is at `de764470e92f1fbbb9a32c2ab907fd114f77e5ae` (`de76447`); the current review worktree is `codex/pr-operation-id-reuse` at the same base. Code commit `b6411ad` passed hosted Actions [#118 / `40262580445`](https://github.com/VuLeCoder/Code-forge/actions/runs/40262580445), and docs reconciliation commit `de76447` passed Actions #120. A local duplicate-OPEN-PR E2E assertion passes on isolated PostgreSQL; hosted CI for this candidate is not yet recorded.
 - Merge→delete ordering is now deterministic and verified: PostgreSQL confirms DELETE queued on the repository advisory lock while merge pauses before ref CAS; merge commit, journal, PR metadata and audit complete before soft-delete. The full PR E2E file passed 14 runnable / 2 intentional skips; #118 passed the full CI workflow.
 - Render serves `388c584`; readiness 200 is not migration, backup/restore, direct Git, or business smoke. Historical P1001 root cause remains unknown. Do not deploy/restart before Git source recovery is verified.
-- P0–P8 are not complete. P2/P8 and other P3/P4 cases remain open; issue #6 stays fail-closed pending owner policy; Vercel is deferred/out of scope.
+- P0–P8 are not complete. P2/P8 and other P3/P4 cases remain open; recent read-only audits also found uncovered restore-vs-purge concurrency (P3) and scheduled temp-directory cleanup wiring (P6). Issue #6 stays fail-closed pending owner policy; Vercel is deferred/out of scope.
 
 The estimates, dates, and state records below are retained as historical planning context; do not use them as current status.
 
