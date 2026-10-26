@@ -13,6 +13,7 @@ import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
 import { Client } from 'pg';
 import { MaintenanceJobsService } from '../src/maintenance/maintenance-jobs.service';
+import { GitStorageService } from '../src/repositories/git-storage.service';
 // cookie-parser is CommonJS; its default import is undefined at runtime in this test runner.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import cookieParser = require('cookie-parser');
@@ -1479,16 +1480,60 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       storageGeneration: storedRepo.storageGeneration, state: 'READY', stale: false });
 
     const raceOperationId = randomUUID();
-    const [raceMergeResponse, deleteResponse] = await Promise.all([
-      call('POST', `${repoPath}/${racePullRequest.pullRequest.number}/merge`, {
+    const storage = app.get(GitStorageService);
+    const updateTarget = storage.compareAndSwapBranch.bind(storage);
+    let releaseMerge!: () => void;
+    let markMergeAtRefUpdate!: () => void;
+    const mergeAtRefUpdate = new Promise<void>((resolveMergeAtRefUpdate) => {
+      markMergeAtRefUpdate = resolveMergeAtRefUpdate;
+    });
+    const mergeRelease = new Promise<void>((resolveMerge) => {
+      releaseMerge = resolveMerge;
+    });
+    const compareAndSwapSpy = jest.spyOn(storage, 'compareAndSwapBranch').mockImplementation(async (
+      key, branch, nextSha, expectedSha, signal,
+    ) => {
+      markMergeAtRefUpdate();
+      await mergeRelease;
+      return updateTarget(key, branch, nextSha, expectedSha, signal);
+    });
+    const barrierUrl = new URL(process.env.DATABASE_URL_UNPOOLED!);
+    barrierUrl.searchParams.set('application_name', `${lockApplicationName}-merge-delete-barrier`);
+    const barrier = new Client({ connectionString: barrierUrl.toString(), connectionTimeoutMillis: 5_000 });
+    let mergeResponse: Response | undefined;
+    let deleteResponse: Response | undefined;
+    let mergeRequestPromise: Promise<Response> | undefined;
+    let deleteRequest: Promise<Response> | undefined;
+    try {
+      await barrier.connect();
+      mergeRequestPromise = call('POST', `${repoPath}/${racePullRequest.pullRequest.number}/merge`, {
         operationId: raceOperationId, expectedSourceSha: raceComparison.sourceSha,
         expectedTargetSha: raceComparison.targetSha, storageGeneration: raceComparison.storageGeneration,
         version: raceDetail.pullRequest.version,
-      }),
-      call('DELETE', 'repos/pullowner/pulldemo'),
-    ]);
-    expect(deleteResponse.status).toBe(204);
-    expect([200, 403, 404]).toContain(raceMergeResponse.status);
+      });
+      await mergeAtRefUpdate;
+
+      const pendingOperation = await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId: raceOperationId } });
+      expect(pendingOperation).toMatchObject({ status: 'PENDING', candidateSha: expect.any(String) });
+      expect(await db.auditLog.count({ where: { targetId: racePullRequest.pullRequest.id,
+        action: 'PULL_REQUEST_MERGED' } })).toBe(0);
+
+      deleteRequest = call('DELETE', 'repos/pullowner/pulldemo');
+      await waitForAdvisoryLockWaiter(barrier, lockApplicationName, 10_000);
+      expect(await db.repository.findUniqueOrThrow({ where: { id: storedRepo.id } })).toMatchObject({ status: 'ACTIVE' });
+
+      releaseMerge();
+      mergeResponse = await mergeRequestPromise;
+      deleteResponse = await deleteRequest;
+    } finally {
+      releaseMerge();
+      compareAndSwapSpy.mockRestore();
+      if (mergeRequestPromise && !mergeResponse) await mergeRequestPromise.catch(() => undefined);
+      if (deleteRequest && !deleteResponse) await deleteRequest.catch(() => undefined);
+      await barrier.end().catch(() => undefined);
+    }
+    expect(mergeResponse?.status).toBe(200);
+    expect(deleteResponse?.status).toBe(204);
 
     const deletedRepository = await db.repository.findUniqueOrThrow({ where: { id: storedRepo.id } });
     expect(deletedRepository.status).toBe('DELETED');
@@ -1502,26 +1547,21 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
       where: { targetId: racePullRequest.pullRequest.id, action: 'PULL_REQUEST_MERGED' },
     });
 
-    if (raceMergeResponse.status === 200) {
-      const raceMerged = await responseJson<{ status: string; operationId: string; mergeCommitSha: string }>(raceMergeResponse);
-      expect(raceMerged).toMatchObject({ status: 'MERGED', operationId: raceOperationId });
-      expect(raceMerged.mergeCommitSha).toMatch(/^[a-f0-9]{40,64}$/);
-      expect(finalRaceTargetSha).toBe(raceMerged.mergeCommitSha);
-      const raceParents = (await git(['--git-dir', bare, 'rev-list', '--parents', '-n', '1', raceMerged.mergeCommitSha]))
-        .stdout.trim().split(' ');
-      expect(raceParents).toHaveLength(3);
-      expect(raceParents.slice(1).sort()).toEqual([raceComparison.targetSha, raceComparison.sourceSha].sort());
-      expect(raceDbPullRequest).toMatchObject({ status: 'MERGED', mergeCommitSha: raceMerged.mergeCommitSha });
-      expect(raceMergeOperations).toHaveLength(1);
-      expect(raceMergeOperations[0]).toMatchObject({ operationId: raceOperationId, status: 'COMPLETED',
-        resultingSha: raceMerged.mergeCommitSha });
-      expect(raceMergeAudits).toBe(1);
-    } else {
-      expect(finalRaceTargetSha).toBe(raceComparison.targetSha);
-      expect(raceDbPullRequest).toMatchObject({ status: 'OPEN', mergeCommitSha: null });
-      expect(raceMergeOperations).toHaveLength(0);
-      expect(raceMergeAudits).toBe(0);
-    }
+    const raceMerged = await responseJson<{ status: string; operationId: string; mergeCommitSha: string }>(mergeResponse!);
+    expect(raceMerged).toMatchObject({ status: 'MERGED', operationId: raceOperationId });
+    expect(raceMerged.mergeCommitSha).toMatch(/^[a-f0-9]{40,64}$/);
+    expect(finalRaceTargetSha).toBe(raceMerged.mergeCommitSha);
+    const raceParents = (await git(['--git-dir', bare, 'rev-list', '--parents', '-n', '1', raceMerged.mergeCommitSha]))
+      .stdout.trim().split(' ');
+    expect(raceParents).toHaveLength(3);
+    expect(raceParents.slice(1).sort()).toEqual([raceComparison.targetSha, raceComparison.sourceSha].sort());
+    expect(raceDbPullRequest).toMatchObject({ status: 'MERGED', mergeCommitSha: raceMerged.mergeCommitSha });
+    expect(raceMergeOperations).toHaveLength(1);
+    expect(raceMergeOperations[0]).toMatchObject({ operationId: raceOperationId, status: 'COMPLETED',
+      resultingSha: raceMerged.mergeCommitSha });
+    expect(raceMergeAudits).toBe(1);
+    expect(await db.auditLog.count({ where: { targetId: storedRepo.id, action: 'REPOSITORY_SOFT_DELETED' } })).toBe(1);
+    expect(await db.auditLog.count({ where: { targetId: racePullRequest.pullRequest.id, action: 'PULL_REQUEST_MERGED' } })).toBe(1);
   }, 60_000);
 
   it('rejects a merge over repository quota without moving refs or merging metadata, while an in-quota merge preserves both parents', async () => {
