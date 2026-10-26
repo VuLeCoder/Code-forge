@@ -8,7 +8,7 @@ Tạo image và chuẩn bị hướng dẫn không chứng minh dịch vụ clou
 
 ### Bằng chứng hiện tại
 
-- Current pushed integration tip `origin/thviet`: `31b727d` (exact SHA `31b727d0de7c15ead9a5a53149675b9ef957a0d9`). Hosted CI #145 is the required verification for this exact SHA; do not treat it as passed until GitHub reports a terminal success. The prior docs-integrated candidate `0878265` passed hosted CI #144. Render has not been verified at this SHA or redeployed from it.
+- Current pushed integration tip `origin/thviet`: `b1ba6d8` (exact SHA `b1ba6d8ddb8836b2f501bad45c18c4ae2ff4da66`). Hosted CI #146 is the required verification for this exact SHA; do not treat it as passed until GitHub reports a terminal success. CI #145 covers only parent `31b727d`; the prior docs-integrated candidate `0878265` passed #144. Render has not been verified at this SHA or redeployed from it.
 - Render Dashboard xác nhận service `code-forge-api-thviet` đang chạy deploy `388c584`, không phải source tip hiện tại. Probe readiness ngày 2026-10-26 trả HTTP 200 với database/Git/storage `up`; endpoint thực hiện `SELECT 1` qua Prisma và ghi/xóa file tạm trong storage. Đây chỉ là bằng chứng connectivity/readiness trên deploy `388c584`, không phải probe chỉ đọc hay smoke nghiệp vụ.
 - Read-only `GET /api/v1/health/live` returned HTTP 200 but only `status` and `timestamp`, without `commitSha`; the health revision field from source commit `97d5d34` is not live yet. Render Settings shows Auto-Deploy `After CI Checks Pass`; a push to `thviet` may redeploy this service.
 - Lịch sử có deploy `4407e7d` thất bại `P1001`; nguyên nhân gốc chưa được chứng minh. Readiness hiện tại cho thấy kết nối hoạt động tại thời điểm probe, không chứng minh đã xác định hoặc loại trừ nguyên nhân lỗi cũ.

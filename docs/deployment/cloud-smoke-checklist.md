@@ -6,9 +6,9 @@
 
 | Trường | Kết quả |
 | --- | --- |
-| Source tip | `thviet`: `31b727d0de7c15ead9a5a53149675b9ef957a0d9` (release-document consistency tip; prior `0878265` passed CI #144) |
-| Code CI evidence | Feature #141 (`40351375771`) and thviet candidate #144 (`40354424638`) passed; current tip #145 is still running. |
-| Latest CI at check | #145: in progress on `31b727d0de7c15ead9a5a53149675b9ef957a0d9` |
+| Source tip | `thviet`: `b1ba6d8ddb8836b2f501bad45c18c4ae2ff4da66` (full backend-E2E evidence tip; prior `0878265` passed CI #144) |
+| Code CI evidence | Feature #141 (`40351375771`) and thviet candidate #144 (`40354424638`) passed; current tip #146 is still running. |
+| Latest CI at check | #146: in progress on `b1ba6d8ddb8836b2f501bad45c18c4ae2ff4da66` |
 | Render commit đang chạy | `388c584` theo Render Dashboard; chưa phải source tip hiện tại |
 | Render auto-deploy | `After CI Checks Pass`; pushes to `thviet` may redeploy. Do not push until the documented source-recovery preflight is satisfied. |
 | Render service limits | Dashboard read-only check: `code-forge-api-thviet`, Free plan, no persistent disk; Live `388c584`; source can be lost on restart/redeploy. |
@@ -16,7 +16,7 @@
 | Neon history window | 6 hours; this is time-travel/instant-restore history, not a completed production export/restore rehearsal. T38 only rehearsed local PostgreSQL metadata backup/restore. |
 | Frontend URL | Chưa có; Vercel deferred/out of scope |
 | Backend URL | `https://code-forge-api-thviet.onrender.com` |
-| Readiness probe | 2026-10-26: `GET /api/v1/health/ready` → HTTP 200; database/Git/storage đều `up` trên deployed `388c584` (Render vẫn chưa ở source tip `31b727d`) |
+| Readiness probe | 2026-10-26: `GET /api/v1/health/ready` → HTTP 200; database/Git/storage đều `up` trên deployed `388c584` (Render vẫn chưa ở source tip `b1ba6d8`) |
 | Live revision endpoint | 2026-10-26: `GET /api/v1/health/live` → HTTP 200, body chỉ có `status` và `timestamp`; `commitSha` chưa có trên deployed `388c584`, nên source change `97d5d34` chưa được xác minh live |
 | Public repository API | 2026-10-26: HTTP 200 sau cold start; initial wake requests returned `503 hibernate-pending-wake` |
 | Git/PR HTTPS smoke | 2026-10-26: anonymous public clone/fetch; private PAT clone/push/fetch; owner PR merge/fetch `f8468c6063a70aea4306f6ab6de7a1c58cafb7bd`; WRITE invitation→accept→collaborator push/PR→owner merge/fetch `481d75d44f2ad2855bab853cb55d28c96235877b`. Both merge commits have two parents. Temporary PATs revoked and sessions logged out. Payload/quota, admin and recovery not tested. |
@@ -24,7 +24,7 @@
 
 Local runtime evidence (separate from cloud): T-COMPOSE used project `codeforge-smoke-20261025-b51c88c` with loopback-only ports and new task-owned volumes; all 7 migrations applied, backend healthcheck was healthy, and `/api/v1/health/ready` returned HTTP 200. The containers/network were stopped without `-v`; existing user containers and volumes were not touched. T37's isolated Linux/PostgreSQL process-crash evidence is recorded in the execution log and is not a Render/Neon result.
 
-Readiness implementation chạy `SELECT 1` qua Prisma và ghi/xóa file tạm trong Git storage (có thể tạo thư mục nếu thiếu). Public/private Git HTTPS và collaborator invitation→accept→push/PR→owner merge/fetch đã được smoke-test qua API/Git; browser UI journey, admin, migration, backup/restore, payload quota và source recovery sau restart chưa được nghiệm thu. Render Dashboard xác nhận service `code-forge-api-thviet`/`thviet` có Auto-Deploy `After CI Checks Pass`, last verified successful deploy `388c584` (source tip `31b727d` mới hơn), và Free không có persistent disk; `/api/v1/health/live` chưa trả `commitSha`. Neon `Code Forge` có history window 6 giờ nhưng chưa có export/restore rehearsal. Không deploy/restart trước khi có kế hoạch sao lưu/khôi phục Git và metadata.
+Readiness implementation chạy `SELECT 1` qua Prisma và ghi/xóa file tạm trong Git storage (có thể tạo thư mục nếu thiếu). Public/private Git HTTPS và collaborator invitation→accept→push/PR→owner merge/fetch đã được smoke-test qua API/Git; browser UI journey, admin, migration, backup/restore, payload quota và source recovery sau restart chưa được nghiệm thu. Render Dashboard xác nhận service `code-forge-api-thviet`/`thviet` có Auto-Deploy `After CI Checks Pass`, last verified successful deploy `388c584` (source tip `b1ba6d8` mới hơn), và Free không có persistent disk; `/api/v1/health/live` chưa trả `commitSha`. Neon `Code Forge` có history window 6 giờ nhưng chưa có export/restore rehearsal. Không deploy/restart trước khi có kế hoạch sao lưu/khôi phục Git và metadata.
 
 ## Tài khoản và quyền truy cập
 
