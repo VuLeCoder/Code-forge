@@ -1125,3 +1125,9 @@ snapshots, not current status. Current acceptance state is in the task board.
 - The temporary PAT was revoked and the test session logged out. Test fixtures contain only generated README content and an empty smoke commit; no application source or secret was committed. The first public-fixture account was created without a retained credential, so it is not offered as a login; the second synthetic account is available for demo login separately from this log.
 - Scope intentionally stays BTL-sized: no migration, backup/restore, redeploy/restart, PR/invitation/admin cloud workflow, or source-loss recovery was attempted. The local Next frontend remains running for manual demo; its two generated untracked helper files remain untouched.
 - CI #128 (`40269234926`) passed on exact pushed source `df77e2b`. These cloud checks occurred after that CI run and are operational smoke evidence, not hosted CI evidence.
+
+## T17-BTL CLOUD ACCEPTANCE DOC RECONCILIATION
+
+- Updated `docs/deployment/cloud-smoke-checklist.md` and `docs/deployment/render-neon-free-operator-runbook.md` to record the verified public clone/fetch and private PAT clone/push/fetch, plus the revoked PAT and explicit untested boundaries. Updated `docs/next-actions.md` and the acceptance snapshot to current `thviet` tip `fca4839`; no code, environment values, migration, or cloud state changed.
+- `git diff --check` passed. The earlier successful CI evidence remains #128 on `df77e2b`; runs #129 (`2d124b3`) and #130 (`fca4839`) were still running when checked. No claim is made that those pending workflows passed.
+- Remaining course-demo gap: one cloud PR→compare/diff→owner merge→fetch check. Render restart/source-loss recovery, backup/restore and migration remain untested and are recorded as free-tier/release limitations rather than silently passed.
