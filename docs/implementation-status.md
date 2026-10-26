@@ -4,7 +4,7 @@
 
 For detailed evidence and residual acceptance cases, use [the acceptance board](operations/acceptance-task-board-2026-10-25.md), [next actions](next-actions.md), and [the cloud checklist](deployment/cloud-smoke-checklist.md). Historical snapshots below are not current status.
 
-- Last CI-verified runtime candidate on `thviet` is `70500d849f1d0e31e64618cc51f311161f716459`; hosted `MVP verification` #150 passed all 28/28 steps on that exact SHA. Later test/docs commits are pending exact-run verification; Render has not been observed on this candidate.
+- Last CI-verified runtime candidate on `thviet` is `70500d849f1d0e31e64618cc51f311161f716459`; hosted `MVP verification` #150 passed all 28/28 steps on that exact SHA. The newer pushed candidate `497fd5d` adds the Docker live healthcheck and stable admin status-filter error codes; its hosted verification is pending. Render has not been observed on either candidate.
 - BTL cloud evidence: Render `388c584` readiness, direct public/private Git, owner PR merge, and WRITE collaborator invitation→push→PR→owner merge smoke passed. Read-only dashboard preflight confirmed `code-forge-api-thviet` tracks `VuLeCoder/Code-forge`/`thviet`, Auto-Deploy is `After CI Checks Pass`, and Free has no persistent disk. Neon `Code Forge` is separate from `BUS Ticket`, with production/Singapore/Free and a 6-hour history window. Migration, backup/restore, admin/audit cloud, quota-boundary cloud tests, and source-loss recovery remain unverified. The historical `4407e7d` P1001 cause remains unknown; no deploy/restart should be inferred from CI.
 - Local P8 prerequisite: T38 rehearsed metadata `pg_dump`/`pg_restore` successfully between two disposable PostgreSQL 17 tmpfs containers after all 7 migrations, with synthetic user/repository/audit rows preserved. This is not Neon production backup/restore, encrypted backup, Git source backup or cloud recovery evidence.
 - Local P8 prerequisite: T40 rehearsed a failed Prisma migration, `migrate resolve --rolled-back`, and forward recovery on a disposable PostgreSQL 17 tmpfs database. Baseline migrations remained intact and the corrected probe table was created; cloud migration/recovery is still unverified.
@@ -13,13 +13,13 @@ For detailed evidence and residual acceptance cases, use [the acceptance board](
 
 | Package | Current state |
 | --- | --- |
-| P0 baseline/CI | Hosted #150 passed all 28/28 steps on runtime candidate `70500d8`; later test/docs follow-ups remain separate exact-SHA checks. No cloud deploy is claimed. |
+| P0 baseline/CI | Hosted #150 passed all 28/28 steps on runtime candidate `70500d8`; newer code candidate `497fd5d` is pushed and awaiting its exact hosted run. No cloud deploy is claimed. |
 | P1 auth/invitation/contracts | Implemented with unit/HTTP integration evidence; full P0–P8 acceptance remains open. |
 | P2 direct cloud Git | Partial: direct Git and owner/collaborator smoke passed on Render `388c584`; migration, backup/recovery, quota and release checks remain open. |
 | P3 repository write coordination | Partial: merge→delete, valid-pack lock-loss, pre-proof push crash and post-durable-child-success push crash tests have evidence; T37 is hosted in feature CI #141. Broader Git/PostgreSQL recovery remains open. |
 | P4 PR/compare/merge | Partial: core flows and merge→delete ordering covered; other matrix/cloud acceptance remains open. |
 | P5 PR/admin UI | Partial: browser checks exist; manual screen-reader/device verification is not established here. |
-| P6 admin/audit/jobs | Partial: core paths are covered; maintenance-job isolation is implemented in `70500d8` with focused local checks and a failure-continuation unit case, while broader boundary coverage and issue #6 resolution remain open. |
+| P6 admin/audit/jobs | Partial: core paths are covered; maintenance-job isolation is implemented in `70500d8`, and admin list status errors now use stable codes in `497fd5d`; broader boundary coverage and issue #6 resolution remain open. |
 | P7 regression | Feature Actions #141, thviet #144 and runtime candidate #150 passed on exact SHAs. Cloud and manual screen-reader/device checks remain separate. |
 | P8 release/handoff | Partial/open: owner/collaborator Git/PR smoke passed; no cloud migration, backup/restore, write-freeze rehearsal, or source-loss recovery is claimed as passed. |
 
