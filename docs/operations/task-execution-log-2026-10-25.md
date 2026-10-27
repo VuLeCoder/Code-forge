@@ -1411,3 +1411,10 @@ cloud status.
 
 - GitHub Actions `MVP verification` #178 ([run `40445667702`](https://github.com/VuLeCoder/Code-forge/actions/runs/40445667702)) completed **success in 5m52s** on exact docs SHA `8f990e0` pushed to `thviet`. The workflow completed its normal backend/frontend/full-stack, Docker, migration-image, disposable-migration and whitespace gates; Actions showed only the known Node 20/Ubuntu runner migration warnings.
 - This is hosted CI evidence only. It does not close P2/P8 cloud deploy, migration, backup/restore, write-freeze/drain, source-loss recovery or issue #6 operator-resolution gates. No cloud state or secret was changed.
+
+## T68-BTL LOCAL DEMO SEED — isolated admin/user walkthrough
+
+- Created a task-owned local demo only; no Render/Neon mutation, cloud migration, deployment, restart, or secret was recorded. PostgreSQL ran in `codeforge-demo-postgres-20261027` on loopback port `40000` with tmpfs storage, and the backend used a separate local Git root. All 7 current Prisma migrations applied successfully.
+- Bootstrap created local admin username `demo-admin`; API registration created local user `demo-user`. The demo contains one public repository (`demo-user/demo-repo`), one private repository (`demo-admin/admin-private-demo`), and a WRITE invitation accepted by the admin. Passwords and connection values are intentionally omitted from this log.
+- Local backend `http://localhost:44000` readiness returned HTTP 200 with database/Git/storage up; frontend `http://localhost:3001/login` returned HTTP 200. Admin stats returned two active users, two active repositories, and zero pull requests. Anonymous admin endpoint access remained HTTP 401. Anonymous public Git `ls-remote` resolved the local repository's `main` ref.
+- Backend build passed before startup. The demo processes/container remain running for the current walkthrough and are task-owned; they are not release evidence. The database and Git storage are ephemeral and must not be treated as cloud persistence. A temporary marker created during setup was removed. Existing Docker volumes and unrelated containers were not touched.
