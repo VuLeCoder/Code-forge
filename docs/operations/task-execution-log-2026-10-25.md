@@ -1353,3 +1353,9 @@ cloud status.
 - CI #161 (`40436044748`) exposed that T50 left its newly promoted admin account in the isolated schema; the existing last-active-admin test then observed three active admins and received 200 instead of the expected 409. The same run also showed the pre-existing login/refresh race transaction timeout; that remains separately observed until a clean candidate proves it.
 - Added one cleanup assertion path in `backend/test/admin.e2e-spec.ts`: delete exactly T50's admin and owner fixtures after PAT/repository cleanup. No production behavior, schema, migration, cloud resource or shared fixture changes.
 - Typecheck, `git diff --check` and independent read-only review passed. Docker Desktop was unavailable, so no local E2E rerun was possible; the next exact `thviet` CI run is required to validate the repair.
+
+## T53-BTL ADMIN E2E REGRESSION — local Docker evidence after daemon recovery
+
+- After Docker Desktop became available, ran the full `backend/test/admin.e2e-spec.ts` suite in disposable container `codeforge-admin-regression-20261027` on loopback port `52353`, PostgreSQL 17 with tmpfs storage, all 7 migrations and a test-owned Git root.
+- Result: **4/4 tests passed** (user/private-source boundaries, T50 repository-lock receive-pack race, last-active-admin race and T51 login/refresh race). This confirms the T52 cleanup repair locally and resolves the transaction-timeout observation in this exact isolated run.
+- Cleanup removed exactly the labeled container; no existing Docker volume, database, Git storage or cloud resource was touched. This remains local evidence until the exact hosted `thviet` run completes.
