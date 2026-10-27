@@ -1482,3 +1482,10 @@ cloud status.
 
 - The Neon Connect modal for `production` showed database `neondb`, role `neondb_owner`, and a connection-pooling option. No password was revealed and no connection string was copied or logged.
 - This confirms only the visible target metadata and pooling UI; direct/pooled URLs remain provider secrets and production migration/backup acceptance is still OPEN.
+
+## T81-BTL BROWSER-HARNESS CLOUD RECHECK — read-only
+
+- Browser Harness reused the owner's logged-in Chrome session (`tranhoangviet200553@gmail.com`) without entering or exposing credentials. Render service `code-forge-api-thviet` is still Live on `VuLeCoder/Code-forge` branch `thviet`, current deployment `388c584`, Free plan, with the documented spin-down warning.
+- Direct probes at the current service returned `/api/v1/health/ready` HTTP 200 with database/Git/storage `up` and Git `2.39.5`; `/api/v1/health/live` returned HTTP 200; `/api/v1/repositories?page=1&limit=20` returned HTTP 200 with the synthetic public `btl-demo-873496/btl-demo` fixture and direct Render clone URL. Anonymous `git -c protocol.version=2 ls-remote --heads` exited 0 and returned no refs because the fixture is empty.
+- Neon Browser Harness still showed project `Code Forge` (`green-mountain-81958216`), production branch `br-steep-snow-aod67yel`, Singapore/Free, 6-hour history; the Connect modal displayed `neondb`/`neondb_owner` and pooling without revealing a password. No deploy, restart, migration, backup/restore, Git ref, database, storage, Docker volume or secret was changed.
+- This refresh strengthens readiness/transport evidence only. Cloud content/auth/quota, migration, backup/restore, restart/source-loss recovery, admin/audit and release-drain acceptance remain OPEN.
