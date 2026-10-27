@@ -1423,3 +1423,9 @@ cloud status.
 
 - Rechecked the running isolated demo without printing credentials or cookies: admin login returned HTTP 200 and the authenticated admin stats endpoint returned HTTP 200 with 2 users, 2 repositories and 0 pull requests; user login returned HTTP 200 and the authenticated repository list returned HTTP 200.
 - The first probe intentionally used the wrong field name (`identifier`) and received the expected HTTP 400 validation envelope; the corrected session-cookie flow passed. This is local API evidence only; it does not establish browser UX or Render/Neon acceptance.
+
+## T70-BTL FRONTEND ACCOUNT MENU — GitHub-inspired header polish
+
+- Leader-owned UI task. Applied `frontend-ui-engineering`, `ui-styling` and `ui-ux-pro-max` guidance: the avatar is now a native accessible menu trigger with a profile link, collaboration invitations, PAT, and admin navigation; Escape restores focus, outside pointer closes the menu, and the menu remains within a 375px viewport. The existing visible logout button and profile-link behavior were preserved for compatibility.
+- Changed only `frontend/src/components/site-header.tsx`, `frontend/src/app/globals.css`, and added `frontend/test/site-header.spec.ts`. No API, auth, backend, or user-owned untracked files were changed.
+- Verification: frontend lint passed; frontend typecheck passed; focused account-menu Playwright **2/2** passed; full `frontend/test/milestone-one.spec.ts` **18/18** passed; `git diff --check` passed. The visual direction is GitHub-inspired navigation hierarchy, not copied branding or markup.
