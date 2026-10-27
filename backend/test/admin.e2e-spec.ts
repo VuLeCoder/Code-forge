@@ -454,6 +454,29 @@ process.exit(result.status ?? 1);
         .toBe(refsAfterPush);
       expect(await db!.gitPushOperation.count({ where: { repositoryId: stored.id, actorId: owner.user.id } })).toBe(1);
       expect(await db!.auditLog.count({ where: { targetId: stored.id, action: 'GIT_PUSH_COMPLETED' } })).toBe(1);
+
+      const unlockResponse = await call('PATCH', `admin/repositories/${stored.id}/status`, adminCookie, { status: 'ACTIVE' });
+      expect(unlockResponse.status).toBe(200);
+      expect(await unlockResponse.json()).toMatchObject({ changed: true, repository: { id: stored.id, status: 'ACTIVE' } });
+      expect(await db!.repository.findUniqueOrThrow({ where: { id: stored.id }, select: { status: true } }))
+        .toMatchObject({ status: 'ACTIVE' });
+      const unlockAudits = await db!.auditLog.findMany({ where: { targetId: stored.id, action: 'ADMIN_REPOSITORY_UNLOCKED' } });
+      expect(unlockAudits).toHaveLength(1);
+      expect(unlockAudits[0]).toMatchObject({ actorId: admin.user.id, details: { from: 'LOCKED', to: 'ACTIVE' } });
+
+      const unlockedSha = (await git(['-C', work, 'rev-parse', 'HEAD'])).stdout.trim();
+      await git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/feature/after-repository-unlock']);
+      expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/feature/after-repository-unlock'], { encoding: 'utf8' }).trim())
+        .toBe(unlockedSha);
+      const operationsAfterUnlock = await db!.gitPushOperation.findMany({
+        where: { repositoryId: stored.id, actorId: owner.user.id }, orderBy: { createdAt: 'asc' },
+      });
+      expect(operationsAfterUnlock).toHaveLength(2);
+      const unlockOperation = operationsAfterUnlock.find(({ operationId }) => operationId !== operations[0]!.operationId);
+      expect(unlockOperation).toMatchObject({ status: 'COMPLETED', changedRefCount: 1, errorCode: null });
+      const pushAuditsAfterUnlock = await db!.auditLog.findMany({ where: { targetId: stored.id, action: 'GIT_PUSH_COMPLETED' } });
+      expect(pushAuditsAfterUnlock).toHaveLength(2);
+      expect(pushAuditsAfterUnlock.some((audit) => (audit.details as { operationId?: string }).operationId === unlockOperation?.operationId)).toBe(true);
     } finally {
       if (!existsSync(hookRelease)) await writeFile(hookRelease, 'release').catch(() => undefined);
       if (pushPromise) await pushPromise.catch(() => undefined);

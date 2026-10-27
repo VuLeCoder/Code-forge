@@ -1363,3 +1363,9 @@ cloud status.
 ## T54-BTL HOSTED ADMIN REGRESSION — exact cleanup candidate
 
 - GitHub Actions `MVP verification` #164 ([run `40436650173`](https://github.com/VuLeCoder/Code-forge/actions/runs/40436650173)) completed **success, 28/28** on exact `thviet` SHA `cec57fa` in 6m07s. This verifies T50/T51/T52 code plus the existing workflow gates on hosted Linux; it is not cloud deploy/recovery evidence.
+
+## T55-BTL ADMIN REPOSITORY UNLOCK ROUND-TRIP — local acceptance
+
+- Extended only `backend/test/admin.e2e-spec.ts` so the T50 repository lock race now verifies `LOCKED → ACTIVE`, exactly one `ADMIN_REPOSITORY_UNLOCKED` audit, and a subsequent PAT push with the expected ref, second completed journal and second push-completed audit.
+- Independent read-only review reported **No findings**. Local gates on the current parent passed: backend unit 21 suites/201 tests, backend typecheck, workspace lint/typecheck/build and `git diff --check`.
+- After Docker recovery, full admin E2E on disposable `codeforge-admin-unlock-20261027` (PostgreSQL 17/tmpfs, loopback port `52354`, 7 migrations) passed **4/4** including the new unlock/push assertions. The exact container was removed; no existing volume/database/cloud resource was touched. Hosted CI for the eventual commit remains required.
