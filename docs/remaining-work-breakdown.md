@@ -1,5 +1,11 @@
 # Code Forge — remaining work breakdown
 
+## Current verified snapshot (2026-10-27)
+
+- Code candidate `f58ef3d` passed hosted MVP verification #193 (`40453128999`) in 6m31s. Documentation checkpoint `aa18a82` passed #194 (`40453906441`) in 5m04s and is the current exact `thviet`/`origin/thviet` SHA.
+- The GitHub-style repository Quick setup flow and the full-stack password-fixture correction are included in that verified code candidate. Local maintenance unit coverage is 18/18 on the current worktree.
+- Render/Neon evidence remains partial: readiness and direct Git/PR smoke are proven, while migration, backup/restore, quota boundaries, admin/audit cloud, restart/source-loss recovery and release drain remain open. Issue #6 remains fail-closed; Vercel is out of scope.
+
 ## Historical execution state (2026-10-26; superseded)
 
 For current acceptance evidence, use [the acceptance board](operations/acceptance-task-board-2026-10-25.md) and [next actions](next-actions.md). The snapshot below predates Render Git/PR smoke and is retained as history.
