@@ -2,7 +2,7 @@
 
 Điền release commit và thời gian chạy. Lưu output không chứa PAT, cookie, access token, Authorization header, mã nguồn private hoặc diff private.
 
-Đã có readiness probe, smoke Git HTTPS trực tiếp tới Render, API/Git smoke cho owner–collaborator invitation→PR→merge, read-only dashboard preflight cho Render/Neon và local Compose runtime smoke cô lập. Đây chưa phải nghiệm thu cloud end-to-end: browser UI journey, admin/audit, quota payload lớn, restart/source recovery, migration và backup/restore vẫn chưa được nghiệm thu. Readiness endpoint chạy `SELECT 1`, kiểm tra Git và ghi/xóa một file tạm; đây không phải probe chỉ đọc. Vercel nằm ngoài phạm vi; chưa có frontend cloud URL được nghiệm thu.
+BTL demo slice P2 đã có bằng chứng cho readiness, public/private Git HTTPS, PAT clone/push/fetch và owner–collaborator invitation→PR→merge. Đây chưa phải nghiệm thu cloud end-to-end: browser UI journey, admin/audit, quota payload lớn, restart/source recovery, migration và backup/restore vẫn chưa được nghiệm thu. Readiness endpoint chạy `SELECT 1`, kiểm tra Git và ghi/xóa một file tạm; đây không phải probe chỉ đọc. Vercel nằm ngoài phạm vi; chưa có frontend cloud URL được nghiệm thu.
 
 | Trường | Kết quả |
 | --- | --- |
@@ -38,13 +38,13 @@ Readiness implementation chạy `SELECT 1` qua Prisma và ghi/xóa file tạm tr
 
 ## Git HTTP trực tiếp Render
 
-- [ ] `git ls-remote <public-url>` hoạt động qua HTTPS/TLS.
+- [x] `git ls-remote <public-url>` hoạt động qua HTTPS/TLS; read-only probe ngày 2026-10-27 và một HTTP/1.1 retry sau wake-up đều exit 0.
 - Read-only 2026-10-27: `git ls-remote https://code-forge-api-thviet.onrender.com/api/v1/git/btl-demo-873496/btl-demo.git` exited 0 but returned no refs because the synthetic repository is empty; this proves endpoint/transport reachability only, not repository content, fetch, push or full cloud acceptance.
 - [x] Private clone, commit, push branch và fetch branch bằng PAT hoạt động (2026-10-26); SHA fetch khớp SHA push.
 - [x] Basic challenge trả về `401` cho request không có credential và authenticated private Git operation thành công qua Render, xác nhận Authorization tới được backend.
 - [ ] Push payload hợp lệ lớn hơn 4,5 MB qua URL Render trực tiếp; kiểm tra push sát quota hoạt động, vượt quota bị từ chối và ref không thay đổi. Git Smart HTTP phải đi trực tiếp backend Render, không đi qua frontend proxy.
 - [ ] Timeout/disconnect hủy Git child process; lỗi hook không được audit như push thành công.
-- [ ] Kiểm tra clone URL được tạo bằng `GIT_PUBLIC_BASE_URL` và trỏ trực tiếp tới backend Render.
+- [x] Clone URL từ repository API smoke ngày 2026-10-27 trỏ trực tiếp tới backend Render (`https://code-forge-api-thviet.onrender.com/api/v1/git/...`), không qua frontend proxy.
 
 ## Cộng tác, pull request, quản trị
 
