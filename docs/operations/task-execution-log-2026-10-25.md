@@ -1434,3 +1434,8 @@ cloud status.
 
 - GitHub Actions `MVP verification` #182 (`40447734540`) completed **success** on exact SHA `4986091`. The run passed the backend unit/E2E, lint, typecheck, build, frontend E2E/full-stack, Docker image, migration image, migration and whitespace gates.
 - This is CI evidence only and does not close Render/Neon deployment, backup/restore or source-loss recovery acceptance.
+
+## T72-BTL HOSTED UI VERIFICATION — account menu candidate
+
+- GitHub Actions `MVP verification` #185 ([run `40448842247`](https://github.com/VuLeCoder/Code-forge/actions/runs/40448842247)) completed **success, 28/28** on exact SHA `4861c85`. This verifies the GitHub-inspired account menu, SVG icon refinement, existing frontend flows, backend gates, Docker image checks, migrations and whitespace gate on hosted CI.
+- No Render/Neon state, source storage, cloud migration or deployment was changed; cloud release/recovery remains a separate open acceptance boundary.
