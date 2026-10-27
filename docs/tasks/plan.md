@@ -1,20 +1,21 @@
 # Code Forge: completion and release plan
 
-## Current verified state (2026-10-25; supersedes the older snapshot below)
+## Historical verified state (2026-10-26; superseded)
 
-- `thviet` and `origin/thviet` match at `4407e7d2e49d0e43aeb48b1e49ee96e986745a03`; hosted Actions [#92 / `40198015346`](https://github.com/VuLeCoder/Code-forge/actions/runs/40198015346) passed on that exact SHA.
-- Render deployment of `4407e7d` failed startup with Prisma `P1001`. The sanitized probe reported DNS/TCP `ok`; Neon UI showed public internet enabled, `Any IP`, and IP allowlisting unavailable. This does not prove DB authentication or SQL connectivity. No cloud migration or smoke is passed.
-- Local unpushed candidate: Prisma defaults `connect_timeout` to 15 seconds while preserving explicit overrides, and an opt-in bounded PostgreSQL handshake probe follows DNS/TCP. Backend unit tests pass 20/20 suites / 166 tests; lint/typecheck/build and `git diff --check` pass. The focused suite includes a simulated server that accepts TCP but stalls during startup. Read-only independent review found no actionable issue. The candidate is not yet pushed/deployed and is not a confirmed fix. Neon's guide documents scale-to-zero wake-up as a possible P1001 cause, not the established cause here.
-- AGY's static review timed out at 120 seconds with no usable result. Codex static security review reported no actionable finding in its reviewed scope; it did not run dynamic tests.
-- P0–P8 remain incomplete. P2/P8 cloud release/recovery, remaining P3/P4 failure cases, and final evidence reconciliation are open. Issue #6 remains fail-closed pending owner policy. Vercel is deferred/out of scope per the latest owner objective.
+For current acceptance and remaining tasks, see [the acceptance board](../operations/acceptance-task-board-2026-10-25.md) and [next actions](../next-actions.md). The snapshot below predates the latest Render Git/PR smoke and is retained as history.
+
+- `origin/thviet` and the current worktree are at `db37ba17c24473c505bb8fb10aa7c8aea9b9ec03` (`db37ba1`) on `codex/pr-operation-id-reuse`. Code commit `b6411ad` passed hosted Actions [#118 / `40262580445`](https://github.com/VuLeCoder/Code-forge/actions/runs/40262580445), docs reconciliation `de76447` passed #120, duplicate-OPEN-PR E2E `ccff002` passed #121, and restore-vs-purge E2E `b51ae23` passed Actions [#122 / `40265483751`](https://github.com/VuLeCoder/Code-forge/actions/runs/40265483751). Scheduled janitor E2E `db37ba1` is under Actions #123 (`40265797091`).
+- Merge→delete ordering is now deterministic and verified: PostgreSQL confirms DELETE queued on the repository advisory lock while merge pauses before ref CAS; merge commit, journal, PR metadata and audit complete before soft-delete. The full PR E2E file passed 14 runnable / 2 intentional skips; #118 passed the full CI workflow.
+- Render serves `388c584`; its startup log records PostgreSQL handshake `ok` in 1,384 ms. Historical failed deploy `4407e7d` logged DNS/TCP `ok` followed by Prisma `P1001` about six seconds later; that older log has no PostgreSQL-handshake result, so the historical cause remains unknown. Readiness is not migration, backup/restore, direct Git, or business smoke. Do not deploy/restart before Git source recovery is verified.
+- P0–P8 are not complete. P2/P8 and other P3/P4 cases remain open; restore-vs-purge concurrency passed hosted Actions #122. Maintenance scheduled cleanup has local end-to-end wiring coverage using isolated roots; hosted run #123 is in progress. Issue #6 stays fail-closed pending owner policy; Vercel is deferred/out of scope.
 
 The estimates, dates, and state records below are retained as historical planning context; do not use them as current status.
 
-**Plan origin:** 2026-10-25 14:02 Asia/Saigon (historical estimate; see current execution snapshot below).
-**Current branch / pushed SHA:** `thviet` / `25487b5` (`origin/thviet` matches).
+**Plan origin:** 2026-10-25 14:02 Asia/Saigon (historical estimate; see current execution snapshot above).
+**Branch / pushed SHA at plan creation (historical):** `thviet` / `25487b5` (`origin/thviet` matched then).
 **Scope:** finish the already user-approved P0–P8 MVP plan; no new product scope.
 
-## Current verified state
+## Historical status snapshot (2026-10-25)
 
 - `thviet` and `origin/thviet` are at `25487b5`. The squash commit `e2b5a1a` is on `origin/main`; hosted run `40180253512` failed on the narrow admin focus-return test (55 passed, 1 failed). Backend, lint, typecheck, and build jobs passed. Treat the frontend regression as open; do not count the workflow as passed.
 - Local workspace lint, typecheck, and build passed; backend unit passed 18 suites / 120 tests. Backend E2E reported 9 suites / 38 passed / 2 skipped, but Jest stayed alive after an open-handle warning and was interrupted. The test results are observed, but this invocation did not exit cleanly and is not a clean gate pass.

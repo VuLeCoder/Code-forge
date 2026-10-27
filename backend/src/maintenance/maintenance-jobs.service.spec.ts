@@ -147,6 +147,18 @@ describe('MaintenanceJobsService', () => {
     expect(fixture.lock.release).toHaveBeenCalledTimes(2);
   });
 
+  it('clears the shared run after an unexpected batch rejection so a later run can retry', async () => {
+    const fixture = makeFixture();
+    const run = jest.spyOn(fixture.internals, 'runScheduled')
+      .mockRejectedValueOnce(new Error('unexpected maintenance failure'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(fixture.service.runOnce()).rejects.toThrow('unexpected maintenance failure');
+    await fixture.service.runOnce();
+
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
   it('retries a later run after the process-wide lock release fails', async () => {
     const fixture = makeFixture();
     fixture.lock.release.mockRejectedValueOnce(new Error('unlock failed')).mockResolvedValueOnce(undefined);
@@ -158,6 +170,19 @@ describe('MaintenanceJobsService', () => {
     expect(fixture.db.$executeRaw).toHaveBeenCalledTimes(6);
     expect(fixture.purge.purgeDue).toHaveBeenCalledTimes(2);
     expect(fixture.storage.cleanupOrphanedTemporaryDirectories).toHaveBeenCalledTimes(2);
+  });
+
+  it('continues independent cleanup after one maintenance job fails', async () => {
+    const fixture = makeFixture();
+    fixture.db.$executeRaw.mockRejectedValueOnce(new Error('temporary database failure'));
+
+    await fixture.internals.runScheduled();
+
+    expect(fixture.db.$executeRaw).toHaveBeenCalledTimes(3);
+    expect(fixture.pushJournal.reconcilePending).toHaveBeenCalledTimes(1);
+    expect(fixture.purge.purgeDue).toHaveBeenCalledWith(50);
+    expect(fixture.storage.cleanupOrphanedTemporaryDirectories).toHaveBeenCalledTimes(1);
+    expect(fixture.lock.release).toHaveBeenCalledTimes(1);
   });
 
   it('skips an overlapping batch and releases the process-wide job lock once', async () => {

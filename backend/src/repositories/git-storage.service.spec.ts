@@ -292,6 +292,49 @@ describe('GitStorageService with real Git', () => {
     ]));
   });
 
+  it('preserves rename paths while keeping full and paged aggregate diff payloads within one MiB', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'main', true, 'Compare aggregate payload');
+    const git = (args: string[], input?: string) => execFileSync('git', ['--git-dir', join(root, key), ...args], {
+      encoding: 'utf8', input,
+    }).trim();
+    const base = git(['rev-parse', 'refs/heads/main']);
+    const originalReadme = git(['rev-parse', 'refs/heads/main:README.md']);
+    const renamedPath = 'renamed [literal] # ü.txt';
+    const entries = [`100644 blob ${originalReadme}\t${renamedPath}\0`];
+    for (let index = 0; index < 10; index++) {
+      const content = `${String(index).padStart(2, '0')} ${'x'.repeat(120 * 1024)}\n`;
+      const blob = git(['hash-object', '-w', '--stdin'], content);
+      entries.push(`100644 blob ${blob}\taggregate-${String(index).padStart(2, '0')}.txt\0`);
+    }
+    const tree = git(['mktree', '-z'], entries.join(''));
+    const sourceSha = git(['-c', 'user.name=Test', '-c', 'user.email=test@example.test',
+      'commit-tree', tree, '-p', base, '-m', 'Create bounded aggregate diff']);
+    git(['update-ref', 'refs/heads/feature/aggregate-diff', sourceSha]);
+
+    const compare = await storage.compare(key, 'feature/aggregate-diff', 'main');
+    expect(compare.diffTruncated).toBe(true);
+    expect(Buffer.byteLength(compare.diff, 'utf8')).toBeLessThanOrEqual(1024 * 1024);
+    expect(compare.files).toHaveLength(11);
+    expect(compare.files).toContainEqual(expect.objectContaining({
+      status: 'R', previousPath: 'README.md', path: renamedPath, diffStatus: 'TEXT',
+    }));
+    expect(compare.files.some((file) => file.diffStatus === 'TRUNCATED')).toBe(true);
+    expect(compare.files.filter((file) => file.diffStatus === 'TEXT')
+      .every((file) => Buffer.byteLength(file.diff ?? '', 'utf8') <= 128 * 1024)).toBe(true);
+
+    const diffPage = await storage.comparePage(key, sourceSha, base, 'diff', 1, 100);
+    const pageDiffs = diffPage.items as { path: string; previousPath?: string; diffStatus: string; diff?: string }[];
+    const returnedDiffBytes = pageDiffs.reduce((total, file) => total + Buffer.byteLength(file.diff ?? '', 'utf8'), 0);
+    expect(returnedDiffBytes).toBeLessThanOrEqual(1024 * 1024);
+    expect(pageDiffs).toContainEqual(expect.objectContaining({
+      status: 'R', previousPath: 'README.md', path: renamedPath, diffStatus: 'TEXT',
+    }));
+    expect(pageDiffs.some((file) => file.diffStatus === 'TRUNCATED')).toBe(true);
+    expect(pageDiffs.filter((file) => file.diffStatus === 'TEXT')
+      .every((file) => Buffer.byteLength(file.diff ?? '', 'utf8') <= 128 * 1024)).toBe(true);
+  });
+
   it('returns NO_MERGE_BASE for unrelated branch histories without changing refs', async () => {
     const key = `${randomUUID()}.git`;
     await storage.create(key, 'main', true, 'Unrelated histories');

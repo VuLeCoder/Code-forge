@@ -2,39 +2,57 @@
 
 Điền release commit và thời gian chạy. Lưu output không chứa PAT, cookie, access token, Authorization header, mã nguồn private hoặc diff private.
 
-Chưa có cloud smoke nào được thực hiện; bảng và mọi mục cloud bên dưới giữ trạng thái chưa chạy. Các kiểm tra local hiện có được ghi trong [README release](./README.md) và không thay thế nghiệm thu cloud.
+BTL demo slice P2 đã có bằng chứng cho readiness, public/private Git HTTPS, PAT clone/push/fetch và owner–collaborator invitation→PR→merge. Đây chưa phải nghiệm thu cloud end-to-end: browser UI journey, admin/audit, quota payload lớn, restart/source recovery, migration và backup/restore vẫn chưa được nghiệm thu. Readiness endpoint chạy `SELECT 1`, kiểm tra Git và ghi/xóa một file tạm; đây không phải probe chỉ đọc. Vercel nằm ngoài phạm vi; chưa có frontend cloud URL được nghiệm thu.
 
 | Trường | Kết quả |
 | --- | --- |
-| Release commit | Chưa chạy |
-| Frontend URL | Chưa công bố |
-| Backend URL | Chưa công bố |
-| Thời điểm UTC | Chưa chạy |
-| Người nghiệm thu | Chưa ghi nhận |
+| Last CI-verified runtime candidate | `thviet`: code candidate `f58ef3d` (exact SHA `f58ef3d33457a91d00e11a44da541b7bd8c5393b`) |
+| Code CI evidence | `MVP verification` #193 (`40453128999`) passed successfully in 6m31s on the exact runtime candidate. |
+| Latest CI at check | Docs-only checkpoints #194 (`40453906441`), #195 (`40454832579`), #196 (`40455544444`) and #197 (`40456342235`) passed; #197 passed in 5m57s on exact docs SHA `dfe735b`. These docs-only runs do not change the Render runtime candidate. |
+| Render commit đang chạy | `388c584` theo Render Dashboard; chưa phải source tip hiện tại |
+| Render auto-deploy | `After CI Checks Pass`; pushes to `thviet` may redeploy. Do not push until the documented source-recovery preflight is satisfied. |
+| Render service limits | Dashboard read-only check: `code-forge-api-thviet`, Free plan, no persistent disk; Live `388c584`; source can be lost on restart/redeploy. |
+| Neon resource | Dashboard read-only check: project `Code Forge` (`green-mountain-81958216`), branch `production`, Singapore, Free; separate from `BUS Ticket`. |
+| Neon history window | Read-only dashboard check 2026-10-27: `production` has a 6-hour history window, with no snapshots and no backup schedule configured. This is time-travel/instant-restore history, not a completed production export/restore rehearsal; T38 only rehearsed local PostgreSQL metadata backup/restore. |
+| Frontend URL | Chưa có; Vercel deferred/out of scope |
+| Backend URL | `https://code-forge-api-thviet.onrender.com` |
+| Readiness probe | 2026-10-27: `GET /api/v1/health/ready` → HTTP 200; database/Git/storage đều `up`, Git `2.39.5`, trên deployed `388c584` (Render vẫn chưa ở CI-verified runtime candidate `f58ef3d`) |
+| Live revision endpoint | 2026-10-27: `GET /api/v1/health/live` → HTTP 200, body chỉ có `status` và `timestamp`; không có `commitSha` trên deployed `388c584`, nên source revision không được suy ra |
+| Public repository API | Read-only probe 2026-10-27: `GET /api/v1/repositories?page=1` returned HTTP 200 with synthetic public fixture `btl-demo-873496/btl-demo` and direct Render clone URL `https://code-forge-api-thviet.onrender.com/api/v1/git/btl-demo-873496/btl-demo.git`. |
+| Git/PR HTTPS smoke | 2026-10-26: anonymous public clone/fetch; private PAT clone/push/fetch; owner PR merge/fetch `f8468c6063a70aea4306f6ab6de7a1c58cafb7bd`; WRITE invitation→accept→collaborator push/PR→owner merge/fetch `481d75d44f2ad2855bab853cb55d28c96235877b`. Both merge commits have two parents. Temporary PATs revoked and sessions logged out. Payload/quota, admin and recovery not tested. |
+| Người nghiệm thu | Codex; Render API/Git/PR integration smoke plus local T-COMPOSE/T37/T38/T40 evidence, not visual browser or full release acceptance |
+
+Local runtime evidence (separate from cloud): T-COMPOSE used project `codeforge-smoke-20261025-b51c88c` with loopback-only ports and new task-owned volumes; all 7 migrations applied, backend healthcheck was healthy, and `/api/v1/health/ready` returned HTTP 200. The containers/network were stopped without `-v`; existing user containers and volumes were not touched. T37's isolated Linux/PostgreSQL process-crash evidence is recorded in the execution log and is not a Render/Neon result.
+
+Readiness implementation chạy `SELECT 1` qua Prisma và ghi/xóa file tạm trong Git storage (có thể tạo thư mục nếu thiếu). Public/private Git HTTPS và collaborator invitation→accept→push/PR→owner merge/fetch đã được smoke-test qua API/Git; browser UI journey, admin, migration, backup/restore, payload quota và source recovery sau restart chưa được nghiệm thu. Render Dashboard xác nhận service `code-forge-api-thviet`/`thviet` có Auto-Deploy `After CI Checks Pass`, last verified successful deploy `388c584` (CI-verified runtime candidate `70500d8` mới hơn), và Free không có persistent disk; `/api/v1/health/live` chưa trả `commitSha`. Neon `Code Forge` có history window 6 giờ nhưng chưa có export/restore rehearsal. Không deploy/restart trước khi có kế hoạch sao lưu/khôi phục Git và metadata.
 
 ## Tài khoản và quyền truy cập
 
-- [ ] Frontend HTTPS tải được; `GET /api/v1/health/ready` trả trạng thái database, Git executable và khả năng ghi storage đều khỏe.
+- [x] Backend readiness: `GET https://code-forge-api-thviet.onrender.com/api/v1/health/ready` trả HTTP 200; database, Git executable (`2.39.5`) và storage đều `up` (2026-10-27; deployed commit `388c584`).
+- [ ] Frontend HTTPS tải được. Chưa có frontend cloud host trong phạm vi hiện tại; không suy ra từ API readiness.
 - [ ] Kiểm tra rate limit qua Render với hai client độc lập; gửi `X-Forwarded-For`/`CF-Connecting-IP` và `X-CodeForge-Client-IP`/signature giả từ client, xác minh không chia sẻ bucket sai hoặc vượt giới hạn. Ghi lại số trusted proxy hop thực tế; backend phải bỏ qua IP chưa ký hợp lệ.
 - [ ] Đăng ký hoặc đăng nhập, refresh, logout; sau logout request API dùng access token cũ bị từ chối.
-- [ ] Tạo repository public và private, xác minh URL clone trả về Render trực tiếp.
+- [x] Tạo fixture repository public/private và xác minh public anonymous clone cùng private authenticated Git access tới Render (2026-10-26). Đây là smoke fixture, không phải dữ liệu dự án.
 - [ ] Anonymous đọc public được, không đọc được private; unauthorized response không phân biệt thông tin repo private.
-- [ ] Tạo PAT đúng scope; clone/fetch private bằng PAT; không đưa PAT vào remote URL/log/history.
+- [x] Tạo PAT giới hạn cho smoke test; private clone/push/fetch thành công. PAT đã revoke; không ghi PAT vào URL/log/history.
 
 ## Git HTTP trực tiếp Render
 
-- [ ] `git ls-remote <public-url>` hoạt động qua HTTPS/TLS.
-- [ ] Clone, tạo commit, push branch, fetch branch mới hoạt động; test private repo với PAT.
-- [ ] Xác minh Basic challenge và `Authorization` không bị proxy/host loại bỏ.
-- [ ] Push payload hợp lệ lớn hơn 4,5 MB qua URL Render trực tiếp; kiểm tra push sát quota hoạt động, vượt quota bị từ chối và ref không thay đổi. Ngưỡng Vercel Function 4,5 MB là lý do test này phải đi trực tiếp Render. [Vercel payload limit](https://vercel.com/docs/errors/function_payload_too_large)
+- [x] `git ls-remote <public-url>` hoạt động qua HTTPS/TLS; read-only probe ngày 2026-10-27 và một HTTP/1.1 retry sau wake-up đều exit 0.
+- Read-only 2026-10-27: `git ls-remote https://code-forge-api-thviet.onrender.com/api/v1/git/btl-demo-873496/btl-demo.git` exited 0 but returned no refs because the synthetic repository is empty; this proves endpoint/transport reachability only, not repository content, fetch, push or full cloud acceptance.
+- [x] Private clone, commit, push branch và fetch branch bằng PAT hoạt động (2026-10-26); SHA fetch khớp SHA push.
+- [x] Basic challenge trả về `401` cho request không có credential và authenticated private Git operation thành công qua Render, xác nhận Authorization tới được backend.
+- [ ] Push payload hợp lệ lớn hơn 4,5 MB qua URL Render trực tiếp; kiểm tra push sát quota hoạt động, vượt quota bị từ chối và ref không thay đổi. Git Smart HTTP phải đi trực tiếp backend Render, không đi qua frontend proxy.
 - [ ] Timeout/disconnect hủy Git child process; lỗi hook không được audit như push thành công.
-- [ ] Kiểm tra URL từ browser được tạo bằng `GIT_PUBLIC_BASE_URL`, không phải Vercel origin.
+- [x] Clone URL từ repository API smoke ngày 2026-10-27 trỏ trực tiếp tới backend Render (`https://code-forge-api-thviet.onrender.com/api/v1/git/...`), không qua frontend proxy.
 
 ## Cộng tác, pull request, quản trị
 
-- [ ] Owner mời collaborator WRITE; collaborator chấp nhận invitation và push source branch.
-- [ ] Collaborator tạo PR; đọc commits/files/diff cùng snapshot; stale compare yêu cầu refresh.
-- [ ] Conflict không cập nhật target; merge thành công tạo commit có hai parent và fetch thấy commit đó.
+- [x] Owner mời collaborator WRITE; collaborator nhận/chấp nhận invitation, clone private repo và push source branch (2026-10-26).
+- [x] Owner tạo PR trên private fixture; compare trả `READY`, files/diff đọc được và owner permission đúng (2026-10-26). Đây là API/Git smoke, không phải browser UI test.
+- [x] Owner merge PR fixture; fetch xác nhận target có merge commit hai parent (2026-10-26).
+- [x] Collaborator tạo PR; owner compare/files/diff và merge quyền owner được xác minh trên fixture (2026-10-26).
+- [ ] Stale compare yêu cầu refresh; conflict không cập nhật target.
 - [ ] Retry cùng operation ID không merge lần hai; trường hợp metadata đang đối soát hiển thị trạng thái tương ứng.
 - [ ] Admin khóa/mở user hoặc repo, restore repository còn hạn và xem audit; admin không được tự đọc private source hoặc merge.
 - [ ] Audit không chứa token, cookie, Authorization, source code hoặc raw diff.

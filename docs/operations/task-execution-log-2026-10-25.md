@@ -7,7 +7,11 @@ or private cloud values.
 This is a chronological log: entries labeled **historical/superseded** are
 snapshots, not current status. Current acceptance state is in the task board.
 
-## T-CURRENT-RELEASE — latest verified release snapshot
+## T-CURRENT-RELEASE — historical/superseded snapshot
+
+The current evidence is recorded in T41–T44 below. This older entry names the
+former `4407e7d`/CI #92 state and must not be used as the current branch or
+cloud status.
 
 - Owner: Codex release lead.
 - Status: incomplete; this entry supersedes older current-state claims below.
@@ -43,6 +47,11 @@ snapshots, not current status. Current acceptance state is in the task board.
   `docs/operations/task-execution-log-2026-10-25.md`, `docs/tasks/plan.md`,
   `docs/tasks/todo.md`, and `docs/remaining-work-breakdown.md`. No secrets,
   database URLs, or private cloud values are included.
+
+## T-CURRENT-RELEASE-2026-10-26 — current evidence pointer
+
+- Last CI-verified runtime candidate: `70500d849f1d0e31e64618cc51f311161f716459` on `thviet`; hosted CI #150 (`40359823730`) passed all 28/28 workflow steps. Later test/docs follow-ups remain separate exact-SHA checks.
+- Render remains at the separately observed deploy `388c584`; no Render deploy/restart, Neon migration, provider setting, or cloud backup/restore was performed. P0–P8 and cloud release remain incomplete.
 
 ## T-BASE — historical baseline snapshot (superseded)
 
@@ -1037,3 +1046,481 @@ snapshots, not current status. Current acceptance state is in the task board.
 - On the dedicated loopback `code_forge_test` DB, root ran lock E2E (2 passed, 1 POSIX-only test skipped on Windows), repository E2E (15/15), then the complete backend E2E suite serially (10/10 suites, 49 passed, 2 skipped, exit 0; Jest exited cleanly). Backend unit passed 20/20 suites / 161 tests; backend lint, typecheck, build and `git diff --check` passed.
 - Both Docker images built from this tree. API image smoke confirmed Node 24, Git 2.39.5, built entry point and Prisma schema; migration image smoke confirmed Prisma CLI/client 6.19.3 and Linux engine. No migrations were executed by this smoke.
 - This closes the local backend regression subgate only. Hosted CI has not run on the new integrated candidate; cloud Render/Neon smoke and final documentation/handoff remain open. No secrets were displayed or committed; the only database target was the dedicated loopback test DB.
+
+## T4-PR-MERGE-OPERATION-ID-REUSE — local gate and hosted CI passed
+
+- On clean `origin/thviet` base `0e380dbc6c7d3aede3f6a23561cbd993f01186d3`, added five table-driven service assertions that reusing a merge `operationId` with a changed repository, PR, source SHA, target SHA, or storage generation returns `409 OPERATION_ID_REUSED` before repository lock, Git/ref mutation, database mutation, audit, or transaction work.
+- Production logic was unchanged. Focused service suite passed 21/21; complete backend unit suite passed 20 suites / 187 tests. Backend lint and typecheck passed. Independent static review found no actionable issue in the added test or the existing production guard.
+- Commit `93b356a2db42dd79088584aed868cd74f11adb74` was pushed to `thviet` after confirming the remote tip still matched the clean base. GitHub Actions workflow run `40259575032` (#114) succeeded on that commit; documentation follow-up `95a765134c751fdd827ad398bf3873f4b6562c87` was also pushed and run `40259796538` (#115) succeeded on the exact SHA. No cloud database/storage was touched.
+
+## T5-P3/P4/P6 ACCEPTANCE BUNDLE — local verification and hosted CI passed
+
+- Scope is one cohesive backend acceptance bundle: reset/read race barrier (`backend/test/repositories.e2e-spec.ts`), stale PR snapshot subrequests (`backend/test/pull-requests.e2e-spec.ts`), compare diff rename and aggregate/file caps (`backend/src/repositories/git-storage.service.spec.ts`), admin bootstrap password-confirmation mismatch (`backend/test/admin-bootstrap.e2e-spec.ts`), repeated admin status no-op behavior (`backend/src/admin/admin.service.spec.ts`), and truthful Render/Neon release evidence (`docs/deployment/README.md`, `docs/deployment/cloud-smoke-checklist.md`). No runtime production code changed.
+- The reset/read test now waits for the four lock clients supported by `RepositoryLockService`'s max-4 pool; the fifth request is still awaited and asserted alongside the other four. All five responses report `RESET`/generation 1 and metadata generation increments once. Root reran the containing repository test 1/1 against a fresh loopback PostgreSQL 17 database (`codeforge_test`) and test-owned Git storage.
+- Root verification: full backend unit suite 20 suites / 192 tests passed; backend typecheck and lint passed; GitStorage focused real-Git regression 1/1 passed (the full suite was covered in the 192-test run); admin bootstrap CLI/PostgreSQL E2E 5/5 passed; repository reset/read E2E 1/1 passed; PR stale snapshot E2E 1/1 passed. `git diff --check` passed before final log update and is rerun before commit.
+- E2E database ran only in a new PostgreSQL 17 container with tmpfs and loopback-only dynamically assigned port; container was stopped and removed after the focused suites. The first reset/read run exposed an impossible expectation of five simultaneous advisory-lock clients against a pool capped at four; assertion now verifies the actual four lock waiters and still awaits/asserts all five HTTP responses. A first attempt to run the M3.6 test by itself skipped the earlier fixture that creates its Public repository; the corrected run selected the containing private-repository test that owns the reset/read scenario.
+- Independent review of admin idempotency, reset barrier, PR stale snapshots, and compare-limit test found no actionable code issue. Reviewer caught that the readiness endpoint writes/deletes a temporary file; README/checklist were corrected to describe this side effect rather than calling it read-only. No cloud DB, migration, deployment, backup, or Render storage was touched. The checklist records readiness only on deployed `388c584`; it explicitly does not claim full cloud smoke or resolve the historical P1001 cause.
+- Bundle commit `3a0b31a513d7452d2dad455ed83c570a3c1109de` was pushed to `thviet` after exact-parent and clean-tree checks. GitHub Actions `MVP verification` run #116 (`40261320693`) succeeded on that exact SHA, including backend E2E, frontend browser/full-stack, Docker API/migration image smoke and disposable migration checks. No cloud deployment or cloud migration was performed. P2/P8 cloud acceptance remains open.
+
+## T6-P3/P4 MERGE→DELETE LOCK ORDER — deterministic E2E added
+
+- Strengthened the existing merge/delete race in `backend/test/pull-requests.e2e-spec.ts`. The test pauses the real merge immediately before compare-and-swap, verifies its durable journal is `PENDING` with a candidate SHA, observes DELETE waiting on the same PostgreSQL advisory lock, then releases merge and requires merge completion before repository soft-delete.
+- Assertions require a two-parent merge commit, target ref pointing at that commit, PR `MERGED`, merge operation `COMPLETED`, and exactly one merge and soft-delete audit. No runtime production code changed.
+- Verification on the dedicated loopback `code_forge_test` PostgreSQL container and test-owned Git storage: containing workflow E2E passed 1/1 (15 other cases intentionally skipped); complete `pull-requests.e2e-spec.ts` passed 14/14 runnable cases (2 process-crash cases intentionally skipped); backend typecheck, backend lint, and `git diff --check` passed. No cloud DB, Render storage, migration, or deployment was touched.
+- Commit `b6411ad78d6b5e66f0e6b1809330b6352e8a4441` was pushed to `thviet` after review and local gates. GitHub Actions `MVP verification` run #118 (`40262580445`) succeeded on that exact SHA, including backend unit/E2E, frontend browser/full-stack, Docker image smoke, and disposable migration checks.
+- This closes deterministic merge→delete lock-order coverage, not all P3/P4 acceptance. No cloud DB, Render storage, migration, or deployment was touched.
+
+## T7-DOCUMENTATION CURRENT-STATE RECONCILIATION — local review complete
+
+- Updated the current execution/evidence blocks across the docs index, implementation ledger, remaining-work plan, next actions, task plan/checklist, acceptance board, and deployment guide/checklist. Dated older records remain intact but are explicitly labeled historical where they could be mistaken for current status.
+- Current verified facts are separated by environment: code CI #118 passed exact code SHA `b6411ad`; source tip at the start of this documentation change was `23cb1c7`; Render still serves `388c584` and has readiness-only evidence; cloud migration, backup/restore, direct Git transport, business smoke, and P1001 root cause remain unverified/open. P0–P8 are not complete; issue #6 remains fail-closed and Vercel remains out of scope.
+- Local documentation diff review and `git diff --check` passed. The initial snapshot recorded Actions #119 as `in_progress`; this was superseded by documentation commit `de76447` pushed to `thviet` and Actions #120 passing on that exact commit. The cloud and owner-policy gates remain open despite the docs CI pass.
+
+## T8-P4 DUPLICATE OPEN BRANCH-PAIR ACCEPTANCE — local E2E passed
+
+- Corrected a static-review false alarm: the Prisma migration already creates partial unique index `pull_requests_open_pair_unique_idx` for `(repository_id, source_branch, target_branch)` where status is `OPEN`; the service maps the resulting unique violation to `409 OPEN_PULL_REQUEST_EXISTS`.
+- Added E2E assertions to the existing owner/collaborator PR journey: a repeated POST for the same branch pair returns the documented 409, leaves exactly one OPEN PR row, and writes only one creation audit. Independent read-only review found no actionable issue.
+- First test invocation had no `DATABASE_URL` in its process and was safely blocked by the suite's loopback `*_test` guard; no test ran against a database. Reran with a new PostgreSQL 17 container bound only to loopback, a dynamically assigned port, and `tmpfs` storage, database `code_forge_test`, plus the suite's own random schema and temporary Git root. Focused case passed 1/1 (15 unrelated cases skipped by the name filter). The test-owned container was stopped and auto-removed; no volume, cloud DB, or Render storage was touched.
+- Backend typecheck and `git diff --check` passed. Direct ESLint on this long E2E file reports 8 existing diagnostics outside the added lines (including the unchanged throttler fixture); no diagnostic points into the new assertion. No runtime implementation changed. Independent review is clean. The change was committed as `ccff0021d4c05b8e1108bab173053d50a1b93bb4` and pushed to `thviet` (no main push); hosted Actions #121 (`40264984366`) passed on that exact SHA. The commit contains this evidence log and current-status updates.
+- Parallel acceptance inventory found two separate uncovered tests: restore-vs-purge concurrency (P3) and scheduled stale-temp-directory cleanup wiring (P6). These are coverage gaps; no production failure was established. P2/P8 cloud acceptance and issue #6's owner policy remain open.
+
+## T9-P3 RESTORE-VS-PURGE RACE — local E2E passed
+
+- Added a deterministic PostgreSQL/Git E2E beside the existing restore/purge lifecycle tests. It pauses the real storage removal while purge holds the repository lock, starts restore, observes its PostgreSQL advisory-lock wait, then releases purge. Assertions require purge to complete, restore to return 404, repository metadata and Git source both to be absent, and no restore audit to exist.
+- Focused E2E passed 1/1 (20 unrelated cases skipped by test-name filter) against a new PostgreSQL 17 loopback-only test container using `tmpfs`, a random schema, and the suite's temporary Git root. Container was stopped and auto-removed; no volume, cloud DB, or Render storage was touched. Backend typecheck and `git diff --check` passed.
+- ESLint on the full legacy E2E file reports 149 pre-existing diagnostics; filtering diagnostics to the new test's lines returned none. This is not a claim that the entire file lint passes. No production code changed. The implementation already takes the same repository lock for restore and purge; the new test verifies that contract under real concurrent requests. The change was reviewed, committed as `b51ae232627b182d7485919a65fcb876671b4562`, pushed to `thviet`, and Actions #122 (`40265483751`) was queued on that SHA.
+
+## T10-P6 SCHEDULED TEMP-JANITOR WIRING — local E2E passed
+
+- Added a focused maintenance E2E that calls the real `MaintenanceJobsService.runOnce()` path and delegates its janitor call to the real cleanup helper with two fixture-only roots under the test's temporary storage. Aged valid-name stage/README directories are removed, while fresh and invalid-name sentinels remain. The default OS temp root is never scanned or mutated.
+- Focused test passed 1/1 (5 unrelated cases skipped by name filter) against a loopback-only PostgreSQL 17 test container with tmpfs and a random test schema. Container was stopped and auto-removed. Backend typecheck and `git diff --check` passed; ESLint produced no diagnostics in the added test region. No production code changed. The test and this record are local and not yet hosted-verified.
+
+## T11-P2 RENDER P1001 LOG REVIEW — root cause still unverified
+
+- Read-only browser inspection of Render's existing failed deploy `4407e7d` (`dep-dbf0fdfb9u1s73b6mntg`) found a startup diagnostic with DNS/TCP `ok` at 107 ms, followed about six seconds later by Prisma 6.19.3 `P1001` for the Neon pooler endpoint. That older diagnostic did not log PostgreSQL handshake status; it is insufficient to distinguish transient endpoint behavior, TLS/auth configuration, or another cause.
+- Read-only inspection of current Live deploy `388c584` found PostgreSQL handshake `ok` in 1,384 ms. This verifies current startup DB connectivity only; it does not retroactively explain the failed deploy or verify application flows, migrations, backup/restore, Git HTTPS, or source recovery.
+- No Environment Values were opened/read, no secrets were copied, and no redeploy, migration, backup, SQL query, or cloud data mutation was performed. Static audit found no environment-variable-name mismatch. Safe remaining path is to establish source recovery first, then use the existing opt-in bounded diagnostic if another controlled deploy is authorized/necessary.
+
+## T12-BTL ACCEPTANCE SLICE + CURRENT CI/CLOUD SNAPSHOT — hosted CI passed
+
+- Agent-authored test-only changes: `backend/test/auth-session-concurrency.e2e-spec.ts` now deterministically races two refreshes using the same active token and asserts family/successor revocation; `backend/test/pull-requests.e2e-spec.ts` retries the same operation ID while the first merge journal is `PENDING` and asserts `202 RECONCILING`, one operation, no merge audit/ref move before release; `backend/test/admin-bootstrap.e2e-spec.ts` asserts promotion preserves a locked account and `lockedAt`. A previously missing Render/Neon operator runbook was added at `docs/deployment/render-neon-free-operator-runbook.md`; it explicitly marks source-loss recovery and backup/restore as not rehearsed and blocks unsafe migration without a verified write freeze.
+- Verification used a newly created PostgreSQL 17 container bound to loopback only, random host port `62007`, tmpfs database storage `code_forge_acceptance_test`, and each suite's isolated schema/test-owned Git root. Full auth concurrency E2E passed 3/3; admin bootstrap CLI/PostgreSQL E2E passed 5/5; full PR E2E passed 14/14 runnable tests with the two Linux-only crash tests skipped on Windows. Backend typecheck and `git diff --check` passed. Container `codeforge-acceptance-20261026-0359` was stopped and auto-removed; existing containers/volumes were not touched. An initial PR test-name filter matched zero tests; corrected filter then passed, followed by the complete file.
+- GitHub Actions #125 (`40267226563`) passed on exact commit `48b29f2931e910c6aebfb6e5a1e1ae35fec6c2cd`; the T12 changes are committed and hosted-verified. Earlier runs #123 (`40265797091`) and #124 (`40266111595`) passed on their recorded SHAs.
+- Read-only cloud check after Render sleep: initial wake attempts returned HTTP 503 with `x-render-routing: hibernate-pending-wake`; a later GET to the public repository list returned HTTP 200 and an empty list. This confirms endpoint recovery after cold start and no public fixture available for Git transport; it does not verify Git Smart HTTP, authentication, migration, backup/restore, PR/admin flows, or explain the historical P1001. No cloud data was created or changed; no secrets, environment values, migration, restart, or backup were accessed.
+- Cloud P2/P8 remain open; source-loss recovery is still not rehearsed. Keep the MVP lightweight: do not add production-scale machinery or repeat broad gates without a changed codebase.
+
+## T13-BTL CLOUD READINESS RECHECK + EVIDENCE RECONCILIATION
+
+- On 2026-10-26 at 04:11 UTC, `GET /api/v1/health/ready` returned HTTP 200 with database, Git executable, and storage all `up`; the public repository list returned HTTP 200 with an empty list. The readiness endpoint may write/delete its documented temporary storage probe file. `/health` and `/api/v1/health` returned 404; use `/api/v1/health/ready` for this app.
+- This is readiness/list evidence only. No account/repository was created; no migration, backup, deploy, restart, or source-storage mutation occurred. Git HTTPS/authenticated workflows and the business-flow smoke remain unverified.
+- Updated the current acceptance snapshot to match clean source tip `48b29f2` and green Actions #125 on its exact SHA. The historical P1001 cause remains unknown; no attempt was made to infer it from the current readiness result.
+
+## T14-BTL RENDER GIT CHALLENGE + LOCAL DEMO AVAILABILITY
+
+- At 2026-10-26 04:19 UTC, a GET to the Render Git Smart HTTP route for a deliberately nonexistent repository returned `401` with `WWW-Authenticate: Basic realm="Code Forge Git", charset="UTF-8"`. This proves the direct Render route and challenge are reachable, not successful clone/fetch/push for an existing repository.
+- Quick local checks found no listener on `localhost:3000/login` or `localhost:4000/api/v1/health/ready`; both connections were refused. No local server was started, and no cloud account/repository was created.
+- Current acceptance docs now record CI #126 (`40267850619`) passing on exact source `f240e72`, the Render Git challenge, and the remaining demo smoke gaps. `git diff --check` passed; P2/P8 remain open.
+
+## T15-BTL LOCAL FRONTEND → RENDER API SMOKE
+
+- Started the local Next.js frontend on `http://127.0.0.1:3000` with process-only `BACKEND_URL=https://code-forge-api-thviet.onrender.com` and `APP_ORIGIN=http://localhost:3000`; no environment file or cloud secret was written. Render's CORS preflight allowed the local origin.
+- Observed `/login` and `/` return HTTP 200; proxied `/api/v1/auth/me` returns the expected unauthenticated 401; proxied POST `/api/v1/auth/register` with `{}` returns 400 `INVALID_REQUEST`. This verifies the local-to-cloud path and origin handling without creating a user. No cloud data was changed.
+- The local demo server is left running for manual use. Next dev generated untracked `frontend/AGENTS.md` and `frontend/CLAUDE.md`; neither is staged or committed. CI #127 (`40268514645`) passed on source `2689b6c`. Real account/repository/Git push, migration, backup/restore and restart recovery remain unverified.
+
+## T16-BTL RENDER PUBLIC/PRIVATE GIT SMOKE — passed
+
+- On 2026-10-26, anonymous clone and fetch passed for the public test fixture `btl-demo-873496/btl-demo`.
+- Authenticated clone, push, and fetch passed for private fixture `btl-demo-user-579004/btl-smoke`; branch `cloud-smoke-579004` fetched at the exact pushed SHA `05c7aad9dd6e3bd5fcfcc8a7586de83df3c28935`. This verifies the HTTPS Git path directly to Render beyond the Basic challenge.
+- The temporary PAT was revoked and the test session logged out. Test fixtures contain only generated README content and an empty smoke commit; no application source or secret was committed. The first public-fixture account was created without a retained credential, so it is not offered as a login; the second synthetic account is available for demo login separately from this log.
+- Scope intentionally stays BTL-sized: no migration, backup/restore, redeploy/restart, PR/invitation/admin cloud workflow, or source-loss recovery was attempted. The local Next frontend remains running for manual demo; its two generated untracked helper files remain untouched.
+- CI #128 (`40269234926`) passed on exact pushed source `df77e2b`. These cloud checks occurred after that CI run and are operational smoke evidence, not hosted CI evidence.
+
+## T17-BTL CLOUD ACCEPTANCE DOC RECONCILIATION
+
+- Updated `docs/deployment/cloud-smoke-checklist.md` and `docs/deployment/render-neon-free-operator-runbook.md` to record the verified public clone/fetch and private PAT clone/push/fetch, plus the revoked PAT and explicit untested boundaries. Updated `docs/next-actions.md` and the acceptance snapshot to current `thviet` tip `fca4839`; no code, environment values, migration, or cloud state changed.
+- `git diff --check` passed. The earlier successful CI evidence remains #128 on `df77e2b`; runs #129 (`2d124b3`) and #130 (`fca4839`) were still running when checked. No claim is made that those pending workflows passed.
+- Remaining course-demo gap: one cloud PR→compare/diff→owner merge→fetch check. Render restart/source-loss recovery, backup/restore and migration remain untested and are recorded as free-tier/release limitations rather than silently passed.
+
+## T18-BTL RENDER PR/MERGE SMOKE — passed
+
+- On the deployed Render API, a new synthetic account/repository `btlclouda930e3db/pr-smoke` completed a bounded private flow: create a source branch with one test-only file, push by temporary PAT, create PR #1, compare and inspect files/diff, verify owner merge permission, merge, then fetch `main`.
+- Fetched `main` resolved to merge commit `f8468c6063a70aea4306f6ab6de7a1c58cafb7bd`; Git inspection confirmed exactly two parents. PAT deletion and session logout requests succeeded. No application repository/source or credential was included.
+- This proves direct API/Git cloud integration for the owner PR journey; it is not visual/browser acceptance and does not cover collaborator invitation, admin, stale/conflict cloud cases, quota boundary, migration, backup/restore or restart/source-loss recovery. No deployment or migration occurred.
+
+## T19-BTL RENDER COLLABORATOR→PR→OWNER MERGE SMOKE — passed
+
+- On a separate private Render fixture, owner `btlown653b1a6a` invited `btlcol653b1a6a` with role `WRITE`; collaborator listed and accepted the invitation, cloned the repository via temporary PAT, pushed `collaborator-feature`, and created PR #1. Owner fetched the compare/files snapshot and verified `canMerge`; owner merged, then collaborator fetched `main`.
+- Fetched target points to merge SHA `481d75d44f2ad2855bab853cb55d28c96235877b`; Git inspection confirmed two parents. PAT revoke and owner/collaborator logout succeeded. Fixture repo `collab-smoke` contains only a smoke file; no project source or credentials were written to the repo or log.
+- This does not test admin/audit, stale/conflict cloud behavior, payload/quota limits, migration, backup/restore or restart/source-loss recovery. No deployment or migration occurred.
+
+## T20-BTL FINAL STATUS RECHECK — latest source CI and two focused checks
+
+- Current `origin/thviet` and worktree HEAD are `97db5ff38ce3fba79968ffcd22f8e9a5140a4f8a`; GitHub Actions run #133 (`40271694208`) completed successfully on that exact SHA. Render remains on the older verified deployment `388c584`.
+- Read-only live check: Render `/api/v1/health/ready` returned HTTP 200. This confirms current deployed readiness only, not migration/recovery or latest-source deployment.
+- Local focused checks: admin bootstrap CLI/PostgreSQL E2E passed 5/5 on an isolated loopback test DB and left zero `admin_bootstrap_*` schemas; homepage demo-storage warning was visible at 375×812 with no horizontal overflow.
+- No application code, cloud data, deployment, migration, Docker volume, or generated untracked helper file was changed. CI, local checks, and cloud evidence remain distinguished; recovery, migration, payload-boundary and admin/audit cloud gates remain open for full P0–P8 completion.
+
+## T21-P6 PUSH AUDIT CRASH-BOUNDARY REVIEW
+
+- Independent read-only review of open issue #5 at source `5fb8153` confirmed journal creation before receive-pack, actor/generation/ref snapshot binding, atomic idempotent success audit, and isolated DB-failure reconciliation coverage.
+- Boundary: if Git moves refs but the process/database fails before `GIT_CHILD_SUCCEEDED` is durably recorded, the row remains `GIT_CHILD_OUTCOME_UNKNOWN`; reconciliation intentionally does not infer success and further writes stay fenced. Existing E2E covers audit-transaction failure after child-success proof, not this earlier window. This remains unproven against issue #5's broad crash wording; per the owner's fail-closed choice, do not auto-attribute it or modify refs. Operator resolution remains deferred under issue #6.
+- Reconciled the cloud checklist summary so it consistently distinguishes the passed API/Git collaborator invitation→PR→merge smoke from the still-unverified browser UI, admin/audit, quota, migration and recovery checks. No runtime code or cloud state changed.
+
+## T22-BTL CI RECHECK — documentation commit verified
+
+- GitHub Actions `MVP verification` run #135 (`40273582715`) completed successfully on exact `thviet` source `2eed94471d4a1d8c3ea80163b26afec0a05ebf1c`; backend unit/E2E, lint, typecheck, build, frontend E2E/full-stack, Docker image checks, migration-image checks and diff whitespace all completed in the green workflow.
+- Updated the current acceptance, next-actions and cloud-checklist snapshots to this exact source/CI evidence. Render remains on `388c584`; this CI result does not claim a new cloud deployment or verify migration, backup/restore, admin cloud, quota, or restart recovery. No runtime code or cloud state changed.
+
+## T23-BTL SOURCE TIP CI RECHECK — complete
+
+- Read-only GitHub Actions API check found `MVP verification` run #136 (`40274166587`) completed with `success` on exact `thviet` SHA `e0a5fc4b93b21ac4d848c42dd14c6d93c4d453b4`.
+- Updated the current acceptance, next-actions and cloud-checklist snapshots from #135 / `2eed944` to #136 / `e0a5fc4`. Render remains on `388c584`; this CI result does not claim a cloud deploy or close migration, backup/restore, admin cloud, quota, or restart-recovery acceptance. No runtime code, cloud data, or service configuration changed.
+
+## T24-BTL DEPLOY REVISION VISIBILITY — implemented in source, not deployed
+
+- Code commit `97d5d34` extends `GET /api/v1/health/live` with nullable `commitSha`, populated only when Render's documented runtime `RENDER_GIT_COMMIT` value is a 40/64-character hex SHA. Missing or malformed values return `null`; no other environment data is exposed.
+- TDD evidence: the focused health test failed to compile before implementation because `commitSha` did not exist; after implementation, `corepack pnpm --filter backend test src/health/health.controller.spec.ts` passed 3/3, targeted ESLint passed, backend typecheck passed, and `git diff --check` passed.
+- This change is not deployed yet. It enables verifying the running commit after a future approved deploy, but does not itself resolve source backup/recovery or authorize restart/deploy.
+
+## T25-BTL SOURCE/CI/CLOUD STATUS RECHECK — documentation reconciled
+
+- Current worktree HEAD and `origin/thviet` both resolve to `7588c0a4306abf5309de2fe0cb8c6e0c93dac0e2`. GitHub Actions `MVP verification` run #138 (`40276491886`) completed successfully on that exact SHA; backend unit/E2E, lint, typecheck, build, frontend E2E/full-stack, Docker API/migration image checks, disposable migration and diff whitespace all completed. GitHub reported advisory notices for Node.js 20 action runtimes and the upcoming `ubuntu-latest` image migration; the workflow status is Success.
+- Read-only request to `GET https://code-forge-api-thviet.onrender.com/api/v1/health/live` returned HTTP 200 at `2026-10-26T06:14:38Z`, with `status` and `timestamp` only; the new `commitSha` field is not present in the live response. Render Dashboard inspection still identifies `388c584` as the Live deploy, older than source tip `7588c0a`.
+- Updated only the current acceptance/next-action/cloud-checklist summaries. Render remains on `388c584`; no deploy, restart, migration, database mutation, backup operation or source recovery rehearsal was performed. Admin/audit cloud, quota-boundary cloud checks, migration, backup/restore and source-loss recovery remain open. Keep T24 as historical source implementation evidence, not live verification.
+- Read-only GitHub API recheck returned issues #5 and #6 both `open`. Corrected `docs/issue-update-drafts.md` to identify `issue-draft-ambiguous-git-journals.md` as the local copy of already-published issue #6; no issue comment or external mutation was made.
+
+## T26-BTL AUTODEPLOY SAFETY CHECK — push deferred
+
+- After the documentation commits `c60feef` and `bf8c6f2`, the pushed code tip remains `origin/thviet`=`7588c0a4306abf5309de2fe0cb8c6e0c93dac0e2`; these commits only reconcile evidence/context and do not change runtime code.
+- Read-only Render Settings inspection showed Auto-Deploy is `After CI Checks Pass`, so pushing to `thviet` may deploy automatically. The current Live deploy is still `388c584`; `/api/v1/health/live` returned HTTP 200 without `commitSha`.
+- Did not push or deploy because Git-source recovery after redeploy has not been rehearsed and the runbook requires that safeguard. No settings, DB, storage, or cloud service were changed.
+
+## T27-BTL UNKNOWN PUSH OUTCOME FAIL-CLOSED E2E
+
+- Added a focused case to `backend/test/push-audit.e2e-spec.ts`: simulate `recordChildSuccess()` returning false after Git has moved a ref, age the unresolved journal beyond the reconciliation grace, recreate the Nest app against the same isolated test schema/storage, then run maintenance.
+- The test verifies the journal stays `PENDING / GIT_CHILD_OUTCOME_UNKNOWN`, no success audit is emitted, Git receive-pack discovery is rejected with the documented generic HTTP 503 response, the repository-delete API exposes `409 GIT_PUSH_RECONCILIATION_REQUIRED` without changing repository state, and a retry leaves refs and operation count unchanged.
+- Local evidence on 2026-10-26: focused PostgreSQL/Git E2E passed 1/1 (`corepack pnpm --filter backend test:e2e -- test/push-audit.e2e-spec.ts`); targeted ESLint passed; backend typecheck passed; `git diff --check` passed. The isolated `git_push_audit_test_*` schema count after teardown was zero.
+- Scope is intentionally bounded: this models unknown durable child-success proof plus Nest app recreation; it is not a hard process crash, advisory-lock connection loss, cloud recovery, or issue #5 full acceptance. Test change is committed locally as `86fe49e` on `codex/pr-operation-id-reuse`; no push, deployment, migration, or cloud mutation occurred. Existing untracked `frontend/AGENTS.md` and `frontend/CLAUDE.md` were preserved.
+
+## T28-BTL OPERATION-ID COLLISION TEST + RELEASE FREEZE DOCS
+
+- Added a unit regression for concurrent merge requests whose globally unique `operationId` insert collides with a committed winner from another repository. It asserts `409 OPERATION_ID_REUSED` and no merge candidate, ref CAS, PR/journal update, or audit. Local commit: `56cfb3d`.
+- Evidence: `corepack pnpm --filter backend exec jest --runInBand --runTestsByPath src/repositories/pull-requests.service.spec.ts` passed 22/22; targeted ESLint for that spec passed; backend typecheck passed; `git diff --check` passed. A separate read-only review confirmed the mocked sequence represents two initial misses, a Prisma `P2002`, and a post-collision read of the other repository's winner. No production code changed.
+- Clarified `docs/deployment/README.md`: release/migration now requires a verified operator/provider write-freeze and drained Git writes; maintenance jobs/readiness/restart are not substitutes. The post-deploy and failure instructions now refer only to restoring writes/removing a verified freeze. Cross-read against the Render/Neon operator runbook found no remaining implication that an application maintenance gate exists.
+- This documentation update does not provide a freeze mechanism or clear cloud release gates. No cloud service/database, migration, deploy, restart, or Git remote was changed. The untracked frontend helper files remain untouched.
+
+## T29-BTL PUSH RECONCILIATION IDEMPOTENCE
+
+- Extended the isolated PostgreSQL/Git push audit E2E: after the maintenance job recovers a completed push journal and writes its audit, invoke `runOnce()` again and assert the journal remains `COMPLETED` and exactly one audit exists for that operation.
+- Evidence on 2026-10-26: focused `corepack pnpm --filter backend test:e2e -- test/push-audit.e2e-spec.ts` passed 1/1; targeted ESLint, backend typecheck, and `git diff --check` passed; isolated `git_push_audit_test_*` schema count after teardown was zero. Read-only review found no issue.
+- Local commit: `5b232dc` on `codex/pr-operation-id-reuse`. Test-only change; no production behavior, cloud service, database outside the isolated schema, migration, deployment, or remote branch changed. Existing untracked frontend helper files remain untouched.
+
+## T30-BTL EXPIRED ADMIN RESTORE BOUNDARY
+
+- Added an admin HTTP/PostgreSQL/Git E2E case that attempts to restore a deleted repository after `purgeAfter`; it asserts `409 RESTORE_EXPIRED`, unchanged tombstone state/timestamps, and no `ADMIN_REPOSITORY_RESTORED` audit. This closes a narrow P6 test gap; service behavior and permissions were unchanged.
+- Local evidence on 2026-10-26: `corepack pnpm --filter backend test:e2e -- test/admin.e2e-spec.ts` passed 3/3 on the loopback Docker test database ending `_test`, using a per-run schema and temporary Git root; targeted ESLint passed; backend typecheck passed; `git diff --check` passed. The first attempt was blocked before app initialization because no `JWT_ACCESS_SECRET` was set; rerun used an ephemeral process-only secret, not a file or logged value.
+- Local commit: `c163df4` on `codex/pr-operation-id-reuse`. Not pushed or deployed; no migration, cloud operation, non-test database, or existing Docker volume was changed. The existing untracked frontend helper files remain untouched.
+
+## T31-BTL CONCURRENT PUSH RECONCILIATION
+
+- Extended the isolated push-audit E2E to run two `GitPushJournalService.reconcilePending()` instances with independent PostgreSQL advisory-lock pools against the same aged journal. A held repository lock ensures both reconcilers have reached the advisory-lock wait before release; the test verifies `COMPLETED`, the expected Git ref, one completion audit, and successful lock reacquisition from both pools. The scheduled maintenance service is stopped/drained during this focused race setup so its global job lock cannot serialize the two calls first.
+- Local evidence on 2026-10-26: `corepack pnpm --filter backend test:e2e -- test/push-audit.e2e-spec.ts` passed 1/1 on the loopback Docker `_test` database with test-owned schema/temp Git storage; targeted ESLint, backend typecheck, and `git diff --check` passed. The audit-failure trigger and test schema were cleaned up. This is concurrent-reconciler coverage, not hard-process-crash or advisory-lock-connection-loss proof.
+- Local commit: `d36e3b2` on `codex/pr-operation-id-reuse`. No runtime implementation, cloud, migration, non-test database, remote branch, or existing Docker volume changed. Existing untracked frontend helper files remain untouched.
+
+## T32-BTL PUSH PROCESS CRASH BEFORE DURABLE CHILD-SUCCESS PROOF
+
+- Added a POSIX-only PostgreSQL/Git E2E in `backend/test/pull-requests.e2e-spec.ts`. A test-only trigger pauses the journal update that would persist `GIT_CHILD_SUCCEEDED`; the test waits until the real Git branch ref has moved, kills only the child API, releases the advisory barrier, and confirms the API's PostgreSQL sessions exit naturally.
+- The crash leaves the journal `PENDING / GIT_CHILD_OUTCOME_UNKNOWN`, preserves the before-ref snapshot, leaves `changedRefCount` null, emits no success audit, remains unreconciled after aging beyond 120 seconds and running maintenance, and fences a subsequent push without moving the ref.
+- Verification on 2026-10-26: focused Linux-only Jest test passed 1/1 in a disposable Docker container running PostgreSQL 15; the container had no persistent volume and was removed after success. Backend typecheck passed, targeted ESLint reports the same 8 pre-existing errors as the unchanged baseline (none added by this test), and `git diff --check` passed. The default backend lint command covers `src/**/*.ts`, not `test/**/*.ts`.
+- Local commit `a9ac678` on `codex/push-crash-proof`; hosted CI remains pending. Worktree: `C:\Users\ADmin\.codex\worktrees\push-crash-proof\Prj1`. Files in the commit: E2E test, implementation status, next actions, acceptance board, and this log. No production code, cloud resource, migration, user database, named Docker volume, or remote branch changed; the commit is not pushed.
+
+## T33-BTL ANONYMOUS PUBLIC GIT READ AFTER OWNER LOCK — local acceptance
+
+- Preserved and reviewed the existing three-line change in `backend/test/admin.e2e-spec.ts`: a locked owner's session/PAT is rejected, while anonymous upload-pack discovery still returns 200 and the repository remains ACTIVE/PUBLIC. Independent read-only review found no actionable defect.
+- On 2026-10-26, the full admin HTTP/PostgreSQL/Git E2E passed 3/3; backend typecheck, targeted ESLint and `git diff --check` passed. Used a newly created PostgreSQL 17 Alpine container with loopback-only random port and tmpfs storage; teardown confirmed zero `admin_test_*` schemas, then stopped/auto-removed only that task-owned container. No existing volume was touched.
+- Worktree/branch: `C:\Users\ADmin\.codex\worktrees\push-crash-proof\Prj1` / `codex/push-crash-proof`, parent `9f127ef`. This closes the bounded P6 public-read regression locally, not hosted CI or cloud acceptance. No production code, cloud operation or migration outside the isolated test fixture changed.
+
+## T34-BTL EXACT PUSH-CRASH BARRIER — review finding resolved locally
+
+- Independent review found that T32 counted any advisory-lock waiter sharing the child API application name, so an unrelated maintenance/repository lock could falsely satisfy its crash barrier. The query now matches the waiting lock to this observer's granted advisory lock by database/classid/objid/objsubid. Only `backend/test/pull-requests.e2e-spec.ts` changed; production behavior is unchanged. A second reviewer found no actionable defect in the fix.
+- RED/GREEN PostgreSQL 17 experiment: a same-name decoy blocked on another advisory lock produced old count 1 versus corrected count 0; adding the actual barrier waiter produced old count 2 versus corrected count 1. Corrected POSIX crash E2E passed 1/1; affected Linux PR/push-audit/admin integration suites passed 3/3, 21 tests, with no skips in that regression run. Backend unit passed 20/20 suites, 195 tests; backend source lint, typecheck and `git diff --check` passed. Targeted PR-test ESLint still reports the same 8 baseline errors/rules, not a clean lint pass for that file.
+- Initial Linux harness invocation failed: Windows bind-mounted shell hook had CRLF, and a forwarded `--` made Jest treat the name filter as positional arguments. The successful rerun used a disposable source snapshot with LF/executable hook and the configured Jest command with explicit `--runTestsByPath`/`--testNamePattern`; no checkout files were changed to bypass this failure. Existing migration-image dependencies were reused, without a new image build or workspace dependency installation.
+- Temporary PostgreSQL and Linux runner containers were label-verified, stopped and auto-removed after zero owned test schemas remained; existing containers/volumes were preserved. Branch `codex/push-crash-proof`, parent `e074241` (T33). Hosted CI and cloud release remain separate gates. No push to `main`/`thviet`, cloud migration, deploy or provider setting change occurred during this local verification.
+
+## T35-BTL FEATURE CI139 — hosted checkpoint accepted
+
+- Reviewed T27–T31 independently with no actionable findings; resolved the T32 barrier finding in `200c22d`, following T33 commit `e074241`. Pushed only `codex/push-crash-proof`; a remote read confirmed feature SHA `200c22da92d72536b585d66769154283325d41e3` and unchanged `thviet` SHA `7588c0a4306abf5309de2fe0cb8c6e0c93dac0e2`.
+- GitHub Actions [MVP verification #139](https://github.com/VuLeCoder/Code-forge/actions/runs/40340975441) completed successfully on the exact feature SHA. Both the monitoring agent and leader rechecked the terminal API result. Backend unit/E2E, lint/typecheck/build, frontend E2E/full-stack, API/migration image builds and smoke, disposable migration and diff whitespace gates passed. CI migration is isolated CI evidence, not a Neon/cloud migration.
+- Render live/readiness requests succeeded at 2026-10-26T14:37Z; readiness reported database/Git/storage up. Live response still exposes no revision, so the running SHA was not inferred. No cloud deploy/restart/migration or provider setting changed. Dashboard access remains unverified: browser-harness requests Chrome remote-debugging permission; IAB was unavailable and scoped Chrome-tab creation failed without creating provider tabs. User has one pending request to allow Chrome access. An existing browser-harness process of uncertain ownership was preserved, not killed/restarted.
+- Updated only current acceptance/implementation/next-action snapshots to distinguish the CI-accepted feature from the unchanged integration branch and cloud. Broader P0–P8 release, backup/restore, source recovery, cloud quota/admin and manual accessibility remain open; do not mark the overall goal complete.
+
+## T36-BTL CLOUD DASHBOARD PREFLIGHT — Render/Neon identities verified read-only
+
+- Browser access became available through the existing logged-in in-app browser. Read-only Render inspection identified project `My project`, service `code-forge-api-thviet` (`srv-dberdkoae00c73e3lm1g`) in Singapore, sourced from `VuLeCoder/Code-forge` branch `thviet`; the service is Free/Docker, Live at deployed commit `388c584`, and its Auto-Deploy setting is `After CI Checks Pass`. Render's Free compute page explicitly states that persistent disks are unsupported, so Git source persistence across restart/redeploy is not assumed.
+- Read-only Neon inspection identified project `Code Forge` (`green-mountain-81958216`) separate from `BUS Ticket`, production branch `br-steep-snow-aod67yel`, AWS Asia Pacific 1 (Singapore), Free plan, two branches, 32.78 MB usage and a 6-hour Postgres history window. The history window is evidence for time-travel/instant-restore capability only; no export backup, restore rehearsal, branch reset, migration or data mutation was performed.
+- No environment values, deploy hooks, credentials, PATs, cookies or connection strings were opened or copied. No Render/Neon setting, deploy, restart, migration, branch, database, Git storage or user file was changed. Existing `thviet` auto-deploy remains a release hazard; do not push it until the documented write-freeze/drain, source copy and metadata backup/recovery rehearsal is completed.
+- Verification: CUA read-only screenshots/AX state from Render settings/compute and Neon settings/postgres on 2026-10-26; current live/readiness API evidence remains separate. This closes identity/configuration preflight only. Admin/audit cloud, payload/quota, migration, backup/restore, restart/source-loss recovery and final release review remain OPEN.
+
+## T37-BTL PUSH CRASH AFTER DURABLE CHILD-SUCCESS — local Linux acceptance
+
+- Added a POSIX-only PostgreSQL/Git E2E case in `backend/test/pull-requests.e2e-spec.ts` for the boundary after the Git receive-pack has moved the ref and `GIT_CHILD_SUCCEEDED` is durable, but before the push journal can finish and emit its success audit. A test-only advisory-lock barrier holds `finish()`, the child API is stopped with `SIGKILL`, and a replacement API runs reconciliation after the journal is aged beyond the 120-second grace period.
+- The case verifies the ref and before-ref snapshot survive the crash, the journal becomes `COMPLETED`, exactly one `GIT_PUSH_COMPLETED` audit is written (including on a repeated maintenance run), and a subsequent branch push succeeds. The test uses the real HTTP Git endpoint and PostgreSQL advisory-lock/session behavior; no production code was changed.
+- Local evidence on 2026-10-26: disposable Docker PostgreSQL 17 Alpine with tmpfs and an isolated `code_forge_test` database; migrations applied successfully; focused Jest run passed 1/1 (`corepack pnpm --filter backend exec jest --config test/jest-e2e.json --runInBand --runTestsByPath test/pull-requests.e2e-spec.ts -t "after.*durable" --verbose`); backend typecheck passed; focused journal/maintenance unit tests passed 44/44; `git diff --check` passed. The Linux runner used a LF-preserving `git -c core.autocrlf=false archive` source snapshot so executable Git hooks were tested as stored; the temporary database/runner containers were removed and no existing Docker volume was touched.
+- Independent read-only review found no actionable findings. Target-file lint still has the same pre-existing baseline errors outside the added block; this is not claimed as a clean lint pass. Windows is intentionally skipped for this POSIX process-crash case. No cloud migration, deploy, database mutation, remote push or `main`/`thviet` update occurred.
+
+## T38-BTL METADATA BACKUP/RESTORE REHEARSAL — local disposable PostgreSQL
+
+- Local metadata rehearsal on 2026-10-26: two disposable `postgres:17-alpine` tmpfs containers (`codeforge-p8-src-x7f3a` and `codeforge-p8-restore-x7f3a`) were labeled `codeforge-p8-backup`. The source received all 7 Prisma migrations and a synthetic fixture with one user, one repository and one audit row. `pg_dump --format=custom --no-owner` produced a 36,886-byte dump; `pg_restore --no-owner --exit-on-error` restored it successfully, with 7 migration rows and matching user/repository/audit values after restore. Exactly the labeled containers and temporary dump directory were removed; existing Docker resources, Neon, Render, repository files and secrets were untouched.
+- This is local metadata backup/restore evidence only. It does not prove encrypted backup, Neon production export/restore, Git object/source backup, application write-freeze/drain, migration rollback or cloud recovery; those P8 gates remain OPEN.
+
+## T39-BTL FEATURE CI141 — hosted verification of current feature tip
+
+- GitHub Actions [MVP verification #141](https://github.com/VuLeCoder/Code-forge/actions/runs/40351375771) completed successfully on exact feature SHA `d2494d589a0ee482926af52cf27da09c710c2ce1` at 2026-10-26. The single `verify` job ran from 15:38:56 to 15:44:31 (local display time) and concluded `success`.
+- This hosted result includes the maintenance retry test and reconciled deployment documentation. It does not imply a `thviet`/`main` update, Render deploy, Neon migration, cloud backup/restore, or source-loss recovery; those remain separate open gates.
+
+## T40-BTL MIGRATION FAILURE/RECOVERY — local disposable PostgreSQL
+
+- Created a temporary Prisma migration copy `codeforge-p8-migration-failure-x7f3b` and used one labeled `postgres:17-alpine` tmpfs container. The seven current migrations applied successfully; `_prisma_migrations` contained 7 finished rows and the probe table did not exist.
+- A deliberately failing migration (`20261026170000_p8_failure_rehearsal`) returned exit 1 with Prisma `P3018` / PostgreSQL `42883`; the seven baseline rows stayed finished, the failed row had no `finished_at` or `rolled_back_at`, and no probe table was created.
+- `prisma migrate resolve --rolled-back 20261026170000_p8_failure_rehearsal` returned 0. Replacing the migration only in the temporary copy with valid SQL and rerunning `prisma migrate deploy` returned 0; the baseline remained 7, the corrected migration finished, and the probe table existed with two columns.
+- Cleanup removed the exact labeled container and temporary Prisma copy. No existing Docker volume, Neon, Render, repository file or secret was touched. This proves local disposable migration failure→resolve→forward recovery only; it does not prove Neon/cloud migration, encrypted backup, write-freeze, application rollback or production recovery.
+
+## T41-BTL FAST-FORWARD THVIET — release candidate submitted
+
+- After review, local tests, T37–T40 evidence and hosted CI #142 success on `20d6d3d`, the feature tip was fast-forwarded to `origin/thviet` as `d8dd9bff1f4d2945a0b861dac4f8d74302142b5f`; no force-push or new branch was created.
+- GitHub Actions [MVP verification #143](https://github.com/VuLeCoder/Code-forge/actions/runs/40354036920) is queued/in progress for the exact `thviet` SHA. Render is configured to deploy after CI checks; no current Render deployment at this SHA is claimed. Cloud migration, backup/restore, source-loss recovery and write-freeze gates remain open.
+
+## T42-BTL FULL BACKEND E2E — local disposable PostgreSQL/Git regression checkpoint
+
+- First invocation was safely blocked before test setup because the shell had no `DATABASE_URL`; no test ran against a database. The rerun used a newly created, loopback-only `postgres:17-alpine` container (`codeforge-full-e2e-20261026`) with tmpfs storage, database `code_forge_test`, all 7 Prisma migrations, process-only JWT/proxy secrets, and a temporary Git root. No existing Docker volume, cloud database, or repository file was used.
+- Verification on 2026-10-26: `corepack pnpm --filter backend test:e2e` passed **10/10 suites, 64 passed, 5 skipped, 69 total** in 142.533s. The skips are the existing Windows-incompatible POSIX crash cases. Expected maintenance warnings exercised fail-closed retry paths; they did not fail the suite.
+- Cleanup removed exactly the labeled disposable container after the run. The temporary Git root is task-owned; no named volume was created or removed. This closes the local full backend regression checkpoint only; hosted CI, Render/Neon migration, encrypted backup, source-loss recovery and P0–P8 release acceptance remain separate gates.
+
+## T43-BTL HOSTED CI TERMINAL CHECKPOINT — runtime candidate accepted
+
+- Read-only CI monitoring verified [MVP verification #145](https://github.com/VuLeCoder/Code-forge/actions/runs/40355040474) success on `31b727d`, [#146](https://github.com/VuLeCoder/Code-forge/actions/runs/40355807041) success on `b1ba6d8`, [#147](https://github.com/VuLeCoder/Code-forge/actions/runs/40356177128) success on exact runtime candidate `50f4ee432d868a065c287cf948dab6f0ea8e3dd3`, and [#148](https://github.com/VuLeCoder/Code-forge/actions/runs/40357459570) success on docs-only `aada694`. Each run completed all 28 workflow steps; backend/frontend tests, typecheck, build, Docker/migration image checks, disposable migration and whitespace gates passed.
+- These are hosted CI results only. No Render deploy/restart, Neon migration, cloud backup/restore, Git source-loss recovery or provider setting changed. A subsequent documentation-only follow-up may trigger another CI run; do not reinterpret it as a cloud release.
+
+## T44-BTL STORAGE-RECOVERY LOCK ORDER — local acceptance
+
+- On a new loopback-only `postgres:17-alpine` tmpfs database with all 7 migrations and a task-owned temporary Git root, the focused test `corepack pnpm --filter backend exec jest --config test/jest-e2e.json --runInBand --runTestsByPath test/repositories.e2e-spec.ts --testNamePattern "serializes completed push before missing-storage recovery and reinitializes the default repository"` passed **1/1** (20 unrelated tests skipped by the name filter).
+- The test verified completed-push serialization before missing-storage recovery, advisory-lock ordering, storage generation reset, hidden/private boundary behavior and idempotent recovery. The labeled container `codeforge-recovery-e2e-20261026` was removed; no named volume, cloud resource or repository file was changed. The temporary Git root was empty after the run; its directory remains as a cleanup candidate because recursive deletion is policy-blocked.
+
+## T45-BTL MAINTENANCE JOB ISOLATION — local implementation checkpoint
+
+- Commit `70500d8` updates `backend/src/maintenance/maintenance-jobs.service.ts` so independent maintenance jobs run sequentially under the existing process-wide advisory lock, while a transient failure in one job no longer prevents later purge or temporary-directory cleanup in the same batch. Reconciliation remains fail-closed and retries on a later tick; logs contain only fixed job labels.
+- Focused verification on 2026-10-26: backend typecheck, targeted ESLint and `corepack pnpm --filter backend exec jest src/maintenance/maintenance-jobs.service.spec.ts --runInBand` passed (18/18). Read-only review-agent reported **No findings**; the added test covers an invitation-expiration failure and confirms later jobs plus lock release still run. Independent failure injection for every other job boundary remains optional follow-up coverage.
+- Runtime commit `70500d8` and test commit `5840efb` were pushed to `origin/thviet`; hosted MVP verification [#150](https://github.com/VuLeCoder/Code-forge/actions/runs/40359823730) passed all 28/28 steps on the runtime commit. The later test/docs tip has follow-up runs still in progress. No Render/Neon deploy, migration, restart, or data mutation was performed.
+
+## T46-BTL DEMO CODE SLICES — healthcheck and admin error contract
+
+- Implemented two small production slices on `codex/push-crash-proof`: `backend/Dockerfile` now declares a Node 24 healthcheck for the configurable `PORT`/`API_PREFIX` live endpoint and exits unhealthy on connection or non-2xx responses; `backend/src/admin/admin.service.ts` now returns stable `INVALID_USER_STATUS` and `INVALID_REPOSITORY_STATUS` error codes with the standard `{ error: { code, message, details } }` shape instead of raw Nest strings.
+- Verification after implementation: `git diff --check` passed; `corepack pnpm --filter backend typecheck` passed; `corepack pnpm --filter backend exec eslint src/admin/admin.service.ts` passed; `corepack pnpm --filter backend exec jest src/admin/admin.service.spec.ts --runInBand` passed 10/10; `docker build --check -f backend/Dockerfile .` completed with no warnings. A read-only review of the combined diff found no actionable correctness, security or regression issue.
+- No full regression suite, cloud deploy, migration, restart, database/storage mutation, or Docker image build was run for this slice yet. The changes are ready for a focused commit/push to `thviet`; hosted CI remains the next verification gate.
+
+## T47-BTL DEMO API ERROR CODES — query validation normalization
+
+- Normalized three remaining controller-level 400 responses to the shared error envelope: invalid pull-request `status` (`INVALID_PULL_REQUEST_STATUS`), invalid compare `summary` (`INVALID_SUMMARY`), and invalid public repository list query/page (`INVALID_REPOSITORY_LIST_QUERY`). HTTP status and validation behavior are unchanged; valid requests and authorization paths are untouched.
+- Verification after implementation: `git diff --check`, backend typecheck and targeted ESLint for both controllers passed. Read-only review against `ApiExceptionFilter` found no actionable compatibility, security or regression issue. There are no dedicated controller unit tests for these exact codes yet; focused HTTP coverage is a follow-up, not a claim of current test coverage.
+- No cloud deploy, migration, restart, database/storage mutation or destructive cleanup was performed. The slice is ready to commit and push to `thviet`; hosted CI remains the next gate.
+
+## T48-BTL CONTROLLER ERROR CONTRACT TESTS — focused local coverage
+
+- Added only `backend/src/repositories/repositories.controllers.spec.ts`; production controllers and API behavior were not changed. The suite covers invalid PR status, invalid compare summary, and both invalid public repository-list branches, asserting HTTP 400 plus the exact nested `{ error: { code, message, details } }` payload.
+- Leader verification: `corepack pnpm --filter backend exec jest src/repositories/repositories.controllers.spec.ts --runInBand` passed 1 suite/4 tests; targeted ESLint and `git diff --check` passed. Independent read-only review found no actionable finding.
+- No database, Git storage, Docker volume, cloud resource, migration, deploy or restart was touched. The test file is ready to commit/push to `thviet`; CI #158 for the previous commit remains separate and still pending.
+
+## T49-BTL WRITE COLLABORATOR USER-LOCK RACE — local acceptance
+
+- Added only `backend/test/repositories.e2e-spec.ts`: a focused real-Git/HTTP/PostgreSQL case for a `WRITE` collaborator whose receive-pack is already inside the pre-receive barrier when that user's account is locked. The in-flight push must finish with one `COMPLETED` journal, one `GIT_PUSH_COMPLETED` audit and the expected branch ref; a later advertisement/push must be rejected and refs/journal/audit counts must remain unchanged.
+- Local verification used the task-owned disposable `postgres:17-alpine` container `codeforge-collab-race-20261026` on loopback port `52351`, tmpfs database storage, all current migrations and a temporary Git root. `corepack pnpm --filter backend exec jest --config test/jest-e2e.json --runInBand --runTestsByPath test/repositories.e2e-spec.ts --testNamePattern 'WRITE collaborator receive-pack' --verbose` passed **1/1** (21 unrelated tests skipped). Backend typecheck and `git diff --check` passed.
+- The full E2E file still has pre-existing lint findings; no clean-file lint claim is made. The inserted block produced no listed new lint finding. Independent read-only review using `D:\AI_Config\skills\.system\review-agent\SKILL.md` reported **No findings**; reviewer did not run the E2E because its shell lacked `DATABASE_URL`, so the disposable-container run above is the execution evidence.
+- CI `MVP verification` #159 (`40362337076`) passed all 28/28 on its exact parent SHA `3153dbb`; it does not include this uncommitted test. The test therefore remains pending commit and a new exact-SHA CI run. The task container was removed after the run; no existing Docker volume, database, cloud resource or secret was touched.
+
+## T50-BTL ADMIN REPOSITORY-LOCK RACE — test implementation, hosted verification pending
+
+- Added only `backend/test/admin.e2e-spec.ts`: a self-contained case (safe under `--testNamePattern`) that creates an admin and owner, holds a real receive-pack in a pre-receive barrier, proves `PATCH admin/repositories/:id/status {status: LOCKED}` waits on the exact repository advisory lock, then verifies push ref/journal/audit completion, admin status/audit success, and post-lock Git rejection with no extra ref/journal/success-audit.
+- Typecheck, targeted ESLint and `git diff --check` passed. Independent read-only review with `D:\AI_Config\skills\.system\review-agent\SKILL.md` reported **No findings**. The focused local E2E was blocked before setup because Docker Desktop's Linux daemon was unavailable (`dockerDesktopLinuxEngine` named pipe missing); no test database/container was created and no existing Docker resource was touched.
+- This slice is committed/pushed as `f6f2a3a` to `thviet`; exact hosted run #161 (`40436044748`) is still in progress. After Docker is available, run `corepack pnpm --filter backend exec jest --config test/jest-e2e.json --runInBand --runTestsByPath test/admin.e2e-spec.ts --testNamePattern 'repository status lock.*receive-pack' --verbose` against an isolated `*_test` database. Until then, do not call local E2E passed; hosted CI and local evidence remain separate.
+
+## T51-BTL ADMIN LOGIN/REFRESH LOCK RACE — fixture independence
+
+- Updated only `backend/test/admin.e2e-spec.ts` so the login/refresh-vs-account-lock race registers and promotes its own `AccountRaceAdmin` instead of depending on `adminAccount` from a preceding test. This makes the focused test-name run deterministic without changing production behavior or assertions.
+- Backend typecheck, targeted ESLint and `git diff --check` passed. Independent read-only review reported **No findings**. Focused E2E remains blocked before setup because Docker Desktop's Linux daemon is unavailable; no database/container/volume was touched.
+
+## T52-BTL ADMIN RACE FIXTURE CLEANUP — CI failure root-cause repair
+
+- CI #161 (`40436044748`) exposed that T50 left its newly promoted admin account in the isolated schema; the existing last-active-admin test then observed three active admins and received 200 instead of the expected 409. The same run also showed the pre-existing login/refresh race transaction timeout; that remains separately observed until a clean candidate proves it.
+- Added one cleanup assertion path in `backend/test/admin.e2e-spec.ts`: delete exactly T50's admin and owner fixtures after PAT/repository cleanup. No production behavior, schema, migration, cloud resource or shared fixture changes.
+- Typecheck, `git diff --check` and independent read-only review passed. Docker Desktop was unavailable, so no local E2E rerun was possible; the next exact `thviet` CI run is required to validate the repair.
+
+## T53-BTL ADMIN E2E REGRESSION — local Docker evidence after daemon recovery
+
+- After Docker Desktop became available, ran the full `backend/test/admin.e2e-spec.ts` suite in disposable container `codeforge-admin-regression-20261027` on loopback port `52353`, PostgreSQL 17 with tmpfs storage, all 7 migrations and a test-owned Git root.
+- Result: **4/4 tests passed** (user/private-source boundaries, T50 repository-lock receive-pack race, last-active-admin race and T51 login/refresh race). This confirms the T52 cleanup repair locally and resolves the transaction-timeout observation in this exact isolated run.
+- Cleanup removed exactly the labeled container; no existing Docker volume, database, Git storage or cloud resource was touched. This remains local evidence until the exact hosted `thviet` run completes.
+
+## T54-BTL HOSTED ADMIN REGRESSION — exact cleanup candidate
+
+- GitHub Actions `MVP verification` #164 ([run `40436650173`](https://github.com/VuLeCoder/Code-forge/actions/runs/40436650173)) completed **success, 28/28** on exact `thviet` SHA `cec57fa` in 6m07s. This verifies T50/T51/T52 code plus the existing workflow gates on hosted Linux; it is not cloud deploy/recovery evidence.
+
+## T55-BTL ADMIN REPOSITORY UNLOCK ROUND-TRIP — local acceptance
+
+- Extended only `backend/test/admin.e2e-spec.ts` so the T50 repository lock race now verifies `LOCKED → ACTIVE`, exactly one `ADMIN_REPOSITORY_UNLOCKED` audit, and a subsequent PAT push with the expected ref, second completed journal and second push-completed audit.
+- Independent read-only review reported **No findings**. Local gates on the current parent passed: backend unit 21 suites/201 tests, backend typecheck, workspace lint/typecheck/build and `git diff --check`.
+- After Docker recovery, full admin E2E on disposable `codeforge-admin-unlock-20261027` (PostgreSQL 17/tmpfs, loopback port `52354`, 7 migrations) passed **4/4** including the new unlock/push assertions. The exact container was removed; no existing volume/database/cloud resource was touched. Hosted CI for the eventual commit remains required.
+
+## T56-BTL HOSTED ADMIN UNLOCK — exact candidate
+
+- GitHub Actions `MVP verification` #167 ([run `40437674377`](https://github.com/VuLeCoder/Code-forge/actions/runs/40437674377)) completed **success, 28/28** on exact `thviet` SHA `e27a8ea` in 5m59s. Backend/frontend suites, Docker API/migration image checks, disposable migration and whitespace gate all passed. This is hosted CI evidence only; Render/Neon release and recovery gates remain open.
+
+## T57-BTL ACCEPTANCE SNAPSHOT/HANDOFF SYNCHRONIZATION
+
+- Updated only the current acceptance snapshot to distinguish the CI-verified runtime candidate `70500d8` from the later docs-only `570236e` checkpoint, record hosted T55 success (#167), and mark the earlier #161 failure as historical. Historical evidence and the cloud-open boundary were preserved.
+- Read-only review reported **No findings**; `git diff --check` passed. No production code, database, Git storage, Docker volume or cloud resource changed.
+
+## T58-BTL MAINTENANCE RECONCILIATION GRACE — disposable E2E proof
+
+- Docker `29.9.2` was available. A new loopback-only `postgres:17-alpine` container with tmpfs storage and database `code_forge_test` received all 7 migrations; no existing container or volume was used.
+- Focused `maintenance-cleanup.e2e-spec.ts` run for pending-grace, immediate `NEEDS_RECONCILIATION`, and cross-type fail-closed cases passed **3/3** (3 unrelated tests skipped by the name filter). The suite verified new PENDING stays unresolved under 120 seconds, `NEEDS_RECONCILIATION` is picked up immediately, and ambiguous cross-type state remains fenced.
+- The exact task-owned container was stopped with automatic removal; the test-owned Git root was cleaned by the suite. No cloud migration, deploy, restart or secret was used.
+
+## T61-BTL CLOUD DOCUMENTATION CONSISTENCY
+
+- Updated the deployment README and cloud checklist to record the actual hosted candidate evidence (#167 on `e27a8ea`), the docs-only runs #169 (`40440248084`), #170 (`40440737174`), #171 (`40441046301`), #172 (`40441281021`), #173 (`40442228491`) and #174 (`40442933565`) completed successfully. The verified basic Render Git/auth/PR smoke remains separate from the unverified full TLS/proxy, quota, admin/audit, migration, backup/restore and source-loss recovery gates.
+- Updated the implementation ledger, next-actions page and acceptance snapshot to remove obsolete “497fd5d pending” wording while preserving the runtime/cloud distinction. Read-only review found no actionable finding; `git diff --check` passed. No cloud state or secrets changed.
+
+## T64-BTL RENDER PUBLIC READ-ONLY PROBE
+
+- Read-only `GET https://code-forge-api-thviet.onrender.com/api/v1/repositories?page=1` returned HTTP 200 with the synthetic public fixture `btl-demo-873496/btl-demo` and a direct Render clone URL. `git ls-remote` against that URL exited 0 but returned no refs because the repository is empty.
+- This proves current public endpoint/transport reachability only; it does not prove content fetch, push, quota, admin/audit, persistence or release acceptance. No PAT, Git ref, database, storage, deployment or cloud setting was mutated.
+
+## T65-BTL HOSTED DOCUMENTATION GATE — exact latest checkpoint
+
+- GitHub Actions `MVP verification` #175 ([run `40443649156`](https://github.com/VuLeCoder/Code-forge/actions/runs/40443649156)) completed **success in 5m54s** on exact docs SHA `3ff191b` pushed to `thviet`.
+- Hosted gates observed on the job page: backend unit **21 suites / 201 tests**, backend E2E **10 suites / 71 tests**, frontend E2E **56/56**, full-stack browser **3 passed**, backend Docker image/runtime smoke, migration image smoke, disposable migration and `git diff --check`. The known non-fatal frontend profile-load warning appeared again and did not fail the run.
+- This is CI evidence only. It does not close P2/P8 cloud deployment, migration, backup/restore, write-freeze/drain, source-loss recovery or direct Git-content smoke gates; no cloud state, database, Git storage, Docker volume or secret was changed.
+
+## T66-BTL HOSTED DOCUMENTATION GATE — exact latest checkpoint
+
+- GitHub Actions `MVP verification` #177 ([run `40444731371`](https://github.com/VuLeCoder/Code-forge/actions/runs/40444731371)) completed **success in 8m23s** on exact docs SHA `e56c5dc` pushed to `thviet`; Docker API/runtime smoke, migration image smoke, disposable migration and whitespace checks were included.
+- A fresh read-only Render check returned `/api/v1/health/ready` HTTP 200 with database/Git/storage `up`, and repository listing HTTP 200 with the synthetic public fixture/direct clone URL. Anonymous `git ls-remote` was reset once during wake-up, then one HTTP/1.1 retry exited 0 with no refs. This remains readiness/transport evidence only and does not close cloud content, quota, persistence or recovery gates.
+- No cloud migration, deploy, restart, backup/restore, PAT, Git ref, database, storage, Docker volume or secret was mutated.
+
+## T67-BTL HOSTED DOCUMENTATION GATE — exact latest checkpoint
+
+- GitHub Actions `MVP verification` #178 ([run `40445667702`](https://github.com/VuLeCoder/Code-forge/actions/runs/40445667702)) completed **success in 5m52s** on exact docs SHA `8f990e0` pushed to `thviet`. The workflow completed its normal backend/frontend/full-stack, Docker, migration-image, disposable-migration and whitespace gates; Actions showed only the known Node 20/Ubuntu runner migration warnings.
+- This is hosted CI evidence only. It does not close P2/P8 cloud deploy, migration, backup/restore, write-freeze/drain, source-loss recovery or issue #6 operator-resolution gates. No cloud state or secret was changed.
+
+## T68-BTL LOCAL DEMO SEED — isolated admin/user walkthrough
+
+- Created a task-owned local demo only; no Render/Neon mutation, cloud migration, deployment, restart, or secret was recorded. PostgreSQL ran in `codeforge-demo-postgres-20261027` on loopback port `40000` with tmpfs storage, and the backend used a separate local Git root. All 7 current Prisma migrations applied successfully.
+- Bootstrap created local admin username `demo-admin`; API registration created local user `demo-user`. The demo contains one public repository (`demo-user/demo-repo`), one private repository (`demo-admin/admin-private-demo`), and a WRITE invitation accepted by the admin. Passwords and connection values are intentionally omitted from this log.
+- Local backend `http://localhost:44000` readiness returned HTTP 200 with database/Git/storage up; frontend `http://localhost:3001/login` returned HTTP 200. Admin stats returned two active users, two active repositories, and zero pull requests. Anonymous admin endpoint access remained HTTP 401. Anonymous public Git `ls-remote` resolved the local repository's `main` ref.
+- Backend build passed before startup. The demo processes/container remain running for the current walkthrough and are task-owned; they are not release evidence. The database and Git storage are ephemeral and must not be treated as cloud persistence. A temporary marker created during setup was removed. Existing Docker volumes and unrelated containers were not touched.
+
+## T69-BTL LOCAL DEMO AUTH SMOKE — session-backed API check
+
+- Rechecked the running isolated demo without printing credentials or cookies: admin login returned HTTP 200 and the authenticated admin stats endpoint returned HTTP 200 with 2 users, 2 repositories and 0 pull requests; user login returned HTTP 200 and the authenticated repository list returned HTTP 200.
+- The first probe intentionally used the wrong field name (`identifier`) and received the expected HTTP 400 validation envelope; the corrected session-cookie flow passed. This is local API evidence only; it does not establish browser UX or Render/Neon acceptance.
+
+## T70-BTL FRONTEND ACCOUNT MENU — GitHub-inspired header polish
+
+- Leader-owned UI task. Applied `frontend-ui-engineering`, `ui-styling` and `ui-ux-pro-max` guidance: the avatar is now a native accessible menu trigger with a profile link, collaboration invitations, PAT, and admin navigation; Escape restores focus, outside pointer closes the menu, and the menu remains within a 375px viewport. The existing visible logout button and profile-link behavior were preserved for compatibility.
+- Changed only `frontend/src/components/site-header.tsx`, `frontend/src/app/globals.css`, and added `frontend/test/site-header.spec.ts`. No API, auth, backend, or user-owned untracked files were changed.
+- Verification: frontend lint passed; frontend typecheck passed; focused account-menu Playwright **2/2** passed; full `frontend/test/milestone-one.spec.ts` **18/18** passed; `git diff --check` passed. The visual direction is GitHub-inspired navigation hierarchy, not copied branding or markup.
+
+## T71-BTL HOSTED VERIFICATION — local demo documentation checkpoint
+
+- GitHub Actions `MVP verification` #182 (`40447734540`) completed **success** on exact SHA `4986091`. The run passed the backend unit/E2E, lint, typecheck, build, frontend E2E/full-stack, Docker image, migration image, migration and whitespace gates.
+- This is CI evidence only and does not close Render/Neon deployment, backup/restore or source-loss recovery acceptance.
+
+## T72-BTL HOSTED UI VERIFICATION — account menu candidate
+
+- GitHub Actions `MVP verification` #185 ([run `40448842247`](https://github.com/VuLeCoder/Code-forge/actions/runs/40448842247)) completed **success, 28/28** on exact SHA `4861c85`. This verifies the GitHub-inspired account menu, SVG icon refinement, existing frontend flows, backend gates, Docker image checks, migrations and whitespace gate on hosted CI.
+- No Render/Neon state, source storage, cloud migration or deployment was changed; cloud release/recovery remains a separate open acceptance boundary.
+
+## T73-BTL AUTH REGISTRATION HARDENING — local evidence
+
+- Commit `5cc5225` hardens the existing registration/login contract without introducing a mail-provider or 2FA bypass: unknown login identifiers now take the Argon2id dummy-verification path, and new passwords require 8–128 characters containing at least one letter and one digit. The registration hint is associated with the password input while the existing confirmation behavior is preserved.
+- Focused backend auth/DTO tests passed **13/13**; registration Playwright passed **1/1**; backend/frontend lint and typecheck passed; `git diff --check` passed. An independent read-only security review confirmed the timing-safe path; its suggestion to require special characters is not a project requirement and was not adopted.
+- Email verification and TOTP 2FA remain explicitly unimplemented and are documented in `docs/operations/auth-security-slice-2026-10-27.md`; they require a real provider/credential-storage contract and additional migrations/tests. No secret, mail credential, raw verification token, 2FA secret, database, Git storage, Docker volume or cloud resource was changed.
+
+## T74-BTL GITHUB-STYLE REPOSITORY QUICK SETUP
+
+- Added a visible Quick setup card to the repository page so users can see the clone or first-push workflow without opening the Clone dialog. It shows HTTPS commands, the default branch, PAT guidance for private repositories, write-permission guidance, and a copy-all-commands action; the existing Clone dialog and API contract remain unchanged.
+- Changed only `frontend/src/app/[username]/[repo]/quick-setup.tsx`, the repository page/CSS, and focused repository tests. User-owned untracked `frontend/AGENTS.md` and `frontend/CLAUDE.md` were preserved and not staged.
+- Local verification: frontend lint and typecheck passed; repository/reset plus M3.1–M3.7 Playwright suite passed **14/14**; independent read-only review reported **No findings**; `git diff --check` passed. Hosted CI is required after pushing the candidate. This task does not close P2/P8 cloud acceptance.
+
+## T75-BTL FULL-STACK FIXTURE ALIGNMENT
+
+- Hosted run #192 on `3edb282` failed twice at the full-stack PR journey because its fixture password lacked the new required digit (`mvp-pr-journey-password`). The auth policy was intentionally not weakened; the fixture now uses `mvp-pr-journey-password-1`.
+- Local full-stack execution could not reach the test because this shell has no `DATABASE_URL`; frontend lint/typecheck and the repository Playwright suite remain green. The fixture-only patch is isolated to `frontend/test-fullstack/pull-requests.spec.ts`; no production API or cloud state changed.
+- Replacement hosted run #193 (`40453128999`) completed **success in 6m31s** on exact SHA `f58ef3d`, providing the required CI evidence for the fixture correction.
+
+## T76-BTL CLOUD READINESS RECHECK — read-only
+
+- Render readiness endpoint returned HTTP 200 with database, Git and storage checks up. The public repository list returned HTTP 200 with the synthetic public fixture, and anonymous `git ls-remote` against its HTTPS endpoint exited 0 with no refs.
+- This probe did not deploy, migrate, restart, mutate refs, inspect secrets or alter Neon/Render state. It is readiness/transport evidence only; admin/audit cloud, quota boundaries, backup/restore and source-loss recovery remain open for P2/P8.
+
+## T77-BTL MAINTENANCE E2E RECHECK — isolated Docker database
+
+- Created a task-owned PostgreSQL database `codeforge_maintenance_20261027_test` inside the existing demo container, ran `corepack pnpm --filter backend exec jest --config test/jest-e2e.json --runInBand test/maintenance-cleanup.e2e-spec.ts`, and observed **6/6 passed** in 6.282s. The suite covered orphan-temp cleanup, retention/idempotence, 120-second pending grace, immediate `NEEDS_RECONCILIATION`, cross-type fail-closed behavior, and unresolved merge/push retention.
+- The suite emitted expected warning logs while intentionally blocking purge behind unresolved journals; assertions passed. The temporary database was dropped in `finally`; the existing `code_forge` database, Docker container and volumes were not reset or removed. This is local isolated evidence only and does not close cloud P2/P8.
+
+## T78-BTL WORKSPACE GATE RECHECK — current branch
+
+- On the exact current worktree SHA, `corepack pnpm lint`, `corepack pnpm typecheck`, and `corepack pnpm build` all passed for backend and frontend. The build generated the existing Next.js routes successfully; no source files were changed by the gate run.
+- This is local verification for the current branch; hosted CI and cloud evidence remain separately recorded. User-owned untracked `frontend/AGENTS.md` and `frontend/CLAUDE.md` remain preserved.
+
+## T79-BTL NEON DASHBOARD PREFLIGHT — read-only
+
+- Browser Harness on the owner session inspected Neon project `Code Forge` (`green-mountain-81958216`), branch `production`, Singapore/Free. Backup & Restore showed a 6-hour history window, no snapshots and no schedule configured.
+- No Restore, Create snapshot, schedule, migration, billing change or data mutation was performed. This confirms the current provider UI state only; production backup/restore remains OPEN.
+
+## T80-BTL NEON CONNECTION PREFLIGHT — read-only
+
+- The Neon Connect modal for `production` showed database `neondb`, role `neondb_owner`, and a connection-pooling option. No password was revealed and no connection string was copied or logged.
+- This confirms only the visible target metadata and pooling UI; direct/pooled URLs remain provider secrets and production migration/backup acceptance is still OPEN.
+
+## T81-BTL BROWSER-HARNESS CLOUD RECHECK — read-only
+
+- Browser Harness reused the owner's logged-in Chrome session (`tranhoangviet200553@gmail.com`) without entering or exposing credentials. Render service `code-forge-api-thviet` is still Live on `VuLeCoder/Code-forge` branch `thviet`, current deployment `388c584`, Free plan, with the documented spin-down warning.
+- Direct probes at the current service returned `/api/v1/health/ready` HTTP 200 with database/Git/storage `up` and Git `2.39.5`; `/api/v1/health/live` returned HTTP 200; `/api/v1/repositories?page=1&limit=20` returned HTTP 200 with the synthetic public `btl-demo-873496/btl-demo` fixture and direct Render clone URL. Anonymous `git -c protocol.version=2 ls-remote --heads` exited 0 and returned no refs because the fixture is empty.
+- Neon Browser Harness still showed project `Code Forge` (`green-mountain-81958216`), production branch `br-steep-snow-aod67yel`, Singapore/Free, 6-hour history; the Connect modal displayed `neondb`/`neondb_owner` and pooling without revealing a password. No deploy, restart, migration, backup/restore, Git ref, database, storage, Docker volume or secret was changed.
+- This refresh strengthens readiness/transport evidence only. Cloud content/auth/quota, migration, backup/restore, restart/source-loss recovery, admin/audit and release-drain acceptance remain OPEN.
+
+## T82-BTL HOSTED DOCUMENTATION GATE — exact checkpoint
+
+- GitHub Actions `MVP verification` #203 ([run `40461037109`](https://github.com/VuLeCoder/Code-forge/actions/runs/40461037109)) completed **success** on exact SHA `823c4b12cb0fbdbab162c59d1347ffe2d4ba9af5` pushed to `thviet`.
+- The run completed backend unit/E2E, lint, typecheck, build, frontend Playwright, full-stack Playwright, Docker API image/runtime smoke, migration image/runtime smoke, disposable migration and `git diff --check`. This is hosted CI evidence for the documentation checkpoint; it does not close cloud migration, backup/restore, source-loss recovery or other P2/P8 gates.
+
+## T83-BTL HOSTED HANDOFF GATE — exact checkpoint
+
+- GitHub Actions `MVP verification` #204 ([run `40461688886`](https://github.com/VuLeCoder/Code-forge/actions/runs/40461688886)) completed **success** on exact SHA `5f8d413164927456a4e0c53841187c9f61c75a7a` pushed to `thviet`.
+- All workflow steps were green, including backend unit/E2E, lint, typecheck, build, frontend/full-stack Playwright, Docker API and migration image smoke, disposable migration and whitespace. This verifies the handoff/documentation checkpoint only; P2/P8 cloud recovery remains open.
+
+## T84-BTL MAINTENANCE GRACE RECHECK — current branch
+
+- On the current branch `codex/push-crash-proof` at `59d5d1b`, `corepack pnpm --filter backend exec jest --runInBand --runTestsByPath src/maintenance/maintenance-jobs.service.spec.ts` passed **18/18** in 4.297s.
+- The focused unit suite asserts that fresh `PENDING` merge journals are filtered by the 120-second grace cutoff while `NEEDS_RECONCILIATION` journals are selected without a `createdAt` delay. Expected warning logs were emitted by failure-path tests; no source, database, Git storage, Docker volume or cloud state changed.
+- This is local focused evidence only. It does not close the separate cloud P2/P8 migration, backup/restore, restart/source-loss or release gates.
+
+## T85-BTL HOSTED MAINTENANCE CHECKPOINT — exact checkpoint
+
+- GitHub Actions `MVP verification` #207 ([run `40462758067`](https://github.com/VuLeCoder/Code-forge/actions/runs/40462758067)) completed **success** on exact SHA `802be54ca30f215634ab527f9e40d5f6605ec497` pushed to `thviet`.
+- The single `verify` job completed in 4m38s (workflow duration 4m42s), including backend/frontend gates, Docker API/migration image smoke, disposable migration and whitespace checks. GitHub emitted only the existing Node.js 20 deprecation and Ubuntu 26 migration notices; no job failure occurred.
+- This is hosted CI evidence for the maintenance documentation checkpoint only. Cloud migration, backup/restore, restart/source-loss recovery and other P2/P8 gates remain open.
+
+## T86-BTL HOSTED HANDOFF CHECKPOINT — exact checkpoint
+
+- GitHub Actions `MVP verification` #208 ([run `40463293976`](https://github.com/VuLeCoder/Code-forge/actions/runs/40463293976)) completed **success** on exact SHA `76766de` pushed to `thviet`.
+- The `verify` job completed in 5m23s (workflow duration 5m25s); backend/frontend tests, lint, typecheck, build, Docker API/migration image smoke, migration-image execution and `git diff --check` all passed. Only the existing Node.js 20 deprecation and Ubuntu 26 migration notices remained.
+- This confirms the hosted documentation checkpoint. It does not close cloud production migration, backup/restore, restart/source-loss recovery or other P2/P8 gates.
+
+## T87-BTL VERCEL TYPECHECK FIX + HOSTED GATE — exact checkpoint
+
+- Vercel reported `TS7006` for `entry` in `frontend/test-fullstack/milestone-three.spec.ts` during a clean `pnpm run build`. The fix in `a7061c0` adds explicit structural types to the two audit assertions; it does not exclude tests, weaken strictness, or change runtime/API behavior.
+- Local verification on the current worktree: `corepack pnpm --filter frontend typecheck`, `corepack pnpm --filter frontend build`, targeted ESLint for `test-fullstack/milestone-three.spec.ts`, and `git diff --check` all passed.
+- GitHub Actions `MVP verification` #210 ([run `40464163263`](https://github.com/VuLeCoder/Code-forge/actions/runs/40464163263)) completed **success** on exact SHA `a7061c0` in 5m42s. Backend/frontend tests, lint, typecheck, build, Docker API/migration smoke, migration-image execution and whitespace passed.
+- This confirms the source/build fix and hosted CI only. Vercel deployment remains dependent on its project being connected to the intended `thviet` source; no Vercel project or secret was modified by Codex.

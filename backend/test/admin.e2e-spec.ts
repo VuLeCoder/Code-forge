@@ -1,14 +1,17 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { execFile, execFileSync, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerStorage } from '@nestjs/throttler';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
 import { Client } from 'pg';
+import { GitStorageService } from '../src/repositories/git-storage.service';
 // cookie-parser is CommonJS; use the compatible import form in the Jest runtime.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import cookieParser = require('cookie-parser');
@@ -71,7 +74,7 @@ describe('Admin HTTP + isolated PostgreSQL + Git', () => {
     const module = await Test.createTestingModule({ imports: [AppModule] })
       // Admin acceptance covers account-lock behavior, not rate limiting;
       // auth.e2e-spec exercises the real throttling behavior separately.
-      .overrideProvider(ThrottlerStorage).useValue({ increment: async (_key: string, ttl: number) => ({
+      .overrideProvider(ThrottlerStorage).useValue({ increment: (_key: string, ttl: number) => Promise.resolve({
         totalHits: 1, timeToExpire: ttl, isBlocked: false, timeToBlockExpire: 0,
       }) }).compile();
     app = module.createNestApplication();
@@ -148,6 +151,9 @@ describe('Admin HTTP + isolated PostgreSQL + Git', () => {
     expect(lockedSession.revokedAt).toBeInstanceOf(Date);
     expect((await call('GET', 'auth/me', lockedUser.cookie)).status).toBe(401);
     expect((await gitAdvertisement()).status).toBe(401);
+    expect((await fetch(`${base}/git/LockedMember/PatLockGate.git/info/refs?service=git-upload-pack`)).status).toBe(200);
+    expect(await db!.repository.findFirstOrThrow({ where: { name: 'PatLockGate' }, select: { status: true, visibility: true } }))
+      .toMatchObject({ status: 'ACTIVE', visibility: 'PUBLIC' });
     expect(await db!.auditLog.findFirst({ where: {
       actorId: admin.userId, targetId: lockedUser.userId, action: 'ADMIN_USER_LOCKED',
       details: { equals: { from: 'ACTIVE', to: 'LOCKED' } },
@@ -188,6 +194,29 @@ describe('Admin HTTP + isolated PostgreSQL + Git', () => {
       actorId: admin.userId, targetId: restorable.id, action: 'ADMIN_REPOSITORY_RESTORED',
       details: { equals: { from: 'DELETED', to: 'ACTIVE' } },
     } })).not.toBeNull();
+
+    const expiredRepositoryResponse = await call('POST', 'repositories', repositoryOwner.cookie, {
+      name: 'ExpiredRestore', visibility: 'PRIVATE', initializeReadme: true,
+    });
+    expect(expiredRepositoryResponse.status).toBe(201);
+    const expiredRepository = await db!.repository.findFirstOrThrow({
+      where: { ownerId: repositoryOwner.userId, normalizedName: 'expiredrestore' },
+    });
+    expect((await call('DELETE', 'repos/PrivateOwner/ExpiredRestore', repositoryOwner.cookie)).status).toBe(204);
+    await db!.repository.update({
+      where: { id: expiredRepository.id },
+      data: { purgeAfter: new Date(Date.now() - 1_000) },
+    });
+    const expiredTombstone = await db!.repository.findUniqueOrThrow({ where: { id: expiredRepository.id } });
+    const restoreExpiredResponse = await call('POST', `admin/repositories/${expiredRepository.id}/restore`, admin.cookie);
+    expect(restoreExpiredResponse.status).toBe(409);
+    expect(await restoreExpiredResponse.json()).toMatchObject({ error: { code: 'RESTORE_EXPIRED' } });
+    expect(await db!.repository.findUniqueOrThrow({ where: { id: expiredRepository.id } })).toMatchObject({
+      status: 'DELETED', deletedAt: expiredTombstone.deletedAt, purgeAfter: expiredTombstone.purgeAfter,
+    });
+    expect(await db!.auditLog.count({ where: {
+      actorId: admin.userId, targetId: expiredRepository.id, action: 'ADMIN_REPOSITORY_RESTORED',
+    } })).toBe(0);
 
     const createdRepository = await call('POST', 'repositories', repositoryOwner.cookie, {
       name: 'AdminBoundary', visibility: 'PRIVATE', initializeReadme: true,
@@ -242,6 +271,221 @@ describe('Admin HTTP + isolated PostgreSQL + Git', () => {
     expect(JSON.stringify(auditBody)).not.toContain(tokenSecret);
     expect(JSON.stringify(auditBody)).not.toContain('password-fixture');
     expect(JSON.stringify(auditBody)).not.toContain(privateSource);
+  }, 60_000);
+
+  it('repository status lock waits for an in-flight receive-pack before applying LOCKED', async () => {
+    const adminRegistration = await call('POST', 'auth/register', '', {
+      username: 'RepositoryStatusRaceAdmin', email: 'repository-status-race-admin@example.test', password,
+    });
+    expect(adminRegistration.status).toBe(201);
+    const adminCookie = cookie(adminRegistration);
+    const admin = await adminRegistration.json() as { user: { id: string } };
+    await db!.user.update({ where: { id: admin.user.id }, data: { systemRole: 'ADMIN' } });
+    const registerResponse = await call('POST', 'auth/register', '', {
+      username: 'RepositoryStatusRaceOwner', email: 'repository-status-race-owner@example.test', password,
+    });
+    expect(registerResponse.status).toBe(201);
+    const ownerCookie = cookie(registerResponse);
+    const owner = await registerResponse.json() as { user: { id: string } };
+    const repositoryResponse = await call('POST', 'repositories', ownerCookie, {
+      name: 'RepositoryStatusPushRace', initializeReadme: true,
+    });
+    expect(repositoryResponse.status).toBe(201);
+    const repositoryBody = await repositoryResponse.json() as { repository: { id: string } };
+    const stored = await db!.repository.findUniqueOrThrow({ where: { id: repositoryBody.repository.id } });
+    const bare = join(storageRoot, stored.storageKey);
+    const tokenResponse = await call('POST', 'tokens', ownerCookie, {
+      name: 'Repository status race', scopes: ['repo:read', 'repo:write'],
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    expect(tokenResponse.status).toBe(201);
+    const { secret, token } = await tokenResponse.json() as { secret: string; token: { id: string } };
+    const work = join(storageRoot, 'repository-status-push-race-clone');
+    const hookRoot = join(storageRoot, 'repository-status-push-race-hooks');
+    const hookStarted = join(storageRoot, 'repository-status-push-race-hook-started');
+    const hookRelease = join(storageRoot, 'repository-status-push-race-hook-release');
+    const askpass = join(storageRoot, process.platform === 'win32'
+      ? 'repository-status-push-race-askpass.cmd' : 'repository-status-push-race-askpass.sh');
+    const run = promisify(execFile);
+    await writeFile(askpass, process.platform === 'win32'
+      ? '@echo off\r\necho %TEST_GIT_PAT%\r\n'
+      : '#!/bin/sh\nprintf "%s\\n" "$TEST_GIT_PAT"\n', { mode: 0o700 });
+    const git = (args: string[]) => run('git', ['-c', 'credential.helper=', ...args], {
+      timeout: 20_000,
+      env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: askpass, TEST_GIT_PAT: secret },
+    });
+    const repoUrl = `${base.replace('http://', 'http://RepositoryStatusRaceOwner@')}/git/RepositoryStatusRaceOwner/RepositoryStatusPushRace.git`;
+    const hookBarrier = `#!/usr/bin/env node
+const fs = require('node:fs');
+const { spawnSync } = require('node:child_process');
+const refs = fs.readFileSync(0);
+fs.writeFileSync(process.env.CODE_FORGE_TEST_HOOK_STARTED, 'started');
+const deadline = Date.now() + 20_000;
+while (!fs.existsSync(process.env.CODE_FORGE_TEST_HOOK_RELEASE)) {
+  if (Date.now() >= deadline) process.exit(99);
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+}
+const result = spawnSync(process.execPath, [process.env.CODE_FORGE_TEST_REAL_HOOK], {
+  input: refs, stdio: ['pipe', 'inherit', 'inherit'], env: process.env,
+});
+process.exit(result.status ?? 1);
+`;
+    await mkdir(hookRoot, { recursive: true });
+    await writeFile(join(hookRoot, 'pre-receive'), hookBarrier, { mode: 0o755 });
+    const realHook = resolve(__dirname, '../src/repositories/pre-receive-hook.cjs');
+    const storage = app!.get(GitStorageService);
+    const openPack = jest.spyOn(storage, 'openPack').mockImplementation((key, defaultBranch, service, advertise,
+      protocol, actorIsOwner) => spawn('git', [
+      ...(process.platform === 'win32' ? ['-c', 'core.longpaths=true'] : []),
+      '-c', `http.receivepack=${service === 'git-receive-pack'}`,
+      '-c', 'http.getanyfile=false',
+      '-c', `http.uploadpack=${service !== 'git-receive-pack'}`,
+      '-c', 'http.maxRequestBuffer=1048576',
+      ...(service === 'git-receive-pack' ? ['-c', `core.hooksPath=${hookRoot}`, '-c', 'receive.denyNonFastForwards=true'] : []),
+      'http-backend',
+    ], {
+      detached: process.platform !== 'win32',
+      env: { PATH: process.env.PATH, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_PROJECT_ROOT: storageRoot, GIT_HTTP_EXPORT_ALL: '1',
+        PATH_INFO: `/${key}/${advertise ? 'info/refs' : service}`,
+        REQUEST_METHOD: advertise ? 'GET' : 'POST', QUERY_STRING: advertise ? `service=${service}` : '',
+        CONTENT_TYPE: advertise ? '' : `application/x-${service}-request`,
+        ...(service === 'git-receive-pack' ? {
+          CODE_FORGE_DEFAULT_BRANCH: defaultBranch,
+          CODE_FORGE_ALLOW_DEFAULT_BRANCH_INITIALIZATION: String(actorIsOwner),
+          CODE_FORGE_MAX_FILE_BYTES: String(Number(process.env.MAX_FILE_BYTES ?? 1024)),
+          CODE_FORGE_MAX_REPOSITORY_BYTES: String(Number(process.env.MAX_REPOSITORY_BYTES ?? 32 * 1024)),
+          CODE_FORGE_TEST_HOOK_STARTED: hookStarted,
+          CODE_FORGE_TEST_HOOK_RELEASE: hookRelease,
+          CODE_FORGE_TEST_REAL_HOOK: realHook,
+        } : {}),
+        ...(protocol ? { GIT_PROTOCOL: protocol } : {}),
+      }, stdio: ['pipe', 'pipe', 'pipe'],
+    }));
+
+    const waitFor = async (predicate: () => boolean | Promise<boolean>, description: string) => {
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        if (await predicate()) return;
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 20));
+      }
+      throw new Error(`Timed out waiting for ${description}.`);
+    };
+    const applicationName = `admin-e2e-${schema.slice(-12)}`;
+    let pushResult: Awaited<ReturnType<typeof git>> | undefined;
+    let pushError: unknown;
+    let statusResponse: Response | undefined;
+    let statusError: unknown;
+    let pushPromise: Promise<void> | undefined;
+    let statusPromise: Promise<void> | undefined;
+    try {
+      await git(['clone', repoUrl, work]);
+      await git(['-C', work, 'config', 'user.name', 'Repository Status Race Tester']);
+      await git(['-C', work, 'config', 'user.email', 'repository-status-race@example.test']);
+      await git(['-C', work, 'switch', '-c', 'feature/repository-status-before-lock']);
+      await writeFile(join(work, 'status-race.txt'), 'push completes before repository lock\n');
+      await git(['-C', work, 'add', 'status-race.txt']);
+      await git(['-C', work, 'commit', '-m', 'Push before repository status lock']);
+      const pushedSha = (await git(['-C', work, 'rev-parse', 'HEAD'])).stdout.trim();
+
+      pushPromise = git(['-C', work, 'push', '--set-upstream', 'origin', 'feature/repository-status-before-lock'])
+        .then((result) => { pushResult = result; }, (error) => { pushError = error; });
+      await waitFor(() => existsSync(hookStarted), 'receive-pack to enter pre-receive');
+
+      statusPromise = call('PATCH', `admin/repositories/${stored.id}/status`, adminCookie, { status: 'LOCKED' })
+        .then((response) => { statusResponse = response; }, (error) => { statusError = error; });
+      await waitFor(async () => {
+        const rows = await adminDb!.$queryRawUnsafe<{ waiting: number }[]>(`
+          WITH lock_key AS (SELECT hashtextextended($2, 0) AS value)
+          SELECT COUNT(DISTINCT activity.pid)::int AS waiting
+          FROM pg_stat_activity AS activity
+          JOIN pg_locks AS pg_lock ON pg_lock.pid = activity.pid
+          CROSS JOIN lock_key
+          WHERE activity.application_name = $1
+            AND activity.wait_event_type = 'Lock'
+            AND activity.wait_event = 'advisory'
+            AND pg_lock.locktype = 'advisory'
+            AND pg_lock.granted = false
+            AND pg_lock.classid = ((lock_key.value >> 32) & 4294967295)::oid
+            AND pg_lock.objid = (lock_key.value & 4294967295)::oid
+            AND pg_lock.objsubid = 1`, applicationName, stored.id);
+        return (rows[0]?.waiting ?? 0) >= 1;
+      }, 'admin repository status lock to queue behind receive-pack');
+      expect(statusResponse).toBeUndefined();
+
+      await writeFile(hookRelease, 'release');
+      await pushPromise;
+      expect(pushError).toBeUndefined();
+      expect(pushResult).toBeDefined();
+      expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/feature/repository-status-before-lock'], { encoding: 'utf8' }).trim())
+        .toBe(pushedSha);
+
+      await statusPromise;
+      expect(statusError).toBeUndefined();
+      expect(statusResponse).toBeDefined();
+      expect(statusResponse!.status).toBe(200);
+      expect(await statusResponse!.json()).toMatchObject({ changed: true, repository: { id: stored.id, status: 'LOCKED' } });
+      expect(await db!.repository.findUniqueOrThrow({ where: { id: stored.id }, select: { status: true } }))
+        .toMatchObject({ status: 'LOCKED' });
+
+      const operations = await db!.gitPushOperation.findMany({ where: { repositoryId: stored.id, actorId: owner.user.id } });
+      expect(operations).toHaveLength(1);
+      expect(operations[0]).toMatchObject({ status: 'COMPLETED', changedRefCount: 1, errorCode: null });
+      const pushAudits = await db!.auditLog.findMany({ where: { targetId: stored.id, action: 'GIT_PUSH_COMPLETED' } });
+      expect(pushAudits).toHaveLength(1);
+      expect(pushAudits[0]).toMatchObject({ actorId: owner.user.id, details: {
+        operationId: operations[0]!.operationId, repositoryId: stored.id, storageGeneration: stored.storageGeneration, changedRefCount: 1,
+      } });
+      const lockAudits = await db!.auditLog.findMany({ where: { targetId: stored.id, action: 'ADMIN_REPOSITORY_LOCKED' } });
+      expect(lockAudits).toHaveLength(1);
+      expect(lockAudits[0]).toMatchObject({ actorId: admin.user.id, details: { from: 'ACTIVE', to: 'LOCKED' } });
+
+      const refsAfterPush = execFileSync('git', ['--git-dir', bare, 'for-each-ref', '--format=%(refname)%09%(objectname)', 'refs/'], { encoding: 'utf8' });
+      const rejectedAdvertisement = await fetch(`${base}/git/RepositoryStatusRaceOwner/RepositoryStatusPushRace.git/info/refs?service=git-receive-pack`, {
+        headers: { Authorization: `Basic ${Buffer.from(`RepositoryStatusRaceOwner:${secret}`).toString('base64')}` },
+      });
+      expect(rejectedAdvertisement.status).toBe(404);
+      await writeFile(join(work, 'after-lock.txt'), 'must remain local\n');
+      await git(['-C', work, 'add', 'after-lock.txt']);
+      await git(['-C', work, 'commit', '-m', 'Attempt push after repository status lock']);
+      await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/feature/after-repository-lock'])).rejects.toBeDefined();
+      expect(execFileSync('git', ['--git-dir', bare, 'for-each-ref', '--format=%(refname)%09%(objectname)', 'refs/'], { encoding: 'utf8' }))
+        .toBe(refsAfterPush);
+      expect(await db!.gitPushOperation.count({ where: { repositoryId: stored.id, actorId: owner.user.id } })).toBe(1);
+      expect(await db!.auditLog.count({ where: { targetId: stored.id, action: 'GIT_PUSH_COMPLETED' } })).toBe(1);
+
+      const unlockResponse = await call('PATCH', `admin/repositories/${stored.id}/status`, adminCookie, { status: 'ACTIVE' });
+      expect(unlockResponse.status).toBe(200);
+      expect(await unlockResponse.json()).toMatchObject({ changed: true, repository: { id: stored.id, status: 'ACTIVE' } });
+      expect(await db!.repository.findUniqueOrThrow({ where: { id: stored.id }, select: { status: true } }))
+        .toMatchObject({ status: 'ACTIVE' });
+      const unlockAudits = await db!.auditLog.findMany({ where: { targetId: stored.id, action: 'ADMIN_REPOSITORY_UNLOCKED' } });
+      expect(unlockAudits).toHaveLength(1);
+      expect(unlockAudits[0]).toMatchObject({ actorId: admin.user.id, details: { from: 'LOCKED', to: 'ACTIVE' } });
+
+      const unlockedSha = (await git(['-C', work, 'rev-parse', 'HEAD'])).stdout.trim();
+      await git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/feature/after-repository-unlock']);
+      expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/feature/after-repository-unlock'], { encoding: 'utf8' }).trim())
+        .toBe(unlockedSha);
+      const operationsAfterUnlock = await db!.gitPushOperation.findMany({
+        where: { repositoryId: stored.id, actorId: owner.user.id }, orderBy: { createdAt: 'asc' },
+      });
+      expect(operationsAfterUnlock).toHaveLength(2);
+      const unlockOperation = operationsAfterUnlock.find(({ operationId }) => operationId !== operations[0]!.operationId);
+      expect(unlockOperation).toMatchObject({ status: 'COMPLETED', changedRefCount: 1, errorCode: null });
+      const pushAuditsAfterUnlock = await db!.auditLog.findMany({ where: { targetId: stored.id, action: 'GIT_PUSH_COMPLETED' } });
+      expect(pushAuditsAfterUnlock).toHaveLength(2);
+      expect(pushAuditsAfterUnlock.some((audit) => (audit.details as { operationId?: string }).operationId === unlockOperation?.operationId)).toBe(true);
+    } finally {
+      if (!existsSync(hookRelease)) await writeFile(hookRelease, 'release').catch(() => undefined);
+      if (pushPromise) await pushPromise.catch(() => undefined);
+      if (statusPromise) await statusPromise.catch(() => undefined);
+      openPack.mockRestore();
+      await db!.personalAccessToken.deleteMany({ where: { id: token.id, userId: owner.user.id } });
+      await db!.repository.deleteMany({ where: { id: stored.id } });
+      await db!.user.deleteMany({ where: { id: { in: [admin.user.id, owner.user.id] } } });
+    }
   }, 60_000);
 
   it('serializes concurrent attempts to lock the last two active administrators', async () => {
@@ -379,8 +623,8 @@ describe('Admin HTTP + isolated PostgreSQL + Git', () => {
       const body = await response.json() as { user: { id: string } };
       return { userId: body.user.id, cookie: cookie(response) };
     };
-    const admin = adminAccount;
-    if (!admin) throw new Error('Admin account fixture was not created by the preceding admin acceptance test.');
+    const admin = await register('AccountRaceAdmin');
+    await db!.user.update({ where: { id: admin.userId }, data: { systemRole: 'ADMIN' } });
 
     const waitForBlockedQuery = async (fragment: string) => {
       const deadline = Date.now() + 10_000;

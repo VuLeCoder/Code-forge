@@ -1,24 +1,27 @@
 # MVP implementation ledger
 
-## Current verified snapshot (2026-10-25; supersedes older status snapshots below)
+## Current verified snapshot (2026-10-27)
 
-- Branch `thviet` and `origin/thviet` match at `4407e7d2e49d0e43aeb48b1e49ee96e986745a03`. GitHub Actions run [#92 / `40198015346`](https://github.com/VuLeCoder/Code-forge/actions/runs/40198015346) succeeded for this exact SHA.
-- Render deployment of `4407e7d` failed at startup with Prisma `P1001`. The deployed sanitized probe reported DNS and TCP `ok`; Neon UI showed public internet enabled, `Any IP`, and IP allowlisting unavailable. This proves only name resolution and TCP reachability from that probe; it does not prove database authentication or SQL connectivity. No migration or cloud smoke is counted as passed.
-- A local, unpushed change now defaults Prisma `connect_timeout` to 15 seconds while preserving explicit overrides and adds an opt-in bounded PostgreSQL handshake probe after DNS/TCP. Full backend unit tests pass (20 suites / 166 tests), backend lint/typecheck/build pass, and the focused probe suite includes a stalled-server case. A read-only independent review found no actionable issue after checking the installed `pg@8.23.1` timeout semantics; it did not use a live database. The change is not pushed or deployed, so it is not a confirmed Render fix. No post-change cloud probe or health/SQL evidence exists yet.
-- AGY's 120-second static review timed out with no usable result. Codex's static security review reported no actionable finding; it did not run dynamic tests. Neither statement establishes cloud security or full acceptance.
-- P0–P8 are not complete. P2/P8 cloud release and recovery are open; P3/P4 have remaining acceptance cases; P7/handoff evidence still needs reconciliation. Issue #6 stays fail-closed pending the owner's authority/approval decision. Vercel is deferred and out of scope per the latest owner objective.
+For detailed evidence and residual acceptance cases, use [the acceptance board](operations/acceptance-task-board-2026-10-25.md), [next actions](next-actions.md), and [the cloud checklist](deployment/cloud-smoke-checklist.md). Historical snapshots below are not current status.
+
+- Latest hosted-verified code candidate is `f58ef3d`; MVP verification #193 (`40453128999`) passed in 6m31s. Documentation checkpoints #194 (`40453906441`) and #195 (`40454832579`) passed successfully; #195 verified exact HEAD/origin `thviet` SHA `b557d5a` in 5m33s. Render has not been redeployed or observed at the latest candidate.
+- BTL cloud evidence: Render readiness and direct public/private Git/PR smoke passed; the latest read-only probe also returned HTTP 200 for database/Git/storage readiness and an anonymous empty-repository `ls-remote` exited 0. Read-only dashboard preflight confirmed `code-forge-api-thviet` tracks `VuLeCoder/Code-forge`/`thviet`, Auto-Deploy is `After CI Checks Pass`, and Free has no persistent disk. Neon `Code Forge` is separate from `BUS Ticket`, with production/Singapore/Free and a 6-hour history window. Migration, backup/restore, admin/audit cloud, quota-boundary cloud tests, and source-loss recovery remain unverified. The historical `4407e7d` P1001 cause remains unknown; no deploy/restart should be inferred from CI.
+- Local P8 prerequisite: T38 rehearsed metadata `pg_dump`/`pg_restore` successfully between two disposable PostgreSQL 17 tmpfs containers after all 7 migrations, with synthetic user/repository/audit rows preserved. This is not Neon production backup/restore, encrypted backup, Git source backup or cloud recovery evidence.
+- Local P8 prerequisite: T40 rehearsed a failed Prisma migration, `migrate resolve --rolled-back`, and forward recovery on a disposable PostgreSQL 17 tmpfs database. Baseline migrations remained intact and the corrected probe table was created; cloud migration/recovery is still unverified.
+- P3/P4 remain partial. T37 (`34ba7b0`, hosted in feature CI #141) adds a POSIX-only push crash E2E after durable `GIT_CHILD_SUCCEEDED` and before journal finish; isolated Linux/PostgreSQL 17 evidence verifies replacement reconciliation, one audit and a subsequent push. Earlier T32 covers the pre-proof crash, while `86fe49e`, `5b232dc` and `56cfb3d` cover Nest recreation, idempotence and operation-ID collision. Broad recovery, advisory-lock-loss and issue #5 remain open.
+- Issue #6 operator resolution remains fail-closed pending the owner policy. Vercel is out of scope. P0–P8 completion is not claimed.
 
 | Package | Current state |
 | --- | --- |
-| P0 baseline/CI | Partial: exact-SHA hosted CI is green; local dirty docs and acceptance-ledger reconciliation remain. |
-| P1 auth/invitation/contracts | Implemented with prior unit/HTTP integration evidence; full P0–P8 acceptance remains open. |
-| P2 direct cloud Git | Open: Render startup fails with P1001; DNS/TCP success is not DB authentication/SQL evidence. |
-| P3 repository write coordination | Partial: locking and race protections exist; remaining failure-matrix and recovery acceptance are open. |
-| P4 PR/compare/merge | Partial: core flows and current private-read regression tests are covered; remaining matrix/cloud acceptance is open. |
+| P0 baseline/CI | Hosted #193 passed on exact code candidate `f58ef3d`; docs checkpoint #194 passed on exact HEAD/origin `aa18a82`. No cloud deploy is claimed. |
+| P1 auth/invitation/contracts | Implemented with unit/HTTP integration evidence; full P0–P8 acceptance remains open. |
+| P2 direct cloud Git | Partial: direct Git and owner/collaborator smoke passed on Render `388c584`; migration, backup/recovery, quota and release checks remain open. |
+| P3 repository write coordination | Partial: merge→delete, valid-pack lock-loss, pre-proof push crash and post-durable-child-success push crash tests have evidence; T37 is hosted in feature CI #141. Broader Git/PostgreSQL recovery remains open. |
+| P4 PR/compare/merge | Partial: core flows and merge→delete ordering covered; other matrix/cloud acceptance remains open. |
 | P5 PR/admin UI | Partial: browser checks exist; manual screen-reader/device verification is not established here. |
-| P6 admin/audit/jobs | Partial: core paths are covered; issue #6 resolution remains deliberately fail-closed. |
-| P7 regression | Partial: run #92 is green, but unresolved acceptance cases and cloud behavior are outside that CI run. |
-| P8 release/handoff | Open: no migration, cloud smoke, backup/restore, or release recovery rehearsal is claimed as passed. |
+| P6 admin/audit/jobs | Partial: core paths are covered; maintenance-job isolation is implemented in `70500d8`, admin list status errors use stable codes in `497fd5d`, and hosted #167 covers the current candidate; broader boundary coverage and issue #6 resolution remain open. |
+| P7 regression | Feature Actions #141, thviet #144 and runtime candidate #150 passed on exact SHAs. Cloud and manual screen-reader/device checks remain separate. |
+| P8 release/handoff | Partial/open: owner/collaborator Git/PR smoke passed; no cloud migration, backup/restore, write-freeze rehearsal, or source-loss recovery is claimed as passed. |
 
 The snapshots and package tables below are retained as historical execution records; where their SHA, run number, or state differs, this section is authoritative.
 

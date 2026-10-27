@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { SourceBrowser } from "./source-browser";
 import { CloneDialog } from "./clone-dialog";
+import { QuickSetup } from "./quick-setup";
 import { useAuth } from "@/components/auth-provider";
 import { sessionFetch } from "@/lib/auth";
 import { repositoryPath, type RepositorySummary } from "@/lib/repositories";
@@ -43,6 +44,7 @@ export default function RepositoryPage() {
     <div className={styles.breadcrumb}><Link href={`/${encodeURIComponent(repo.owner.username)}`}>{repo.owner.username}</Link><span>/</span><strong>{repo.name}</strong><span className="badge">{repo.visibility === "PRIVATE" ? "Riêng tư" : "Công khai"}</span></div>
     <div className={styles.header}><div><span className="eyebrow">Repository</span><h1>{repo.name}</h1>{repo.description && <p>{repo.description}</p>}</div><div className={styles.actions}><Link className="button buttonSecondary" href={`${repositoryPath(repo)}/pulls`}>Pull requests</Link>{repo.permissions?.canManage && <Link className="button buttonSecondary" href={`${repositoryPath(repo)}/settings`}>Cài đặt</Link>}</div></div>
     {repo.storageState === "RESET" && <div className={styles.notice} role="status">Mã nguồn của repository demo đã bị reset. Bare repository rỗng đã được tạo lại; lịch sử commit trước đó không thể khôi phục.</div>}
+    <QuickSetup repository={repo} />
     <CloneDialog key={`${repo.id}/${repo.name}/${repo.visibility}`} repository={repo} />
     <Suspense fallback={<p role="status">Đang tải branch…</p>}><SourceBrowser endpoint={`/api/v1/repos/${encodeURIComponent(params.username)}/${encodeURIComponent(params.repo)}`}>
     <section className={styles.empty} aria-labelledby="empty-title"><span className={styles.icon} aria-hidden="true">&lt;/&gt;</span><h2 id="empty-title">Repository chưa có mã nguồn</h2><p>Repository này hiện chưa có tệp nào.</p><div className={styles.details}><span>Nhánh mặc định</span><strong>{repo.defaultBranch}</strong></div></section>

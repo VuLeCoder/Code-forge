@@ -17,5 +17,6 @@ export class RegisterDto {
   @IsString()
   @MinLength(8)
   @MaxLength(128)
+  @Matches(/^(?=.*[A-Za-z])(?=.*\d)/, { message: 'Mật khẩu phải có ít nhất một chữ cái và một chữ số.' })
   password!: string;
 }

@@ -1,20 +1,21 @@
 # Code Forge completion checklist
 
-## Current open release gates (2026-10-25; supersedes older snapshots below)
+## Historical open release gates (2026-10-26; superseded)
 
-- Source baseline is `thviet` = `origin/thviet` = `4407e7d2e49d0e43aeb48b1e49ee96e986745a03`; hosted Actions [#92 / `40198015346`](https://github.com/VuLeCoder/Code-forge/actions/runs/40198015346) passed on the exact SHA.
-- [ ] Diagnose Render startup `P1001`. The deployed sanitized probe reported DNS/TCP `ok`; Neon UI showed public internet enabled, `Any IP`, IP allowlist unavailable. These facts do not prove DB authentication/SQL. Do not claim cloud migration or smoke passed.
-- [ ] Review the local candidate: default `connect_timeout=15` (explicit overrides preserved) plus an opt-in bounded PostgreSQL handshake probe. Full backend unit tests pass 20/20 suites / 166 tests, including a focused stalled-server test; backend lint/typecheck/build and `git diff --check` pass; read-only independent review found no actionable issue. Then push to `thviet`, deploy, and inspect safe probe/health/SQL evidence. Do not close Render issue unless the post-change evidence succeeds; no confirmed root cause yet.
-- [ ] Complete direct Render Git transport and release/recovery cloud smoke after connectivity is fixed; include restore from a local clone and document ephemeral source storage.
-- [ ] Close the remaining P3/P4 failure/recovery matrix and reconcile docs to exact release evidence.
-- [ ] Keep issue #6 fail-closed until owner authority/approval policy is decided. Vercel is deferred/out of scope per latest owner objective.
+For current acceptance and remaining tasks, see [the acceptance board](../operations/acceptance-task-board-2026-10-25.md) and [next actions](../next-actions.md). The checklist below predates the latest Render Git/PR smoke and is retained as history.
+
+- Current source tip: `thviet` = `origin/thviet` = `23cb1c7`. Code commit `b6411ad` passed full hosted CI #118 (`40262580445`); docs-only run #119 on `23cb1c7` was in progress at this snapshot.
+- [x] Deterministic P3/P4 merge→delete ordering E2E, backend typecheck/lint, full PR E2E file, and hosted code workflow #118.
+- [ ] Complete remaining P3/P4 failure/recovery acceptance cases and reconcile handoff evidence.
+- [ ] Complete P2/P8 cloud release: verify Git storage backup/restore before deploy/restart, then migration, direct Render Git transport, auth/PR/admin smoke, and recovery rehearsal. Current Render readiness 200 is not full smoke; historical P1001 root cause is unknown.
+- [ ] Keep ambiguous journal issue #6 fail-closed until owner authority/approval policy is decided. Vercel remains deferred/out of scope.
 - [ ] P0–P8 completion checkpoint: not achieved.
 
-AGY's 120-second static review timed out without usable output. Codex static security review had no actionable finding in the reviewed scope but did not run dynamic tests. Older checklist snapshots below are historical and may contain superseded run numbers or task states.
+Older checklist blocks below are retained as dated history; their SHAs, test totals, and provider state are not current.
 
 Original plan snapshot: 2026-10-25 14:02 Asia/Saigon. See [plan](plan.md) for estimates, owner roles, skills, risks, and acceptance criteria.
 
-## Current execution snapshot (2026-10-25)
+## Historical execution snapshot (2026-10-25)
 
 - `thviet` / `origin/thviet`: `25487b5`. Hosted run #77 (`40178590940`) passed all workflow gates on exact SHA `25487b5c99603e09254c2b5a6e30d358193dad01`.
 - Squash commit `e2b5a1a` is on `origin/main`; run `40180253512` failed at the narrow admin focus-return test (55 passed, 1 failed). Backend, lint, typecheck, and build jobs passed; main CI is not green.
@@ -36,7 +37,7 @@ Original plan snapshot: 2026-10-25 14:02 Asia/Saigon. See [plan](plan.md) for es
 - [ ] T6: Reconcile docs and hand off runbooks/evidence.
 - [ ] Final checkpoint: all P0–P8 acceptance evidence present; no cloud/source-durability claims beyond tests performed.
 
-## Current continuation tasks (verified 2026-10-25)
+## Historical continuation tasks (verified 2026-10-25)
 
 These bounded items refine existing T1–T6 tasks; they do not replace unchecked plan items.
 

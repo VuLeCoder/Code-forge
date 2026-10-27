@@ -123,15 +123,25 @@ describe('Repository HTTP + PostgreSQL', () => {
   }, 60_000);
 
   afterAll(async () => {
-    await app?.close();
-    await db?.$disconnect();
-    if (storageRoot) await rm(storageRoot, { recursive: true, force: true });
-    if (admin) {
+    const cleanupFailures: Array<{ step: string; error: unknown }> = [];
+    const attemptCleanup = async (step: string, cleanup: () => Promise<unknown> | unknown) => {
       try {
-        if (schemaCreated) await admin.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`);
-      } finally {
-        await admin.$disconnect();
+        await cleanup();
+      } catch (error) {
+        cleanupFailures.push({ step, error });
       }
+    };
+
+    await attemptCleanup('close Nest application', async () => { await app?.close(); });
+    await attemptCleanup('disconnect test Prisma client', async () => { await db?.$disconnect(); });
+    await attemptCleanup('remove temporary Git storage', async () => {
+      if (storageRoot) await rm(storageRoot, { recursive: true, force: true });
+    });
+    if (admin) {
+      await attemptCleanup('drop isolated test schema', async () => {
+        if (schemaCreated) await admin!.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`);
+      });
+      await attemptCleanup('disconnect admin Prisma client', async () => { await admin!.$disconnect(); });
     }
     for (const [key, value] of Object.entries({
       DATABASE_URL: originalUrl, MAX_REPOSITORIES_PER_USER: originalQuota,
@@ -142,8 +152,17 @@ describe('Repository HTTP + PostgreSQL', () => {
       MAX_FILE_BYTES: originalMaxFileBytes,
       MAX_PUSH_BYTES: originalMaxPushBytes,
     })) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
+      await attemptCleanup(`restore ${key}`, () => {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      });
+    }
+
+    if (cleanupFailures.length > 0) {
+      const errors = cleanupFailures.map(({ step, error }) => new Error(`Cleanup failed: ${step}`, { cause: error }));
+      throw new AggregateError(errors, `${cleanupFailures.length} repository E2E cleanup step(s) failed.`, {
+        cause: cleanupFailures[0]?.error,
+      });
     }
   });
 
@@ -242,8 +261,55 @@ describe('Repository HTTP + PostgreSQL', () => {
     expect((await call('GET', 'repos/owner/demo/image?path=logo.png', ownerCookie)).status).toBe(404);
     expect((await call('GET', 'repos/owner/demo/image?path=README.md', ownerCookie)).status).toBe(400);
     await rm(bare, { recursive: true });
-    const concurrentRecoveryResponses = await Promise.all(Array.from({ length: 5 }, () =>
-      call('GET', 'repos/owner/demo/commits', ownerCookie)));
+    const recoveryBarrier = new Client({ connectionString: originalUrl! });
+    let recoveryBarrierHeld = false;
+    let concurrentRecoveryPromise: Promise<Response[]> | undefined;
+    const unlockRecoveryBarrier = async () => {
+      if (!recoveryBarrierHeld) return;
+      const result = await recoveryBarrier.query<{ pg_advisory_unlock: boolean }>(
+        'SELECT pg_advisory_unlock(hashtextextended($1, 0))', [stored.id]);
+      if (!result.rows[0]?.pg_advisory_unlock) throw new Error('The concurrent-recovery barrier lock was not held.');
+      recoveryBarrierHeld = false;
+    };
+    let concurrentRecoveryResponses: Response[] = [];
+    await recoveryBarrier.connect();
+    try {
+      await recoveryBarrier.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [stored.id]);
+      recoveryBarrierHeld = true;
+      concurrentRecoveryPromise = Promise.all(Array.from({ length: 5 }, () =>
+        call('GET', 'repos/owner/demo/commits', ownerCookie)));
+      const deadline = Date.now() + 5_000;
+      let queuedReaders = 0;
+      do {
+        const waiters = await admin.$queryRawUnsafe<{ waiting: number }[]>(`
+          WITH lock_key AS (SELECT hashtextextended($2, 0) AS value)
+          SELECT COUNT(DISTINCT activity.pid)::int AS waiting
+          FROM pg_stat_activity AS activity
+          JOIN pg_locks AS pg_lock ON pg_lock.pid = activity.pid
+          CROSS JOIN lock_key
+          WHERE activity.application_name = $1
+            AND activity.wait_event_type = 'Lock'
+            AND activity.wait_event = 'advisory'
+            AND pg_lock.locktype = 'advisory'
+            AND pg_lock.granted = false
+            AND pg_lock.classid = ((lock_key.value >> 32) & 4294967295)::oid
+            AND pg_lock.objid = (lock_key.value & 4294967295)::oid
+            AND pg_lock.objsubid = 1`, lockApplicationName, stored.id);
+        queuedReaders = waiters[0]?.waiting ?? 0;
+        // RepositoryLockService caps its pool at four clients; the fifth HTTP
+        // request remains queued in that pool until one of these lock waiters proceeds.
+        if (queuedReaders === 4) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      } while (Date.now() < deadline);
+      expect(queuedReaders).toBe(4);
+      await unlockRecoveryBarrier();
+      concurrentRecoveryResponses = await concurrentRecoveryPromise;
+    } finally {
+      try { await unlockRecoveryBarrier(); }
+      catch { /* Closing the dedicated barrier session also releases its lock. */ }
+      try { await recoveryBarrier.end(); }
+      finally { if (concurrentRecoveryPromise) await concurrentRecoveryPromise.catch(() => undefined); }
+    }
     expect(concurrentRecoveryResponses.map((response) => response.status)).toEqual([200, 200, 200, 200, 200]);
     const concurrentRecoveryResults = await Promise.all(concurrentRecoveryResponses.map(async (response) =>
       await response.json() as { commits: unknown[]; storageState: string; storageGeneration: number }));
@@ -1065,6 +1131,156 @@ process.exit(result.status ?? 1);
     }
   }, 60_000);
 
+  it('allows an authorized WRITE collaborator receive-pack to finish after account lock', async () => {
+    const other = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'other' } });
+    const created = await call('POST', 'repositories', ownerCookie, { name: 'CollaboratorPushUserLockRace', initializeReadme: true });
+    expect(created.status).toBe(201);
+    const { repository } = await created.json() as { repository: { id: string } };
+    const stored = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
+    const bare = join(storageRoot, stored.storageKey);
+    const inviteResponse = await call('POST', 'repos/owner/collaboratorpushuserlockrace/invitations', ownerCookie,
+      { username: 'Other', role: 'WRITE' });
+    expect(inviteResponse.status).toBe(201);
+    const { invitation } = await inviteResponse.json() as { invitation: { id: string } };
+    expect((await call('POST', `invitations/${invitation.id}/accept`, otherCookie)).status).toBe(201);
+    const tokenResponse = await call('POST', 'tokens', otherCookie, {
+      name: 'Collaborator push user-lock race', scopes: ['repo:read', 'repo:write'],
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    expect(tokenResponse.status).toBe(201);
+    const { secret, token } = await tokenResponse.json() as { secret: string; token: { id: string } };
+    const work = join(storageRoot, 'collaborator-push-user-lock-race-clone');
+    const hookRoot = join(storageRoot, 'collaborator-push-user-lock-race-hooks');
+    const hookStarted = join(storageRoot, 'collaborator-push-user-lock-race-hook-started');
+    const hookRelease = join(storageRoot, 'collaborator-push-user-lock-race-hook-release');
+    const askpass = join(storageRoot, process.platform === 'win32'
+      ? 'collaborator-push-user-lock-askpass.cmd' : 'collaborator-push-user-lock-askpass.sh');
+    const run = promisify(execFile);
+    await writeFile(askpass, process.platform === 'win32'
+      ? '@echo off\r\necho %TEST_GIT_PAT%\r\n'
+      : '#!/bin/sh\nprintf "%s\\n" "$TEST_GIT_PAT"\n', { mode: 0o700 });
+    const git = (args: string[]) => run('git', ['-c', 'credential.helper=', ...args], {
+      timeout: 20_000,
+      env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: join(storageRoot, 'empty-user-lock-git-config'),
+        GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: askpass, TEST_GIT_PAT: secret },
+    });
+    const repoUrl = `${base.replace('http://', 'http://Other@')}/git/Owner/CollaboratorPushUserLockRace.git`;
+    await git(['clone', repoUrl, work]);
+    await git(['-C', work, 'config', 'user.name', 'Collaborator Push User Lock Tester']);
+    await git(['-C', work, 'config', 'user.email', 'collaborator-push-user-lock@example.test']);
+    await git(['-C', work, 'switch', '-c', 'feature/collaborator-push-before-user-lock']);
+    await writeFile(join(work, 'race.txt'), 'authorized collaborator push completes after actor lock\n');
+    await git(['-C', work, 'add', 'race.txt']);
+    await git(['-C', work, 'commit', '-m', 'Collaborator push before account lock']);
+    const pushedSha = (await git(['-C', work, 'rev-parse', 'HEAD'])).stdout.trim();
+
+    await mkdir(hookRoot, { recursive: true });
+    const realHook = resolve(__dirname, '../src/repositories/pre-receive-hook.cjs');
+    const barrierHook = `#!/usr/bin/env node
+const fs = require('node:fs');
+const { spawnSync } = require('node:child_process');
+const refs = fs.readFileSync(0);
+fs.writeFileSync(process.env.CODE_FORGE_TEST_HOOK_STARTED, 'started');
+const deadline = Date.now() + 20_000;
+while (!fs.existsSync(process.env.CODE_FORGE_TEST_HOOK_RELEASE)) {
+  if (Date.now() >= deadline) process.exit(99);
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+}
+const result = spawnSync(process.execPath, [process.env.CODE_FORGE_TEST_REAL_HOOK], {
+  input: refs, stdio: ['pipe', 'inherit', 'inherit'], env: process.env,
+});
+process.exit(result.status ?? 1);
+`;
+    await writeFile(join(hookRoot, 'pre-receive'), barrierHook, { mode: 0o755 });
+    const storage = app.get(GitStorageService);
+    const openPack = jest.spyOn(storage, 'openPack').mockImplementation((key, defaultBranch, service, advertise,
+      protocol, actorIsOwner) => spawn('git', [
+      ...(process.platform === 'win32' ? ['-c', 'core.longpaths=true'] : []),
+      '-c', `http.receivepack=${service === 'git-receive-pack'}`,
+      '-c', 'http.getanyfile=false',
+      '-c', `http.uploadpack=${service !== 'git-receive-pack'}`,
+      '-c', 'http.maxRequestBuffer=1048576',
+      ...(service === 'git-receive-pack' ? ['-c', `core.hooksPath=${hookRoot}`, '-c', 'receive.denyNonFastForwards=true'] : []),
+      'http-backend',
+    ], {
+      detached: process.platform !== 'win32',
+      env: { PATH: process.env.PATH, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null',
+        GIT_PROJECT_ROOT: storageRoot, GIT_HTTP_EXPORT_ALL: '1',
+        PATH_INFO: `/${key}/${advertise ? 'info/refs' : service}`,
+        REQUEST_METHOD: advertise ? 'GET' : 'POST', QUERY_STRING: advertise ? `service=${service}` : '',
+        CONTENT_TYPE: advertise ? '' : `application/x-${service}-request`,
+        ...(service === 'git-receive-pack' ? {
+          CODE_FORGE_DEFAULT_BRANCH: defaultBranch,
+          CODE_FORGE_ALLOW_DEFAULT_BRANCH_INITIALIZATION: String(actorIsOwner),
+          CODE_FORGE_MAX_FILE_BYTES: String(Number(process.env.MAX_FILE_BYTES ?? 1024)),
+          CODE_FORGE_MAX_REPOSITORY_BYTES: String(Number(process.env.MAX_REPOSITORY_BYTES ?? 32 * 1024)),
+          CODE_FORGE_TEST_HOOK_STARTED: hookStarted,
+          CODE_FORGE_TEST_HOOK_RELEASE: hookRelease,
+          CODE_FORGE_TEST_REAL_HOOK: realHook,
+        } : {}),
+        ...(protocol ? { GIT_PROTOCOL: protocol } : {}),
+      }, stdio: ['pipe', 'pipe', 'pipe'],
+    }));
+
+    const waitFor = async (predicate: () => boolean | Promise<boolean>, description: string) => {
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline) {
+        if (await predicate()) return;
+        await new Promise((resolveDelay) => setTimeout(resolveDelay, 20));
+      }
+      throw new Error(`Timed out waiting for ${description}.`);
+    };
+    let pushResult: Awaited<ReturnType<typeof git>> | undefined;
+    let pushError: unknown;
+    let pushPromise: Promise<void> | undefined;
+    try {
+      pushPromise = git(['-C', work, 'push', '--set-upstream', 'origin', 'feature/collaborator-push-before-user-lock'])
+        .then((result) => { pushResult = result; }, (error) => { pushError = error; });
+      await waitFor(() => existsSync(hookStarted), 'authorized collaborator receive-pack to enter pre-receive');
+
+      await db.user.update({ where: { id: other.id }, data: { status: 'LOCKED', lockedAt: new Date() } });
+      expect(await db.user.findUniqueOrThrow({ where: { id: other.id }, select: { status: true } })).toMatchObject({ status: 'LOCKED' });
+
+      await writeFile(hookRelease, 'release');
+      await pushPromise;
+      expect(pushError).toBeUndefined();
+      expect(pushResult).toBeDefined();
+      expect(execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/feature/collaborator-push-before-user-lock'], { encoding: 'utf8' }).trim())
+        .toBe(pushedSha);
+
+      const operations = await db.gitPushOperation.findMany({ where: { repositoryId: stored.id, actorId: other.id } });
+      expect(operations).toHaveLength(1);
+      expect(operations[0]).toMatchObject({ status: 'COMPLETED', changedRefCount: 1, errorCode: null });
+      const pushAudits = await db.auditLog.findMany({ where: { targetId: stored.id, action: 'GIT_PUSH_COMPLETED' } });
+      expect(pushAudits).toHaveLength(1);
+      expect(pushAudits[0]).toMatchObject({ actorId: other.id, details: {
+        operationId: operations[0]!.operationId, repositoryId: stored.id, storageGeneration: stored.storageGeneration, changedRefCount: 1,
+      } });
+      expect(JSON.stringify(pushAudits[0]?.details).includes(secret)).toBe(false);
+
+      const refsAfterFirstPush = execFileSync('git', ['--git-dir', bare, 'for-each-ref', '--format=%(refname)%09%(objectname)', 'refs/'], { encoding: 'utf8' });
+      const rejectedAdvertisement = await fetch(`${base}/git/Owner/CollaboratorPushUserLockRace.git/info/refs?service=git-receive-pack`, {
+        headers: { Authorization: `Basic ${Buffer.from(`Other:${secret}`).toString('base64')}` },
+      });
+      expect(rejectedAdvertisement.status).toBe(401);
+      await writeFile(join(work, 'after-lock.txt'), 'must remain local\n');
+      await git(['-C', work, 'add', 'after-lock.txt']);
+      await git(['-C', work, 'commit', '-m', 'Attempt collaborator push after account lock']);
+      await expect(git(['-C', work, 'push', 'origin', 'HEAD:refs/heads/feature/after-collaborator-lock'])).rejects.toBeDefined();
+      expect(execFileSync('git', ['--git-dir', bare, 'for-each-ref', '--format=%(refname)%09%(objectname)', 'refs/'], { encoding: 'utf8' }))
+        .toBe(refsAfterFirstPush);
+      expect(await db.gitPushOperation.count({ where: { repositoryId: stored.id, actorId: other.id } })).toBe(1);
+      expect(await db.auditLog.count({ where: { targetId: stored.id, action: 'GIT_PUSH_COMPLETED' } })).toBe(1);
+    } finally {
+      if (!existsSync(hookRelease)) await writeFile(hookRelease, 'release').catch(() => undefined);
+      if (pushPromise) await pushPromise.catch(() => undefined);
+      openPack.mockRestore();
+      await db.personalAccessToken.deleteMany({ where: { id: token.id, userId: other.id } });
+      await db.user.update({ where: { id: other.id }, data: { status: 'ACTIVE', lockedAt: null } });
+      await db.repository.deleteMany({ where: { id: stored.id } });
+    }
+  }, 60_000);
+
   it('rejects a queued receive-pack when the actor is locked before repository lock acquisition', async () => {
     const created = await call('POST', 'repositories', ownerCookie, { name: 'QueuedPushUserLock', initializeReadme: true });
     expect(created.status).toBe(201);
@@ -1684,6 +1900,76 @@ process.exit(result.status ?? 1);
     expect(() => execFileSync('git', ['--git-dir', bare, 'rev-parse', '--is-bare-repository'], { stdio: 'pipe' })).toThrow();
     expect((await create('RENAMED')).status).toBe(201);
   });
+
+  it('queues restore behind purge and never restores metadata after source removal', async () => {
+    const created = await create('PurgeRace');
+    expect(created.status).toBe(201);
+    const repo = await db.repository.findFirstOrThrow({ where: { ownerId, normalizedName: 'purgerace' } });
+    const bare = join(storageRoot, repo.storageKey);
+    expect(existsSync(bare)).toBe(true);
+
+    expect((await call('DELETE', 'repos/owner/purgerace', ownerCookie)).status).toBe(204);
+    await db.repository.update({ where: { id: repo.id }, data: { purgeAfter: new Date(Date.now() - 1000) } });
+
+    const storage = app.get(GitStorageService);
+    const removeStorage = storage.remove.bind(storage);
+    let signalRemovalStarted!: () => void;
+    let releaseRemoval!: () => void;
+    const removalStarted = new Promise<void>((resolve) => { signalRemovalStarted = resolve; });
+    const removalBarrier = new Promise<void>((resolve) => { releaseRemoval = resolve; });
+    const removeSpy = jest.spyOn(storage, 'remove').mockImplementation(async (storageKey) => {
+      signalRemovalStarted();
+      await removalBarrier;
+      await removeStorage(storageKey);
+    });
+    const purgeService = app.get(RepositoryPurgeService);
+    const purge = purgeService.purgeDue();
+    let restore: Promise<Response> | undefined;
+
+    try {
+      await removalStarted;
+      restore = call('POST', 'repos/owner/purgerace/restore', ownerCookie);
+      const deadline = Date.now() + 5_000;
+      let queuedRestores = 0;
+      do {
+        const waiters = await admin.$queryRawUnsafe<{ waiting: number }[]>(`
+          WITH lock_key AS (SELECT hashtextextended($2, 0) AS value)
+          SELECT COUNT(DISTINCT activity.pid)::int AS waiting
+          FROM pg_stat_activity AS activity
+          JOIN pg_locks AS pg_lock ON pg_lock.pid = activity.pid
+          CROSS JOIN lock_key
+          WHERE activity.application_name = $1
+            AND activity.wait_event_type = 'Lock'
+            AND activity.wait_event = 'advisory'
+            AND pg_lock.locktype = 'advisory'
+            AND pg_lock.granted = false
+            AND pg_lock.classid = ((lock_key.value >> 32) & 4294967295)::oid
+            AND pg_lock.objid = (lock_key.value & 4294967295)::oid
+            AND pg_lock.objsubid = 1`, lockApplicationName, repo.id);
+        queuedRestores = waiters[0]?.waiting ?? 0;
+        if (queuedRestores === 1) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      } while (Date.now() < deadline);
+      expect(queuedRestores).toBe(1);
+
+      releaseRemoval();
+      expect(await purge).toBe(1);
+      expect((await restore).status).toBe(404);
+      expect(await db.repository.findUnique({ where: { id: repo.id } })).toBeNull();
+      expect(existsSync(bare)).toBe(false);
+      expect(await db.auditLog.count({ where: { targetId: repo.id, action: 'REPOSITORY_RESTORED' } })).toBe(0);
+    } finally {
+      releaseRemoval();
+      removeSpy.mockRestore();
+      await purge.catch(() => undefined);
+      await restore?.catch(() => undefined);
+      const remaining = await db.repository.findUnique({ where: { id: repo.id } });
+      if (remaining) {
+        await removeStorage(remaining.storageKey);
+        await db.repository.delete({ where: { id: repo.id } });
+      }
+    }
+  }, 30_000);
 
   it('serializes concurrent creates and counts soft-deleted repositories toward quota', async () => {
     const results = await Promise.all([create('LastOne'), create('LastTwo')]);

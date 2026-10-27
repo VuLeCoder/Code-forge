@@ -199,8 +199,8 @@ test('M4 real private PAT UI, READ/WRITE/OWNER, push, revocation, audit and sani
     await expect(page.getByRole('status')).toHaveText('Đã thu hồi token.');
     await expect(git(['-C', work, 'fetch', 'origin'], credentials('M38Owner', secret))).rejects.toThrow();
     const audit = await db.auditLog.findMany({ where: { targetId: token.id }, orderBy: { createdAt: 'asc' } });
-    expect(audit.map((entry) => entry.action)).toEqual(['TOKEN_CREATED', 'TOKEN_REVOKED']);
-    expect(audit.every((entry) => entry.actorId === repo.ownerId)).toBe(true);
+    expect(audit.map((entry: { action: string }) => entry.action)).toEqual(['TOKEN_CREATED', 'TOKEN_REVOKED']);
+    expect(audit.every((entry: { actorId: string | null }) => entry.actorId === repo.ownerId)).toBe(true);
     expect(JSON.stringify(audit).includes(secret)).toBe(false);
     const logs = await readFile(state.logPath, 'utf8');
     for (const sensitive of [secret, otherSecret, password, '# Private', stored.tokenHash]) expect(logs.includes(sensitive)).toBe(false);

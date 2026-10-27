@@ -6,10 +6,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
+import { PrismaService } from '../src/database/prisma.service';
 import { MaintenanceJobsService } from '../src/maintenance/maintenance-jobs.service';
+import { GitStorageService } from '../src/repositories/git-storage.service';
+import { GitPushJournalService } from '../src/repositories/git-push-journal.service';
+import { RepositoryLockService } from '../src/repositories/repository-lock.service';
 // cookie-parser is CommonJS; its default import is undefined at runtime in this test runner.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 import cookieParser = require('cookie-parser');
@@ -280,6 +284,7 @@ describe('Git push audit HTTP + PostgreSQL + Git', () => {
     const triggerName = `fail_push_audit_${schema.slice(-12)}`;
     const functionName = `${triggerName}_fn`;
     let interruptedOperationId: string | undefined;
+    let interruptedSha: string | undefined;
     try {
       await admin.$executeRawUnsafe(`CREATE FUNCTION "${schema}"."${functionName}"() RETURNS trigger LANGUAGE plpgsql AS $$
         BEGIN
@@ -294,7 +299,7 @@ describe('Git push audit HTTP + PostgreSQL + Git', () => {
       await writeFile(join(work, 'reconcile-audit.txt'), 'ref update survives audit transaction failure\n');
       await git(ownerToken.secret, ['-C', work, 'add', 'reconcile-audit.txt']);
       await git(ownerToken.secret, ['-C', work, 'commit', '-m', 'Exercise push journal reconciliation']);
-      const interruptedSha = (await git(ownerToken.secret, ['-C', work, 'rev-parse', 'HEAD'])).stdout.trim();
+      interruptedSha = (await git(ownerToken.secret, ['-C', work, 'rev-parse', 'HEAD'])).stdout.trim();
       await expect(git(ownerToken.secret, ['-C', work, 'push', '--set-upstream', 'origin', 'feature/reconcile-audit-failure'])).rejects.toBeDefined();
 
       expect((await git(ownerToken.secret, ['--git-dir', bare, 'rev-parse', 'refs/heads/feature/reconcile-audit-failure'])).stdout.trim())
@@ -327,10 +332,44 @@ describe('Git push audit HTTP + PostgreSQL + Git', () => {
       await admin.$executeRawUnsafe(`DROP FUNCTION IF EXISTS "${schema}"."${functionName}"()`);
     }
 
-    if (!interruptedOperationId) throw new Error('Push operation was not journaled for reconciliation.');
+    if (!interruptedOperationId || !interruptedSha) throw new Error('Push operation was not journaled for reconciliation.');
     await db.$executeRaw`UPDATE git_push_operations SET created_at = NOW() - INTERVAL '121 seconds'
       WHERE operation_id = ${interruptedOperationId}::uuid AND repository_id = ${repository.id}::uuid`;
     const maintenance = app.get(MaintenanceJobsService);
+    await maintenance.onModuleDestroy();
+    const primaryLocks = app.get(RepositoryLockService);
+    const secondaryLocks = new RepositoryLockService(app.get(ConfigService));
+    const concurrentJournals = [
+      app.get(GitPushJournalService),
+      new GitPushJournalService(app.get(PrismaService), app.get(GitStorageService), secondaryLocks),
+    ];
+    const blockedReconcilers = await primaryLocks.acquire(repository.id);
+    const reconciliationRuns = concurrentJournals.map((journal) => journal.reconcilePending());
+    let bothReconcilersQueued = false;
+    try {
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const waiters = await db.$queryRaw<{ count: bigint }[]>`SELECT COUNT(*)::bigint AS count FROM pg_stat_activity
+          WHERE wait_event_type = 'Lock' AND wait_event = 'advisory' AND query LIKE '%pg_advisory_lock%'`;
+        if (waiters[0]!.count >= 2n) {
+          bothReconcilersQueued = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    } finally {
+      await blockedReconcilers.release();
+    }
+    try {
+      await Promise.all(reconciliationRuns);
+      expect(bothReconcilersQueued).toBe(true);
+      for (const locks of [primaryLocks, secondaryLocks]) {
+        const reacquired = await locks.acquire(repository.id);
+        await reacquired.release();
+      }
+    } finally {
+      await secondaryLocks.onModuleDestroy();
+    }
+
     let completedAfterReconcile: { status: string; changed_ref_count: number | null }[] = [];
     for (let attempt = 0; attempt < 20; attempt += 1) {
       await maintenance.runOnce();
@@ -340,11 +379,99 @@ describe('Git push audit HTTP + PostgreSQL + Git', () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     expect(completedAfterReconcile).toMatchObject([{ status: 'COMPLETED', changed_ref_count: 1 }]);
+    expect((await git(ownerToken.secret, ['--git-dir', bare, 'rev-parse', 'refs/heads/feature/reconcile-audit-failure'])).stdout.trim())
+      .toBe(interruptedSha);
     const recoveredAudits = await db.$queryRaw<{ actor_id: string; details: Record<string, unknown> }[]>`SELECT actor_id, details FROM audit_logs
       WHERE action = 'GIT_PUSH_COMPLETED' AND details->>'repositoryId' = ${repository.id}
         AND details->>'operationId' = ${interruptedOperationId}`;
     expect(recoveredAudits).toHaveLength(1);
     expect(recoveredAudits[0]).toMatchObject({ actor_id: owner.id, details: { operationId: interruptedOperationId,
       repositoryId: repository.id, storageGeneration: storedRepo.storageGeneration, changedRefCount: 1 } });
+    await maintenance.runOnce();
+    expect(await db.gitPushOperation.findUniqueOrThrow({ where: { operationId: interruptedOperationId } }))
+      .toMatchObject({ status: 'COMPLETED', changedRefCount: 1 });
+    const repeatedRecoveryAudits = await db.$queryRaw<{ count: bigint }[]>`SELECT COUNT(*) AS count FROM audit_logs
+      WHERE action = 'GIT_PUSH_COMPLETED' AND details->>'operationId' = ${interruptedOperationId}`;
+    expect(repeatedRecoveryAudits).toEqual([{ count: 1n }]);
+
+    const pushJournal = app.get(GitPushJournalService);
+    await git(ownerToken.secret, ['-C', work, 'switch', '-c', 'feature/unknown-child-outcome']);
+    await writeFile(join(work, 'unknown-outcome.txt'), 'ref update without durable child-success proof\n');
+    await git(ownerToken.secret, ['-C', work, 'add', 'unknown-outcome.txt']);
+    await git(ownerToken.secret, ['-C', work, 'commit', '-m', 'Exercise unknown child outcome']);
+    const unknownOutcomeSha = (await git(ownerToken.secret, ['-C', work, 'rev-parse', 'HEAD'])).stdout.trim();
+    const refsBeforeUnknownPushOutput = (await git(ownerToken.secret,
+      ['--git-dir', bare, 'for-each-ref', '--format=%(refname) %(objectname)', 'refs/'])).stdout.trim();
+    const refsBeforeUnknownPush = Object.fromEntries(refsBeforeUnknownPushOutput.split('\n').map((line) => {
+      const [name, sha] = line.split(' ');
+      return [name!, sha!];
+    }));
+    const childSuccessSpy = jest.spyOn(pushJournal, 'recordChildSuccess').mockResolvedValue(false);
+    try {
+      await expect(git(ownerToken.secret, ['-C', work, 'push', '--set-upstream', 'origin', 'feature/unknown-child-outcome']))
+        .rejects.toBeDefined();
+    } finally {
+      childSuccessSpy.mockRestore();
+    }
+
+    expect((await git(ownerToken.secret, ['--git-dir', bare, 'rev-parse', 'refs/heads/feature/unknown-child-outcome']))
+      .stdout.trim()).toBe(unknownOutcomeSha);
+    const unknownOperations = await db.$queryRaw<{
+      operation_id: string; status: string; error_code: string | null; before_refs: Record<string, string> | null;
+      changed_ref_count: number | null;
+    }[]>`SELECT operation_id, status, error_code, before_refs, changed_ref_count FROM git_push_operations
+      WHERE repository_id = ${repository.id}::uuid AND status IN ('PENDING', 'NEEDS_RECONCILIATION')
+      ORDER BY created_at DESC LIMIT 1`;
+    expect(unknownOperations).toHaveLength(1);
+    const unknownOperationId = unknownOperations[0]!.operation_id;
+    expect(unknownOperations[0]).toMatchObject({ status: 'PENDING', error_code: 'GIT_CHILD_OUTCOME_UNKNOWN',
+      changed_ref_count: null });
+    expect(unknownOperations[0]!.before_refs).toEqual(refsBeforeUnknownPush);
+    await db.$executeRaw`UPDATE git_push_operations SET created_at = NOW() - INTERVAL '121 seconds'
+      WHERE operation_id = ${unknownOperationId}::uuid AND repository_id = ${repository.id}::uuid`;
+
+    await app.close();
+    const { AppModule } = await import('../src/app.module');
+    const restartedModule = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    app = restartedModule.createNestApplication();
+    app.use(cookieParser());
+    app.setGlobalPrefix('api/v1');
+    app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+    await app.listen(0, '127.0.0.1');
+    base = `${await app.getUrl()}/api/v1`;
+    const restartedMaintenance = app.get(MaintenanceJobsService);
+    await restartedMaintenance.runOnce();
+
+    const afterRestart = await db.gitPushOperation.findUniqueOrThrow({ where: { operationId: unknownOperationId } });
+    expect(afterRestart).toMatchObject({ status: 'PENDING', errorCode: 'GIT_CHILD_OUTCOME_UNKNOWN', changedRefCount: null });
+    const auditsForUnknownOperation = await db.$queryRaw<{ count: bigint }[]>`SELECT COUNT(*) AS count FROM audit_logs
+      WHERE action = 'GIT_PUSH_COMPLETED' AND details->>'repositoryId' = ${repository.id}
+        AND details->>'operationId' = ${unknownOperationId}`;
+    expect(auditsForUnknownOperation).toEqual([{ count: 0n }]);
+
+    const receivePackAdvertisement = await fetch(
+      `${base}/git/PushAuditOwner/PushAuditDemo.git/info/refs?service=git-receive-pack`,
+      { headers: { Authorization: `Basic ${Buffer.from(`PushAuditOwner:${ownerToken.secret}`).toString('base64')}` } },
+    );
+    expect(receivePackAdvertisement.status).toBe(503);
+    expect(await receivePackAdvertisement.text()).toBe('Git request unavailable.\n');
+
+    const blockedDelete = await call('DELETE', 'repos/PushAuditOwner/PushAuditDemo');
+    expect(blockedDelete.status).toBe(409);
+    expect((await responseJson<{ error: { code: string } }>(blockedDelete)).error.code)
+      .toBe('GIT_PUSH_RECONCILIATION_REQUIRED');
+    expect(await db.repository.findUniqueOrThrow({ where: { id: repository.id } }))
+      .toMatchObject({ status: 'ACTIVE', storageGeneration: storedRepo.storageGeneration });
+
+    const operationsBeforeBlockedRetry = await db.gitPushOperation.count({ where: { repositoryId: repository.id } });
+    const refsBeforeBlockedRetry = (await git(ownerToken.secret,
+      ['--git-dir', bare, 'for-each-ref', '--format=%(refname) %(objectname)', 'refs/'])).stdout;
+    await git(ownerToken.secret, ['-C', work, 'switch', '-c', 'feature/blocked-after-restart']);
+    await expect(git(ownerToken.secret,
+      ['-C', work, 'push', '--set-upstream', 'origin', 'feature/blocked-after-restart'])).rejects.toBeDefined();
+    const refsAfterBlockedRetry = (await git(ownerToken.secret,
+      ['--git-dir', bare, 'for-each-ref', '--format=%(refname) %(objectname)', 'refs/'])).stdout;
+    expect(refsAfterBlockedRetry).toBe(refsBeforeBlockedRetry);
+    expect(await db.gitPushOperation.count({ where: { repositoryId: repository.id } })).toBe(operationsBeforeBlockedRetry);
   }, 60_000);
 });

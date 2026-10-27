@@ -79,11 +79,12 @@ describe('Admin bootstrap CLI + PostgreSQL', () => {
     ]);
   });
 
-  it('promotes an existing account without replacing its password', async () => {
+  it('promotes an existing account without unlocking it or replacing its password', async () => {
     const passwordHash = await argon2.hash('Existing-Password-123!', { type: argon2.argon2id, memoryCost: 4_096, timeCost: 1, parallelism: 1 });
+    const lockedAt = new Date('2026-10-01T00:00:00.000Z');
     await db.user.create({ data: {
       username: 'ExistingAdmin', normalizedUsername: 'existingadmin', email: 'existing@example.test',
-      normalizedEmail: 'existing@example.test', passwordHash,
+      normalizedEmail: 'existing@example.test', passwordHash, status: 'LOCKED', lockedAt,
     } });
     const result = runBootstrap('ExistingAdmin\nexisting@example.test\n');
 
@@ -94,10 +95,31 @@ describe('Admin bootstrap CLI + PostgreSQL', () => {
     expect(result.stdout).not.toContain('Password:');
     const user = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'existingadmin' } });
     expect(user.systemRole).toBe('ADMIN');
+    expect(user).toMatchObject({ status: 'LOCKED', lockedAt });
     expect(user.passwordHash).toBe(passwordHash);
     await expect(db.auditLog.findMany({ where: { targetId: user.id } })).resolves.toEqual([
       expect.objectContaining({ actorId: null, action: 'SYSTEM_ADMIN_PROMOTED', details: { channel: 'bootstrap_cli' } }),
     ]);
+  });
+
+  it('rejects a password confirmation mismatch without creating a user or audit record', async () => {
+    const password = 'Admin-Password-123!';
+    const confirmation = 'Admin-Password-456!';
+    const auditCountBefore = await db.auditLog.count();
+    const result = runBootstrap(`MismatchPassword\nmismatch-password@example.test\n${password}\n${confirmation}\n`);
+
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(1);
+    expect(result.stdout).not.toContain(password);
+    expect(result.stdout).not.toContain(confirmation);
+    expect(result.stderr).toContain('Mật khẩu xác nhận không khớp.');
+    expect(result.stderr).not.toContain(password);
+    expect(result.stderr).not.toContain(confirmation);
+    expect(result.args.join('\0')).not.toContain(password);
+    expect(result.args.join('\0')).not.toContain(confirmation);
+    await expect(db.user.findUnique({ where: { normalizedUsername: 'mismatchpassword' } })).resolves.toBeNull();
+    await expect(db.user.findUnique({ where: { normalizedEmail: 'mismatch-password@example.test' } })).resolves.toBeNull();
+    await expect(db.auditLog.count()).resolves.toBe(auditCountBefore);
   });
 
   it('is idempotent when the matching account already has ADMIN role', async () => {

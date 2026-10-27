@@ -147,14 +147,43 @@ describe('AuthService', () => {
 
   it('revokes the active token family when a rotated token is reused', async () => {
     sessionApi.findUnique.mockResolvedValue({ ...session, user, revokedAt: now });
-    sessionApi.updateMany.mockResolvedValue({ count: 1 });
+    txQueryRaw.mockResolvedValue([{ id: user.id }]);
+    txUpdateSessions.mockResolvedValue({ count: 1 });
+    transaction.mockImplementation(async (callback: (client: Prisma.TransactionClient) => Promise<unknown>) =>
+      callback(tx as never),
+    );
 
     await expect(service.refresh('reused-token')).rejects.toMatchObject({ status: HttpStatus.UNAUTHORIZED });
-    const revokeInput = sessionApi.updateMany.mock.calls[0]?.[0] as
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(txQueryRaw).toHaveBeenCalledTimes(1);
+    const revokeInput = txUpdateSessions.mock.calls[0]?.[0] as
       | { where: { familyId: string; revokedAt: null }; data: { revokedAt: Date } }
       | undefined;
     expect(revokeInput?.where).toEqual({ familyId: session.familyId, revokedAt: null });
     expect(revokeInput?.data.revokedAt).toBeInstanceOf(Date);
+    expect(sessionApi.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('revokes the family inside the user-locked transaction when a concurrent rotation loses its compare-and-set', async () => {
+    sessionApi.findUnique.mockResolvedValue({ ...session, user });
+    txQueryRaw.mockResolvedValue([{ status: 'ACTIVE' }]);
+    txUpdateSessions.mockResolvedValueOnce({ count: 0 }).mockResolvedValueOnce({ count: 1 });
+    transaction.mockImplementation(async (callback: (client: Prisma.TransactionClient) => Promise<unknown>) =>
+      callback(tx as never),
+    );
+
+    await expect(service.refresh('raced-refresh-token')).rejects.toMatchObject({ status: HttpStatus.UNAUTHORIZED });
+
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(txQueryRaw).toHaveBeenCalledTimes(1);
+    expect(txUpdateSessions).toHaveBeenCalledTimes(2);
+    const familyRevokeInput = txUpdateSessions.mock.calls[1]?.[0] as
+      | { where: { familyId: string; revokedAt: null }; data: { revokedAt: Date } }
+      | undefined;
+    expect(familyRevokeInput?.where).toEqual({ familyId: session.familyId, revokedAt: null });
+    expect(familyRevokeInput?.data.revokedAt).toBeInstanceOf(Date);
+    expect(txCreateSession).not.toHaveBeenCalled();
+    expect(sessionApi.updateMany).not.toHaveBeenCalled();
   });
 
   it('makes logout idempotent when no refresh cookie exists', async () => {

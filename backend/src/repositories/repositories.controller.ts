@@ -16,7 +16,7 @@ export class RepositoriesController {
     const page = rawPage === undefined ? 1 : Number(rawPage);
     if ((search !== undefined && (typeof search !== 'string' || search.length > 100)) ||
       !Number.isSafeInteger(page) || page < 1 || page > 1000) {
-      throw new BadRequestException('Tham số tìm kiếm hoặc trang không hợp lệ.');
+      throw new BadRequestException({ error: { code: 'INVALID_REPOSITORY_LIST_QUERY', message: 'Tham số tìm kiếm hoặc trang không hợp lệ.', details: {} } });
     }
     return this.repositories.listPublic(search?.trim(), page);
   }

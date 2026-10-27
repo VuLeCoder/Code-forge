@@ -10,6 +10,51 @@ import { PrismaService } from '../src/database/prisma.service';
 import { UsersService } from '../src/users/users.service';
 
 type Outcome<T> = { ok: true; value: T } | { ok: false; error: unknown };
+const QUERY_TIMEOUT_MS = 2_000;
+const CLEANUP_TIMEOUT_MS = 5_000;
+const DATABASE_OPERATION_TIMEOUT_MS = 5_000;
+
+function createPostgresTestClient(connectionString: string): Client {
+  return new Client({
+    connectionString,
+    connectionTimeoutMillis: CLEANUP_TIMEOUT_MS,
+    statement_timeout: QUERY_TIMEOUT_MS,
+    query_timeout: QUERY_TIMEOUT_MS + 1_000,
+  });
+}
+
+async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error(`${label} exceeded its ${timeoutMs}ms deadline.`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+async function attemptCleanup(
+  errors: unknown[],
+  label: string,
+  operation: () => Promise<unknown>,
+): Promise<void> {
+  try {
+    await withTimeout(Promise.resolve().then(operation), CLEANUP_TIMEOUT_MS, label);
+  } catch (cause) {
+    errors.push(new Error(`${label} failed.`, { cause }));
+  }
+}
+
+function throwCleanupFailures(errors: unknown[], scenarioError?: unknown): void {
+  if (errors.length === 0) return;
+  const cleanupError = new AggregateError(errors, 'Auth concurrency test cleanup failed.');
+  if (scenarioError) throw new AggregateError([scenarioError, cleanupError], 'Auth concurrency scenario and cleanup failed.');
+  throw cleanupError;
+}
 
 function assertLoopbackTestDatabase(connectionString: string, variableName: string): URL {
   let url: URL;
@@ -147,6 +192,36 @@ async function waitForLogoutBehindRefresh(
   );
 }
 
+async function waitForRequestBlockedByRequest(
+  monitor: Client,
+  waiterApplicationName: string,
+  blockerApplicationName: string,
+  isSettled: () => boolean,
+): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const result = await monitor.query<{ waiting: number }>(`
+      SELECT COUNT(*)::int AS waiting
+      FROM pg_stat_activity AS waiter
+      JOIN pg_stat_activity AS blocker
+        ON blocker.application_name = $2
+        AND blocker.datname = current_database()
+        AND blocker.pid <> pg_backend_pid()
+      WHERE waiter.application_name = $1
+        AND waiter.datname = current_database()
+        AND waiter.pid <> pg_backend_pid()
+        AND waiter.wait_event_type = 'Lock'
+        AND pg_blocking_pids(waiter.pid) @> ARRAY[blocker.pid]
+    `, [waiterApplicationName, blockerApplicationName]);
+    if ((result.rows[0]?.waiting ?? 0) === 1) return;
+    if (isSettled()) {
+      throw new Error(`${waiterApplicationName} settled before it queued behind ${blockerApplicationName}.`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`Timed out waiting for ${waiterApplicationName} to queue behind ${blockerApplicationName}.`);
+}
+
 function captureOutcome<T>(promise: Promise<T>, onSettled: () => void): Promise<Outcome<T>> {
   return promise.then(
     (value): Outcome<T> => ({ ok: true, value }),
@@ -158,12 +233,14 @@ describe('Auth session refresh/logout concurrency with PostgreSQL', () => {
   const schema = `auth_concurrency_test_${randomBytes(8).toString('hex')}`;
   const suffix = randomBytes(6).toString('hex');
   const refreshApplicationName = `auth-refresh-${suffix}`;
+  const reuseApplicationName = `auth-reuse-${suffix}`;
   const logoutApplicationName = `auth-logout-${suffix}`;
   const barrierApplicationName = `auth-barrier-${suffix}`;
   const monitorApplicationName = `auth-monitor-${suffix}`;
   let admin: PrismaClient | undefined;
   let seedDb: PrismaClient | undefined;
   let refreshDb: PrismaClient | undefined;
+  let reuseDb: PrismaClient | undefined;
   let logoutDb: PrismaClient | undefined;
   let isolatedUrl: URL;
   let schemaCreated = false;
@@ -191,8 +268,13 @@ describe('Auth session refresh/logout concurrency with PostgreSQL', () => {
     }
 
     admin = new PrismaClient({ datasourceUrl: isolatedUrl.toString() });
-    await admin.$executeRawUnsafe(`CREATE SCHEMA "${schema}"`);
     schemaCreated = true;
+    await withTimeout(admin.$connect(), DATABASE_OPERATION_TIMEOUT_MS, 'Connecting the auth admin Prisma client');
+    await withTimeout(
+      admin.$executeRawUnsafe(`CREATE SCHEMA "${schema}"`),
+      DATABASE_OPERATION_TIMEOUT_MS,
+      'Creating the isolated auth test schema',
+    );
 
     const migrationUrl = new URL(isolatedUrl);
     migrationUrl.searchParams.set('schema', schema);
@@ -218,52 +300,59 @@ describe('Auth session refresh/logout concurrency with PostgreSQL', () => {
     };
     seedDb = new PrismaClient({ datasourceUrl: serviceUrl(`auth-seed-${suffix}`) });
     refreshDb = new PrismaClient({ datasourceUrl: serviceUrl(refreshApplicationName) });
+    reuseDb = new PrismaClient({ datasourceUrl: serviceUrl(reuseApplicationName) });
     logoutDb = new PrismaClient({ datasourceUrl: serviceUrl(logoutApplicationName) });
-    await Promise.all([seedDb.$connect(), refreshDb.$connect(), logoutDb.$connect()]);
+    await withTimeout(
+      Promise.all([seedDb.$connect(), refreshDb.$connect(), reuseDb.$connect(), logoutDb.$connect()]),
+      DATABASE_OPERATION_TIMEOUT_MS,
+      'Connecting the isolated auth Prisma clients',
+    );
 
-    const [refreshIdentity, logoutIdentity] = await Promise.all([
-      refreshDb.$queryRaw<{ applicationName: string; schemaName: string }[]>`
-        SELECT current_setting('application_name') AS "applicationName", current_schema() AS "schemaName"
-      `,
-      logoutDb.$queryRaw<{ applicationName: string; schemaName: string }[]>`
-        SELECT current_setting('application_name') AS "applicationName", current_schema() AS "schemaName"
-      `,
-    ]);
+    const [refreshIdentity, reuseIdentity, logoutIdentity] = await withTimeout(
+      Promise.all([
+        refreshDb.$queryRaw<{ applicationName: string; schemaName: string }[]>`
+          SELECT current_setting('application_name') AS "applicationName", current_schema() AS "schemaName"
+        `,
+        reuseDb.$queryRaw<{ applicationName: string; schemaName: string }[]>`
+          SELECT current_setting('application_name') AS "applicationName", current_schema() AS "schemaName"
+        `,
+        logoutDb.$queryRaw<{ applicationName: string; schemaName: string }[]>`
+          SELECT current_setting('application_name') AS "applicationName", current_schema() AS "schemaName"
+        `,
+      ]),
+      DATABASE_OPERATION_TIMEOUT_MS,
+      'Checking the isolated auth database connections',
+    );
     expect(refreshIdentity[0]).toMatchObject({ applicationName: refreshApplicationName, schemaName: schema });
+    expect(reuseIdentity[0]).toMatchObject({ applicationName: reuseApplicationName, schemaName: schema });
     expect(logoutIdentity[0]).toMatchObject({ applicationName: logoutApplicationName, schemaName: schema });
   }, 60_000);
 
   afterAll(async () => {
-    await Promise.all([
-      seedDb?.$disconnect(),
-      refreshDb?.$disconnect(),
-      logoutDb?.$disconnect(),
-    ].filter((operation): operation is Promise<void> => operation !== undefined));
-    if (admin) {
-      if (schemaCreated) await admin.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
-      await admin.$disconnect();
+    const cleanupErrors: unknown[] = [];
+    const disconnects: Array<[string, () => Promise<unknown>]> = [];
+    if (seedDb) disconnects.push(['Disconnecting the auth seed client', () => seedDb!.$disconnect()]);
+    if (refreshDb) disconnects.push(['Disconnecting the auth refresh client', () => refreshDb!.$disconnect()]);
+    if (reuseDb) disconnects.push(['Disconnecting the auth reuse client', () => reuseDb!.$disconnect()]);
+    if (logoutDb) disconnects.push(['Disconnecting the auth logout client', () => logoutDb!.$disconnect()]);
+    await Promise.all(disconnects.map(([label, disconnect]) => attemptCleanup(cleanupErrors, label, disconnect)));
+
+    if (admin && schemaCreated) {
+      await attemptCleanup(cleanupErrors, 'Dropping the isolated auth test schema', () => admin!.$transaction(async (tx) => {
+        await tx.$executeRaw`SET LOCAL statement_timeout = '2000ms'`;
+        await tx.$executeRawUnsafe(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+      }));
     }
-  });
+    if (admin) await attemptCleanup(cleanupErrors, 'Disconnecting the auth admin client', () => admin!.$disconnect());
+    throwCleanupFailures(cleanupErrors);
+  }, 20_000);
 
   it('serializes refresh before logout and revokes the newly issued successor', async () => {
     if (!admin || !seedDb || !refreshDb || !logoutDb) throw new Error('Auth concurrency E2E setup did not finish.');
 
     const passwordHash = 'test-only-unused-password-hash';
-    const user = await seedDb.user.create({ data: {
-      username: 'concurrency-owner',
-      normalizedUsername: 'concurrency-owner',
-      email: 'concurrency-owner@example.test',
-      normalizedEmail: 'concurrency-owner@example.test',
-      passwordHash,
-    } });
     const rawRefreshToken = randomBytes(48).toString('base64url');
     const familyId = randomUUID();
-    const oldSession = await seedDb.session.create({ data: {
-      userId: user.id,
-      familyId,
-      tokenHash: createHash('sha256').update(rawRefreshToken).digest('hex'),
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
-    } });
 
     const config = new ConfigService({
       JWT_ACCESS_SECRET: `auth-concurrency-test-secret-${randomBytes(24).toString('hex')}`,
@@ -287,19 +376,34 @@ describe('Auth session refresh/logout concurrency with PostgreSQL', () => {
     const barrierUrl = new URL(isolatedUrl);
     barrierUrl.searchParams.set('schema', schema);
     barrierUrl.searchParams.set('application_name', barrierApplicationName);
-    const barrier = new Client({ connectionString: barrierUrl.toString() });
+    const barrier = createPostgresTestClient(barrierUrl.toString());
     const monitorUrl = new URL(barrierUrl);
     monitorUrl.searchParams.set('application_name', monitorApplicationName);
-    const monitor = new Client({ connectionString: monitorUrl.toString() });
+    const monitor = createPostgresTestClient(monitorUrl.toString());
     let barrierConnected = false;
     let monitorConnected = false;
     let transactionOpen = false;
+    let scenarioError: unknown;
     let refreshSettled = false;
     let logoutSettled = false;
     let refreshOutcome: Promise<Outcome<Awaited<ReturnType<AuthService['refresh']>>>> | undefined;
     let logoutOutcome: Promise<Outcome<void>> | undefined;
 
     try {
+      const user = await withTimeout(seedDb.user.create({ data: {
+        username: 'concurrency-owner',
+        normalizedUsername: 'concurrency-owner',
+        email: 'concurrency-owner@example.test',
+        normalizedEmail: 'concurrency-owner@example.test',
+        passwordHash,
+      } }), DATABASE_OPERATION_TIMEOUT_MS, 'Creating the auth concurrency test user');
+      const oldSession = await withTimeout(seedDb.session.create({ data: {
+        userId: user.id,
+        familyId,
+        tokenHash: createHash('sha256').update(rawRefreshToken).digest('hex'),
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      } }), DATABASE_OPERATION_TIMEOUT_MS, 'Creating the original auth refresh session');
+
       await barrier.connect();
       barrierConnected = true;
       await monitor.connect();
@@ -328,29 +432,345 @@ describe('Auth session refresh/logout concurrency with PostgreSQL', () => {
 
       await barrier.query('COMMIT');
       transactionOpen = false;
-      const [refreshResult, logoutResult] = await Promise.all([refreshOutcome, logoutOutcome]);
+      const [refreshResult, logoutResult] = await withTimeout(
+        Promise.all([refreshOutcome, logoutOutcome]),
+        CLEANUP_TIMEOUT_MS,
+        'Waiting for the serialized refresh and logout requests',
+      );
       if (!refreshResult.ok) throw refreshResult.error;
       if (!logoutResult.ok) throw logoutResult.error;
 
-      const sessions = await seedDb.session.findMany({ where: { familyId }, orderBy: { createdAt: 'asc' } });
+      const sessions = await withTimeout(
+        seedDb.session.findMany({ where: { familyId }, orderBy: { createdAt: 'asc' } }),
+        DATABASE_OPERATION_TIMEOUT_MS,
+        'Reading the completed refresh token family',
+      );
       expect(sessions).toHaveLength(2);
       expect(sessions.find((session) => session.id === oldSession.id)?.revokedAt).toBeInstanceOf(Date);
       expect(sessions.every((session) => session.revokedAt !== null)).toBe(true);
-      await expect(refreshService.refresh(refreshResult.value.refreshToken))
+      await expect(withTimeout(
+        refreshService.refresh(refreshResult.value.refreshToken),
+        CLEANUP_TIMEOUT_MS,
+        'Checking that logout revoked the refreshed token',
+      ))
         .rejects.toMatchObject({ status: HttpStatus.UNAUTHORIZED });
+    } catch (error) {
+      scenarioError = error;
+      throw error;
     } finally {
-      try {
-        if (transactionOpen) await barrier.query('ROLLBACK').catch(() => undefined);
-        const pending: Promise<unknown>[] = [];
-        if (refreshOutcome) pending.push(refreshOutcome);
-        if (logoutOutcome) pending.push(logoutOutcome);
-        await Promise.all(pending);
-      } finally {
-        const connectionsToClose: Promise<void>[] = [];
-        if (monitorConnected) connectionsToClose.push(monitor.end());
-        if (barrierConnected) connectionsToClose.push(barrier.end());
-        await Promise.allSettled(connectionsToClose);
+      const cleanupErrors: unknown[] = [];
+      if (transactionOpen) {
+        await attemptCleanup(cleanupErrors, 'Rolling back the auth concurrency barrier', () => barrier.query('ROLLBACK'));
+        transactionOpen = false;
       }
+      const connectionsToClose: Array<[string, () => Promise<unknown>]> = [];
+      if (monitorConnected) connectionsToClose.push(['Closing the auth concurrency monitor', () => monitor.end()]);
+      if (barrierConnected) connectionsToClose.push(['Closing the auth concurrency barrier', () => barrier.end()]);
+      await Promise.all(connectionsToClose.map(([label, close]) => attemptCleanup(cleanupErrors, label, close)));
+
+      const pending: Promise<unknown>[] = [];
+      if (refreshOutcome) pending.push(refreshOutcome);
+      if (logoutOutcome) pending.push(logoutOutcome);
+      if (pending.length > 0) {
+        await attemptCleanup(cleanupErrors, 'Waiting for auth concurrency requests after closing barriers', () => Promise.allSettled(pending));
+      }
+      throwCleanupFailures(cleanupErrors, scenarioError);
+    }
+  }, 20_000);
+
+  it('revokes a descendant when reuse of a revoked ancestor races an active successor refresh', async () => {
+    if (!admin || !seedDb || !refreshDb || !reuseDb) throw new Error('Auth concurrency E2E setup did not finish.');
+
+    const familyId = randomUUID();
+    const oldRefreshToken = randomBytes(48).toString('base64url');
+    const activeRefreshToken = randomBytes(48).toString('base64url');
+
+    const config = new ConfigService({
+      JWT_ACCESS_SECRET: `auth-reuse-test-secret-${randomBytes(24).toString('hex')}`,
+      ACCESS_TOKEN_TTL_SECONDS: 900,
+      REFRESH_TOKEN_TTL_DAYS: 30,
+    });
+    const jwt = new JwtService({});
+    const successorRefreshService = new AuthService(
+      refreshDb as unknown as PrismaService,
+      new UsersService(refreshDb as unknown as PrismaService),
+      jwt,
+      config,
+    );
+    const reuseService = new AuthService(
+      reuseDb as unknown as PrismaService,
+      new UsersService(reuseDb as unknown as PrismaService),
+      jwt,
+      config,
+    );
+
+    const barrierUrl = new URL(isolatedUrl);
+    barrierUrl.searchParams.set('schema', schema);
+    barrierUrl.searchParams.set('application_name', barrierApplicationName);
+    const barrier = createPostgresTestClient(barrierUrl.toString());
+    const monitorUrl = new URL(barrierUrl);
+    monitorUrl.searchParams.set('application_name', monitorApplicationName);
+    const monitor = createPostgresTestClient(monitorUrl.toString());
+    let barrierConnected = false;
+    let monitorConnected = false;
+    let transactionOpen = false;
+    let successorSettled = false;
+    let reuseSettled = false;
+    let scenarioError: unknown;
+    let successorOutcome: Promise<Outcome<Awaited<ReturnType<AuthService['refresh']>>>> | undefined;
+    let reuseOutcome: Promise<Outcome<Awaited<ReturnType<AuthService['refresh']>>>> | undefined;
+
+    try {
+      const user = await withTimeout(seedDb.user.create({
+        data: {
+          username: 'reuse-race-owner',
+          normalizedUsername: 'reuse-race-owner',
+          email: 'reuse-race-owner@example.test',
+          normalizedEmail: 'reuse-race-owner@example.test',
+          passwordHash: 'test-only-unused-password-hash',
+        },
+      }), DATABASE_OPERATION_TIMEOUT_MS, 'Creating the refresh-reuse test user');
+      const oldSession = await withTimeout(seedDb.session.create({
+        data: {
+          userId: user.id,
+          familyId,
+          tokenHash: createHash('sha256').update(oldRefreshToken).digest('hex'),
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+          revokedAt: new Date(),
+        },
+      }), DATABASE_OPERATION_TIMEOUT_MS, 'Creating the revoked ancestor session');
+      const activeSession = await withTimeout(seedDb.session.create({
+        data: {
+          userId: user.id,
+          familyId,
+          tokenHash: createHash('sha256').update(activeRefreshToken).digest('hex'),
+          expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        },
+      }), DATABASE_OPERATION_TIMEOUT_MS, 'Creating the active successor session');
+
+      await barrier.connect();
+      barrierConnected = true;
+      await monitor.connect();
+      monitorConnected = true;
+      await barrier.query('BEGIN');
+      transactionOpen = true;
+      const locked = await barrier.query(
+        `SELECT id FROM "${schema}".sessions WHERE id = $1::uuid FOR UPDATE`,
+        [activeSession.id],
+      );
+      expect(locked.rowCount).toBe(1);
+      const pidResult = await barrier.query<{ pid: number }>('SELECT pg_backend_pid() AS pid');
+      const barrierPid = Number(pidResult.rows[0]?.pid);
+      expect(Number.isInteger(barrierPid)).toBe(true);
+
+      successorOutcome = captureOutcome(successorRefreshService.refresh(activeRefreshToken), () => {
+        successorSettled = true;
+      });
+      const trackedApplications = [
+        refreshApplicationName,
+        reuseApplicationName,
+        barrierApplicationName,
+        monitorApplicationName,
+      ];
+      await waitForBarrierWaiter(
+        monitor,
+        refreshApplicationName,
+        trackedApplications,
+        barrierPid,
+        () => successorSettled,
+      );
+
+      reuseOutcome = captureOutcome(reuseService.refresh(oldRefreshToken), () => {
+        reuseSettled = true;
+      });
+      await waitForRequestBlockedByRequest(
+        monitor,
+        reuseApplicationName,
+        refreshApplicationName,
+        () => reuseSettled,
+      );
+
+      await barrier.query('COMMIT');
+      transactionOpen = false;
+      const [successorResult, reuseResult] = await withTimeout(
+        Promise.all([successorOutcome, reuseOutcome]),
+        CLEANUP_TIMEOUT_MS,
+        'Waiting for the successor refresh and ancestor reuse requests',
+      );
+      if (successorResult.ok === false) throw successorResult.error;
+      expect(reuseResult).toMatchObject({ ok: false });
+      if (reuseResult.ok === true) throw new Error('Reusing a revoked ancestor unexpectedly succeeded.');
+      expect(reuseResult.error).toMatchObject({
+        status: HttpStatus.UNAUTHORIZED,
+      });
+
+      const family = await withTimeout(
+        seedDb.session.findMany({ where: { familyId }, orderBy: { createdAt: 'asc' } }),
+        DATABASE_OPERATION_TIMEOUT_MS,
+        'Reading the completed refresh token family',
+      );
+      expect(family).toHaveLength(3);
+      expect(family.find(({ id }) => id === oldSession.id)?.revokedAt).toBeInstanceOf(Date);
+      expect(family.find(({ id }) => id === activeSession.id)?.revokedAt).toBeInstanceOf(Date);
+      expect(family.every(({ revokedAt }) => revokedAt !== null)).toBe(true);
+      await expect(withTimeout(
+        successorRefreshService.refresh(successorResult.value.refreshToken),
+        CLEANUP_TIMEOUT_MS,
+        'Checking that reuse revoked the successor refresh token',
+      ))
+        .rejects.toMatchObject({ status: HttpStatus.UNAUTHORIZED });
+    } catch (error) {
+      scenarioError = error;
+      throw error;
+    } finally {
+      const cleanupErrors: unknown[] = [];
+      if (transactionOpen) {
+        await attemptCleanup(cleanupErrors, 'Rolling back the auth concurrency barrier', () => barrier.query('ROLLBACK'));
+        transactionOpen = false;
+      }
+
+      const connectionsToClose: Array<[string, () => Promise<unknown>]> = [];
+      if (monitorConnected) connectionsToClose.push(['Closing the auth concurrency monitor', () => monitor.end()]);
+      if (barrierConnected) connectionsToClose.push(['Closing the auth concurrency barrier', () => barrier.end()]);
+      if (refreshDb) connectionsToClose.push(['Closing the auth refresh client', () => refreshDb!.$disconnect()]);
+      if (reuseDb) connectionsToClose.push(['Closing the auth reuse client', () => reuseDb!.$disconnect()]);
+      await Promise.all(connectionsToClose.map(([label, close]) => attemptCleanup(cleanupErrors, label, close)));
+
+      const pendingRequests: Promise<unknown>[] = [];
+      if (successorOutcome) pendingRequests.push(successorOutcome);
+      if (reuseOutcome) pendingRequests.push(reuseOutcome);
+      if (pendingRequests.length > 0) {
+        await attemptCleanup(
+          cleanupErrors,
+          'Waiting for auth concurrency requests after closing clients',
+          () => Promise.allSettled(pendingRequests),
+        );
+      }
+
+      throwCleanupFailures(cleanupErrors, scenarioError);
+    }
+  }, 20_000);
+
+  it('revokes the successor when the same active refresh token is submitted concurrently', async () => {
+    if (!admin || !seedDb || !refreshDb || !reuseDb) throw new Error('Auth concurrency E2E setup did not finish.');
+
+    const familyId = randomUUID();
+    const rawRefreshToken = randomBytes(48).toString('base64url');
+    const config = new ConfigService({
+      JWT_ACCESS_SECRET: `auth-same-token-test-secret-${randomBytes(24).toString('hex')}`,
+      ACCESS_TOKEN_TTL_SECONDS: 900,
+      REFRESH_TOKEN_TTL_DAYS: 30,
+    });
+    const jwt = new JwtService({});
+    const firstService = new AuthService(
+      refreshDb as unknown as PrismaService,
+      new UsersService(refreshDb as unknown as PrismaService),
+      jwt,
+      config,
+    );
+    const secondService = new AuthService(
+      reuseDb as unknown as PrismaService,
+      new UsersService(reuseDb as unknown as PrismaService),
+      jwt,
+      config,
+    );
+
+    const barrierUrl = new URL(isolatedUrl);
+    barrierUrl.searchParams.set('schema', schema);
+    barrierUrl.searchParams.set('application_name', barrierApplicationName);
+    const barrier = createPostgresTestClient(barrierUrl.toString());
+    const monitorUrl = new URL(barrierUrl);
+    monitorUrl.searchParams.set('application_name', monitorApplicationName);
+    const monitor = createPostgresTestClient(monitorUrl.toString());
+    let barrierConnected = false;
+    let monitorConnected = false;
+    let transactionOpen = false;
+    let firstSettled = false;
+    let secondSettled = false;
+    let scenarioError: unknown;
+    let firstOutcome: Promise<Outcome<Awaited<ReturnType<AuthService['refresh']>>>> | undefined;
+    let secondOutcome: Promise<Outcome<Awaited<ReturnType<AuthService['refresh']>>>> | undefined;
+
+    try {
+      const user = await withTimeout(seedDb.user.create({ data: {
+        username: 'same-token-race-owner',
+        normalizedUsername: 'same-token-race-owner',
+        email: 'same-token-race-owner@example.test',
+        normalizedEmail: 'same-token-race-owner@example.test',
+        passwordHash: 'test-only-unused-password-hash',
+      } }), DATABASE_OPERATION_TIMEOUT_MS, 'Creating the same-token refresh race user');
+      const originalSession = await withTimeout(seedDb.session.create({ data: {
+        userId: user.id,
+        familyId,
+        tokenHash: createHash('sha256').update(rawRefreshToken).digest('hex'),
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      } }), DATABASE_OPERATION_TIMEOUT_MS, 'Creating the same-token refresh race session');
+
+      await barrier.connect();
+      barrierConnected = true;
+      await monitor.connect();
+      monitorConnected = true;
+      await barrier.query('BEGIN');
+      transactionOpen = true;
+      const locked = await barrier.query(`SELECT id FROM "${schema}".users WHERE id = $1::uuid FOR UPDATE`, [user.id]);
+      expect(locked.rowCount).toBe(1);
+      const pidResult = await barrier.query<{ pid: number }>('SELECT pg_backend_pid() AS pid');
+      const barrierPid = Number(pidResult.rows[0]?.pid);
+      expect(Number.isInteger(barrierPid)).toBe(true);
+
+      firstOutcome = captureOutcome(firstService.refresh(rawRefreshToken), () => { firstSettled = true; });
+      const trackedApplications = [refreshApplicationName, reuseApplicationName, barrierApplicationName, monitorApplicationName];
+      await waitForBarrierWaiter(monitor, refreshApplicationName, trackedApplications, barrierPid, () => firstSettled);
+
+      secondOutcome = captureOutcome(secondService.refresh(rawRefreshToken), () => { secondSettled = true; });
+      await waitForRequestBlockedByRequest(monitor, reuseApplicationName, refreshApplicationName, () => secondSettled);
+
+      await barrier.query('COMMIT');
+      transactionOpen = false;
+      const [firstResult, secondResult] = await withTimeout(
+        Promise.all([firstOutcome, secondOutcome]),
+        CLEANUP_TIMEOUT_MS,
+        'Waiting for concurrent refresh attempts using the same token',
+      );
+      if (firstResult.ok === false) throw firstResult.error;
+      expect(secondResult).toMatchObject({ ok: false });
+      if (secondResult.ok === true) throw new Error('Concurrent reuse of one refresh token unexpectedly succeeded.');
+      expect(secondResult.error).toMatchObject({ status: HttpStatus.UNAUTHORIZED });
+
+      const family = await withTimeout(
+        seedDb.session.findMany({ where: { familyId }, orderBy: { createdAt: 'asc' } }),
+        DATABASE_OPERATION_TIMEOUT_MS,
+        'Reading the completed same-token refresh family',
+      );
+      expect(family).toHaveLength(2);
+      expect(family.find(({ id }) => id === originalSession.id)?.revokedAt).toBeInstanceOf(Date);
+      expect(family.every(({ revokedAt }) => revokedAt !== null)).toBe(true);
+      await expect(withTimeout(
+        firstService.refresh(firstResult.value.refreshToken),
+        CLEANUP_TIMEOUT_MS,
+        'Checking that concurrent token reuse revoked the successful response token',
+      )).rejects.toMatchObject({ status: HttpStatus.UNAUTHORIZED });
+    } catch (error) {
+      scenarioError = error;
+      throw error;
+    } finally {
+      const cleanupErrors: unknown[] = [];
+      if (transactionOpen) {
+        await attemptCleanup(cleanupErrors, 'Rolling back the same-token refresh barrier', () => barrier.query('ROLLBACK'));
+        transactionOpen = false;
+      }
+      const connectionsToClose: Array<[string, () => Promise<unknown>]> = [];
+      if (monitorConnected) connectionsToClose.push(['Closing the same-token refresh monitor', () => monitor.end()]);
+      if (barrierConnected) connectionsToClose.push(['Closing the same-token refresh barrier', () => barrier.end()]);
+      await Promise.all(connectionsToClose.map(([label, close]) => attemptCleanup(cleanupErrors, label, close)));
+
+      const pendingRequests: Promise<unknown>[] = [];
+      if (firstOutcome) pendingRequests.push(firstOutcome);
+      if (secondOutcome) pendingRequests.push(secondOutcome);
+      if (pendingRequests.length > 0) {
+        await attemptCleanup(cleanupErrors, 'Waiting for same-token refresh requests after releasing barriers', () => Promise.allSettled(pendingRequests));
+      }
+      throwCleanupFailures(cleanupErrors, scenarioError);
     }
   }, 20_000);
 });

@@ -14,6 +14,10 @@ import { normalizeEmail, normalizeUsername } from './normalization';
 
 type AuthResult = { user: PublicUser; accessToken: string; refreshToken: string };
 
+// Keep the password verification path comparable when the login identifier is
+// unknown. This is a fixed Argon2id hash of a value that is never accepted.
+const DUMMY_PASSWORD_HASH = '$argon2id$v=19$m=19456,p=1,t=2$rih3rhImYxa6HOcDcpF2FA$302mL1FByAxw/yCa7AZgzL6GDp+beh38JJLSTcgnaBs';
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -68,7 +72,9 @@ export class AuthService {
 
   async login(dto: LoginDto): Promise<AuthResult> {
     const user = await this.users.findByLogin(normalizeEmail(dto.login));
-    if (!user || !(await argon2.verify(user.passwordHash, dto.password))) {
+    const passwordHash = user?.passwordHash ?? DUMMY_PASSWORD_HASH;
+    const passwordMatches = await argon2.verify(passwordHash, dto.password);
+    if (!user || !passwordMatches) {
       throw new AuthError(HttpStatus.UNAUTHORIZED, 'INVALID_CREDENTIALS', 'Thông tin đăng nhập không chính xác.');
     }
     this.assertActive(user.status);
@@ -94,9 +100,13 @@ export class AuthService {
     const existing = await this.prisma.session.findUnique({ where: { tokenHash }, include: { user: true } });
     if (!existing) this.invalidRefresh();
     if (existing.revokedAt) {
-      await this.prisma.session.updateMany({
-        where: { familyId: existing.familyId, revokedAt: null },
-        data: { revokedAt: new Date() },
+      await this.prisma.$transaction(async (tx) => {
+        // Serialize reuse detection with every refresh in this user's token family.
+        await tx.$queryRaw`SELECT id FROM users WHERE id = ${existing.userId}::uuid FOR UPDATE`;
+        await tx.session.updateMany({
+          where: { familyId: existing.familyId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
       });
       this.invalidRefresh();
     }
@@ -112,7 +122,13 @@ export class AuthService {
         where: { id: existing.id, revokedAt: null },
         data: { revokedAt: now, lastUsedAt: now },
       });
-      if (revoked.count !== 1) return null;
+      if (revoked.count !== 1) {
+        await tx.session.updateMany({
+          where: { familyId: existing.familyId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+        return null;
+      }
       return tx.session.create({
         data: {
           userId: existing.userId,
@@ -122,13 +138,7 @@ export class AuthService {
         },
       });
     });
-    if (!next) {
-      await this.prisma.session.updateMany({
-        where: { familyId: existing.familyId, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
-      this.invalidRefresh();
-    }
+    if (!next) this.invalidRefresh();
     return this.result(existing.user, next, nextRawToken);
   }
 

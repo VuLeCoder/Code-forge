@@ -6,8 +6,10 @@ export class HealthController {
   constructor(private readonly healthService: HealthService) {}
 
   @Get('live')
-  live(): { status: 'ok'; timestamp: string } {
-    return { status: 'ok', timestamp: new Date().toISOString() };
+  live(): { status: 'ok'; timestamp: string; commitSha: string | null } {
+    const renderCommit = process.env.RENDER_GIT_COMMIT ?? '';
+    const commitSha = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(renderCommit) ? renderCommit : null;
+    return { status: 'ok', timestamp: new Date().toISOString(), commitSha };
   }
 
   @Get('ready')

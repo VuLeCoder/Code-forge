@@ -170,6 +170,28 @@ describe('Git HTTP process lifecycle', () => {
     expect(JSON.parse(raw)).toMatchObject({ event: 'git_write', operation: 'receive-pack-discovery', status: 200 });
   });
 
+  it('forwards Git protocol v2 to upload-pack storage', async () => {
+    script = `process.stdout.end(${JSON.stringify(header + '0000')});`;
+
+    const response = await fetch(`${url}/info/refs?service=git-upload-pack`, {
+      headers: { 'Git-Protocol': 'version=2' },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('0000');
+    expect(start).toHaveBeenCalledWith('key', 'main', 'git-upload-pack', true, 'version=2', true);
+  });
+
+  it('rejects unsupported Git protocol versions before starting a child', async () => {
+    const response = await fetch(`${url}/info/refs?service=git-upload-pack`, {
+      headers: { 'Git-Protocol': 'version=3' },
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.text()).toBe('Git request unavailable.\n');
+    expect(start).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['nonzero child exit', 'Content-Type: application/x-git-receive-pack-result\r\n\r\n0000', 17, 'failed'],
     ['incomplete CGI headers', 'Content-Type: application/x-git-receive-pack-result', 0, 'failed'],

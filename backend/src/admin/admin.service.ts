@@ -37,7 +37,9 @@ export class AdminService {
 
   async listUsers(query: AdminListQueryDto) {
     const page = this.page(query.page);
-    if (query.status !== undefined && !['ACTIVE', 'LOCKED'].includes(query.status)) throw new BadRequestException('Trạng thái user không hợp lệ.');
+    if (query.status !== undefined && !['ACTIVE', 'LOCKED'].includes(query.status)) {
+      throw new BadRequestException({ error: { code: 'INVALID_USER_STATUS', message: 'Trạng thái user không hợp lệ.', details: {} } });
+    }
     const where: Prisma.UserWhereInput = {
       ...(query.status ? { status: query.status as UserStatus } : {}),
       ...(query.q ? { OR: [{ username: { contains: query.q, mode: 'insensitive' } }, { email: { contains: query.q, mode: 'insensitive' } }] } : {}),
@@ -50,7 +52,9 @@ export class AdminService {
 
   async listRepositories(query: AdminListQueryDto) {
     const page = this.page(query.page);
-    if (query.status !== undefined && !['ACTIVE', 'LOCKED', 'DELETED'].includes(query.status)) throw new BadRequestException('Trạng thái repository không hợp lệ.');
+    if (query.status !== undefined && !['ACTIVE', 'LOCKED', 'DELETED'].includes(query.status)) {
+      throw new BadRequestException({ error: { code: 'INVALID_REPOSITORY_STATUS', message: 'Trạng thái repository không hợp lệ.', details: {} } });
+    }
     const where: Prisma.RepositoryWhereInput = {
       ...(query.status ? { status: query.status as RepositoryStatus } : {}),
       ...(query.q ? { OR: [{ name: { contains: query.q, mode: 'insensitive' } },
