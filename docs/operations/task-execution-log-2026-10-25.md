@@ -1429,3 +1429,8 @@ cloud status.
 - Leader-owned UI task. Applied `frontend-ui-engineering`, `ui-styling` and `ui-ux-pro-max` guidance: the avatar is now a native accessible menu trigger with a profile link, collaboration invitations, PAT, and admin navigation; Escape restores focus, outside pointer closes the menu, and the menu remains within a 375px viewport. The existing visible logout button and profile-link behavior were preserved for compatibility.
 - Changed only `frontend/src/components/site-header.tsx`, `frontend/src/app/globals.css`, and added `frontend/test/site-header.spec.ts`. No API, auth, backend, or user-owned untracked files were changed.
 - Verification: frontend lint passed; frontend typecheck passed; focused account-menu Playwright **2/2** passed; full `frontend/test/milestone-one.spec.ts` **18/18** passed; `git diff --check` passed. The visual direction is GitHub-inspired navigation hierarchy, not copied branding or markup.
+
+## T71-BTL HOSTED VERIFICATION — local demo documentation checkpoint
+
+- GitHub Actions `MVP verification` #182 (`40447734540`) completed **success** on exact SHA `4986091`. The run passed the backend unit/E2E, lint, typecheck, build, frontend E2E/full-stack, Docker image, migration image, migration and whitespace gates.
+- This is CI evidence only and does not close Render/Neon deployment, backup/restore or source-loss recovery acceptance.
