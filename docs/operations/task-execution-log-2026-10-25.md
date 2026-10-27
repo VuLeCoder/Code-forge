@@ -1462,3 +1462,8 @@ cloud status.
 
 - Render readiness endpoint returned HTTP 200 with database, Git and storage checks up. The public repository list returned HTTP 200 with the synthetic public fixture, and anonymous `git ls-remote` against its HTTPS endpoint exited 0 with no refs.
 - This probe did not deploy, migrate, restart, mutate refs, inspect secrets or alter Neon/Render state. It is readiness/transport evidence only; admin/audit cloud, quota boundaries, backup/restore and source-loss recovery remain open for P2/P8.
+
+## T77-BTL MAINTENANCE E2E RECHECK — isolated Docker database
+
+- Created a task-owned PostgreSQL database `codeforge_maintenance_20261027_test` inside the existing demo container, ran `corepack pnpm --filter backend exec jest --config test/jest-e2e.json --runInBand test/maintenance-cleanup.e2e-spec.ts`, and observed **6/6 passed** in 6.282s. The suite covered orphan-temp cleanup, retention/idempotence, 120-second pending grace, immediate `NEEDS_RECONCILIATION`, cross-type fail-closed behavior, and unresolved merge/push retention.
+- The suite emitted expected warning logs while intentionally blocking purge behind unresolved journals; assertions passed. The temporary database was dropped in `finally`; the existing `code_forge` database, Docker container and volumes were not reset or removed. This is local isolated evidence only and does not close cloud P2/P8.
