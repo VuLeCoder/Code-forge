@@ -1373,3 +1373,14 @@ cloud status.
 ## T56-BTL HOSTED ADMIN UNLOCK — exact candidate
 
 - GitHub Actions `MVP verification` #167 ([run `40437674377`](https://github.com/VuLeCoder/Code-forge/actions/runs/40437674377)) completed **success, 28/28** on exact `thviet` SHA `e27a8ea` in 5m59s. Backend/frontend suites, Docker API/migration image checks, disposable migration and whitespace gate all passed. This is hosted CI evidence only; Render/Neon release and recovery gates remain open.
+
+## T57-BTL ACCEPTANCE SNAPSHOT/HANDOFF SYNCHRONIZATION
+
+- Updated only the current acceptance snapshot to distinguish the CI-verified runtime candidate `70500d8` from the later docs-only `570236e` checkpoint, record hosted T55 success (#167), and mark the earlier #161 failure as historical. Historical evidence and the cloud-open boundary were preserved.
+- Read-only review reported **No findings**; `git diff --check` passed. No production code, database, Git storage, Docker volume or cloud resource changed.
+
+## T58-BTL MAINTENANCE RECONCILIATION GRACE — disposable E2E proof
+
+- Docker `29.9.2` was available. A new loopback-only `postgres:17-alpine` container with tmpfs storage and database `code_forge_test` received all 7 migrations; no existing container or volume was used.
+- Focused `maintenance-cleanup.e2e-spec.ts` run for pending-grace, immediate `NEEDS_RECONCILIATION`, and cross-type fail-closed cases passed **3/3** (3 unrelated tests skipped by the name filter). The suite verified new PENDING stays unresolved under 120 seconds, `NEEDS_RECONCILIATION` is picked up immediately, and ambiguous cross-type state remains fenced.
+- The exact task-owned container was stopped with automatic removal; the test-owned Git root was cleaned by the suite. No cloud migration, deploy, restart or secret was used.
