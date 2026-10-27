@@ -1394,3 +1394,9 @@ cloud status.
 
 - Read-only `GET https://code-forge-api-thviet.onrender.com/api/v1/repositories?page=1` returned HTTP 200 with the synthetic public fixture `btl-demo-873496/btl-demo` and a direct Render clone URL. `git ls-remote` against that URL exited 0 but returned no refs because the repository is empty.
 - This proves current public endpoint/transport reachability only; it does not prove content fetch, push, quota, admin/audit, persistence or release acceptance. No PAT, Git ref, database, storage, deployment or cloud setting was mutated.
+
+## T65-BTL HOSTED DOCUMENTATION GATE — exact latest checkpoint
+
+- GitHub Actions `MVP verification` #175 ([run `40443649156`](https://github.com/VuLeCoder/Code-forge/actions/runs/40443649156)) completed **success in 5m54s** on exact docs SHA `3ff191b` pushed to `thviet`.
+- Hosted gates observed on the job page: backend unit **21 suites / 201 tests**, backend E2E **10 suites / 71 tests**, frontend E2E **56/56**, full-stack browser **3 passed**, backend Docker image/runtime smoke, migration image smoke, disposable migration and `git diff --check`. The known non-fatal frontend profile-load warning appeared again and did not fail the run.
+- This is CI evidence only. It does not close P2/P8 cloud deployment, migration, backup/restore, write-freeze/drain, source-loss recovery or direct Git-content smoke gates; no cloud state, database, Git storage, Docker volume or secret was changed.
