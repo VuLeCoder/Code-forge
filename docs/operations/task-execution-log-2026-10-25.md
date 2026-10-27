@@ -1477,3 +1477,8 @@ cloud status.
 
 - Browser Harness on the owner session inspected Neon project `Code Forge` (`green-mountain-81958216`), branch `production`, Singapore/Free. Backup & Restore showed a 6-hour history window, no snapshots and no schedule configured.
 - No Restore, Create snapshot, schedule, migration, billing change or data mutation was performed. This confirms the current provider UI state only; production backup/restore remains OPEN.
+
+## T80-BTL NEON CONNECTION PREFLIGHT — read-only
+
+- The Neon Connect modal for `production` showed database `neondb`, role `neondb_owner`, and a connection-pooling option. No password was revealed and no connection string was copied or logged.
+- This confirms only the visible target metadata and pooling UI; direct/pooled URLs remain provider secrets and production migration/backup acceptance is still OPEN.
