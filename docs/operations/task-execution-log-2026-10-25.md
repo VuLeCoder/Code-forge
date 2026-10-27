@@ -1499,3 +1499,9 @@ cloud status.
 
 - GitHub Actions `MVP verification` #204 ([run `40461688886`](https://github.com/VuLeCoder/Code-forge/actions/runs/40461688886)) completed **success** on exact SHA `5f8d413164927456a4e0c53841187c9f61c75a7a` pushed to `thviet`.
 - All workflow steps were green, including backend unit/E2E, lint, typecheck, build, frontend/full-stack Playwright, Docker API and migration image smoke, disposable migration and whitespace. This verifies the handoff/documentation checkpoint only; P2/P8 cloud recovery remains open.
+
+## T84-BTL MAINTENANCE GRACE RECHECK — current branch
+
+- On the current branch `codex/push-crash-proof` at `59d5d1b`, `corepack pnpm --filter backend exec jest --runInBand --runTestsByPath src/maintenance/maintenance-jobs.service.spec.ts` passed **18/18** in 4.297s.
+- The focused unit suite asserts that fresh `PENDING` merge journals are filtered by the 120-second grace cutoff while `NEEDS_RECONCILIATION` journals are selected without a `createdAt` delay. Expected warning logs were emitted by failure-path tests; no source, database, Git storage, Docker volume or cloud state changed.
+- This is local focused evidence only. It does not close the separate cloud P2/P8 migration, backup/restore, restart/source-loss or release gates.
