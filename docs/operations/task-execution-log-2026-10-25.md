@@ -1455,4 +1455,10 @@ cloud status.
 ## T75-BTL FULL-STACK FIXTURE ALIGNMENT
 
 - Hosted run #192 on `3edb282` failed twice at the full-stack PR journey because its fixture password lacked the new required digit (`mvp-pr-journey-password`). The auth policy was intentionally not weakened; the fixture now uses `mvp-pr-journey-password-1`.
-- Local full-stack execution could not reach the test because this shell has no `DATABASE_URL`; frontend lint/typecheck and the repository Playwright suite remain green. The fixture-only patch is isolated to `frontend/test-fullstack/pull-requests.spec.ts`; no production API or cloud state changed. A new hosted run is required for final CI evidence.
+- Local full-stack execution could not reach the test because this shell has no `DATABASE_URL`; frontend lint/typecheck and the repository Playwright suite remain green. The fixture-only patch is isolated to `frontend/test-fullstack/pull-requests.spec.ts`; no production API or cloud state changed.
+- Replacement hosted run #193 (`40453128999`) completed **success in 6m31s** on exact SHA `f58ef3d`, providing the required CI evidence for the fixture correction.
+
+## T76-BTL CLOUD READINESS RECHECK — read-only
+
+- Render readiness endpoint returned HTTP 200 with database, Git and storage checks up. The public repository list returned HTTP 200 with the synthetic public fixture, and anonymous `git ls-remote` against its HTTPS endpoint exited 0 with no refs.
+- This probe did not deploy, migrate, restart, mutate refs, inspect secrets or alter Neon/Render state. It is readiness/transport evidence only; admin/audit cloud, quota boundaries, backup/restore and source-loss recovery remain open for P2/P8.
