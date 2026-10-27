@@ -6,9 +6,9 @@ BTL demo slice P2 đã có bằng chứng cho readiness, public/private Git HTTP
 
 | Trường | Kết quả |
 | --- | --- |
-| Last CI-verified runtime candidate | `thviet`: `70500d849f1d0e31e64618cc51f311161f716459` |
-| Code CI evidence | `MVP verification` #150 (`40359823730`) passed all 28/28 steps on the exact runtime candidate. |
-| Latest CI at check | Hosted runtime/test gates through #167 (`40437674377`) are green on exact `e27a8ea`; docs-only #169 (`40440248084`), #170 (`40440737174`), #171 (`40441046301`), #172 (`40441281021`), #173 (`40442228491`), #174 (`40442933565`), #175 (`40443649156`), #176 (`40444281060`), #177 (`40444731371`) and #178 (`40445667702`) completed successfully on their exact documentation SHAs. These docs-only runs do not change the runtime candidate `70500d8`. |
+| Last CI-verified runtime candidate | `thviet`: code candidate `f58ef3d` (exact SHA `f58ef3d33457a91d00e11a44da541b7bd8c5393b`) |
+| Code CI evidence | `MVP verification` #193 (`40453128999`) passed successfully in 6m31s on the exact runtime candidate. |
+| Latest CI at check | Docs-only checkpoints #194 (`40453906441`), #195 (`40454832579`), #196 (`40455544444`) and #197 (`40456342235`) passed; #197 passed in 5m57s on exact docs SHA `dfe735b`. These docs-only runs do not change the Render runtime candidate. |
 | Render commit đang chạy | `388c584` theo Render Dashboard; chưa phải source tip hiện tại |
 | Render auto-deploy | `After CI Checks Pass`; pushes to `thviet` may redeploy. Do not push until the documented source-recovery preflight is satisfied. |
 | Render service limits | Dashboard read-only check: `code-forge-api-thviet`, Free plan, no persistent disk; Live `388c584`; source can be lost on restart/redeploy. |
@@ -16,9 +16,9 @@ BTL demo slice P2 đã có bằng chứng cho readiness, public/private Git HTTP
 | Neon history window | 6 hours; this is time-travel/instant-restore history, not a completed production export/restore rehearsal. T38 only rehearsed local PostgreSQL metadata backup/restore. |
 | Frontend URL | Chưa có; Vercel deferred/out of scope |
 | Backend URL | `https://code-forge-api-thviet.onrender.com` |
-| Readiness probe | 2026-10-27: `GET /api/v1/health/ready` → HTTP 200; database/Git/storage đều `up`, Git `2.39.5`, trên deployed `388c584` (Render vẫn chưa ở CI-verified runtime candidate `70500d8`) |
+| Readiness probe | 2026-10-27: `GET /api/v1/health/ready` → HTTP 200; database/Git/storage đều `up`, Git `2.39.5`, trên deployed `388c584` (Render vẫn chưa ở CI-verified runtime candidate `f58ef3d`) |
 | Live revision endpoint | 2026-10-27: `GET /api/v1/health/live` → HTTP 200, body chỉ có `status` và `timestamp`; không có `commitSha` trên deployed `388c584`, nên source revision không được suy ra |
-| Public repository API | 2026-10-26: HTTP 200 sau cold start; initial wake requests returned `503 hibernate-pending-wake`. Read-only 2026-10-27: `GET /api/v1/repositories?page=1` returned HTTP 200 with synthetic public fixture `btl-demo-873496/btl-demo` and direct Render clone URL `https://code-forge-api-thviet.onrender.com/api/v1/git/btl-demo-873496/btl-demo.git`. |
+| Public repository API | Read-only probe 2026-10-27: `GET /api/v1/repositories?page=1` returned HTTP 200 with synthetic public fixture `btl-demo-873496/btl-demo` and direct Render clone URL `https://code-forge-api-thviet.onrender.com/api/v1/git/btl-demo-873496/btl-demo.git`. |
 | Git/PR HTTPS smoke | 2026-10-26: anonymous public clone/fetch; private PAT clone/push/fetch; owner PR merge/fetch `f8468c6063a70aea4306f6ab6de7a1c58cafb7bd`; WRITE invitation→accept→collaborator push/PR→owner merge/fetch `481d75d44f2ad2855bab853cb55d28c96235877b`. Both merge commits have two parents. Temporary PATs revoked and sessions logged out. Payload/quota, admin and recovery not tested. |
 | Người nghiệm thu | Codex; Render API/Git/PR integration smoke plus local T-COMPOSE/T37/T38/T40 evidence, not visual browser or full release acceptance |
 
