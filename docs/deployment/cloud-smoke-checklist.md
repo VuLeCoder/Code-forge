@@ -16,8 +16,8 @@
 | Neon history window | 6 hours; this is time-travel/instant-restore history, not a completed production export/restore rehearsal. T38 only rehearsed local PostgreSQL metadata backup/restore. |
 | Frontend URL | Chưa có; Vercel deferred/out of scope |
 | Backend URL | `https://code-forge-api-thviet.onrender.com` |
-| Readiness probe | 2026-10-26: `GET /api/v1/health/ready` → HTTP 200; database/Git/storage đều `up` trên deployed `388c584` (Render vẫn chưa ở CI-verified runtime candidate `70500d8`) |
-| Live revision endpoint | 2026-10-26: `GET /api/v1/health/live` → HTTP 200, body chỉ có `status` và `timestamp`; `commitSha` chưa có trên deployed `388c584`, nên source change `97d5d34` chưa được xác minh live |
+| Readiness probe | 2026-10-27: `GET /api/v1/health/ready` → HTTP 200; database/Git/storage đều `up`, Git `2.39.5`, trên deployed `388c584` (Render vẫn chưa ở CI-verified runtime candidate `70500d8`) |
+| Live revision endpoint | 2026-10-27: `GET /api/v1/health/live` → HTTP 200, body chỉ có `status` và `timestamp`; không có `commitSha` trên deployed `388c584`, nên source revision không được suy ra |
 | Public repository API | 2026-10-26: HTTP 200 sau cold start; initial wake requests returned `503 hibernate-pending-wake` |
 | Git/PR HTTPS smoke | 2026-10-26: anonymous public clone/fetch; private PAT clone/push/fetch; owner PR merge/fetch `f8468c6063a70aea4306f6ab6de7a1c58cafb7bd`; WRITE invitation→accept→collaborator push/PR→owner merge/fetch `481d75d44f2ad2855bab853cb55d28c96235877b`. Both merge commits have two parents. Temporary PATs revoked and sessions logged out. Payload/quota, admin and recovery not tested. |
 | Người nghiệm thu | Codex; Render API/Git/PR integration smoke plus local T-COMPOSE/T37/T38/T40 evidence, not visual browser or full release acceptance |
@@ -28,7 +28,7 @@ Readiness implementation chạy `SELECT 1` qua Prisma và ghi/xóa file tạm tr
 
 ## Tài khoản và quyền truy cập
 
-- [x] Backend readiness: `GET https://code-forge-api-thviet.onrender.com/api/v1/health/ready` trả HTTP 200; database, Git executable và storage đều `up` (2026-10-26; deployed commit `388c584`).
+- [x] Backend readiness: `GET https://code-forge-api-thviet.onrender.com/api/v1/health/ready` trả HTTP 200; database, Git executable (`2.39.5`) và storage đều `up` (2026-10-27; deployed commit `388c584`).
 - [ ] Frontend HTTPS tải được. Chưa có frontend cloud host trong phạm vi hiện tại; không suy ra từ API readiness.
 - [ ] Kiểm tra rate limit qua Render với hai client độc lập; gửi `X-Forwarded-For`/`CF-Connecting-IP` và `X-CodeForge-Client-IP`/signature giả từ client, xác minh không chia sẻ bucket sai hoặc vượt giới hạn. Ghi lại số trusted proxy hop thực tế; backend phải bỏ qua IP chưa ký hợp lệ.
 - [ ] Đăng ký hoặc đăng nhập, refresh, logout; sau logout request API dùng access token cũ bị từ chối.

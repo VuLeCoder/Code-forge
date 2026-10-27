@@ -8,9 +8,9 @@ Tạo image và chuẩn bị hướng dẫn không chứng minh dịch vụ clou
 
 ### Bằng chứng hiện tại
 
-- Last CI-verified runtime candidate on `thviet`: `70500d8` (exact SHA `70500d849f1d0e31e64618cc51f311161f716459`). Hosted CI #150 passed all 28/28 steps on that exact SHA. Render has not been verified at this candidate or redeployed from it.
-- Render Dashboard xác nhận service `code-forge-api-thviet` đang chạy deploy `388c584`, không phải source tip hiện tại. Probe readiness ngày 2026-10-26 trả HTTP 200 với database/Git/storage `up`; endpoint thực hiện `SELECT 1` qua Prisma và ghi/xóa file tạm trong storage. Đây chỉ là bằng chứng connectivity/readiness trên deploy `388c584`, không phải probe chỉ đọc hay smoke nghiệp vụ.
-- Read-only `GET /api/v1/health/live` returned HTTP 200 but only `status` and `timestamp`, without `commitSha`; the health revision field from source commit `97d5d34` is not live yet. Render Settings shows Auto-Deploy `After CI Checks Pass`; a push to `thviet` may redeploy this service.
+- Latest hosted-verified branch candidate on `thviet`: `e27a8ea`; hosted CI #167 passed all 28/28 steps on that exact SHA. HEAD/origin `thviet` is docs-only `283b9f3`; Render has not been verified at the latest candidate or redeployed from it.
+- Render Dashboard xác nhận service `code-forge-api-thviet` đang chạy deploy `388c584`, không phải source tip hiện tại. Probe readiness ngày 2026-10-27 trả HTTP 200 với database/Git/storage `up` và Git `2.39.5`; endpoint thực hiện `SELECT 1` qua Prisma và ghi/xóa file tạm trong storage. Đây chỉ là bằng chứng connectivity/readiness trên deploy `388c584`, không phải probe chỉ đọc hay smoke nghiệp vụ.
+- Read-only `GET /api/v1/health/live` ngày 2026-10-27 trả HTTP 200 nhưng body chỉ có `status` và `timestamp`, không có `commitSha`; không suy ra source revision live. Render Settings shows Auto-Deploy `After CI Checks Pass`; a push to `thviet` may redeploy this service.
 - Lịch sử có deploy `4407e7d` thất bại `P1001`; nguyên nhân gốc chưa được chứng minh. Readiness hiện tại cho thấy kết nối hoạt động tại thời điểm probe, không chứng minh đã xác định hoặc loại trừ nguyên nhân lỗi cũ.
 - Basic Git/auth smoke trực tiếp đã được xác minh trên deploy `388c584` (anonymous public clone/fetch, private PAT clone/push/fetch và owner/collaborator PR smoke). Full TLS/proxy, quota payload, admin/audit, migration, backup/restore, cold start và mất source khi restart/khôi phục vẫn chưa nghiệm thu; không suy ra cloud release từ CI hay local image smoke.
 
