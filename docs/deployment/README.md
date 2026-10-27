@@ -8,7 +8,7 @@ Tạo image và chuẩn bị hướng dẫn không chứng minh dịch vụ clou
 
 ### Bằng chứng hiện tại
 
-- Latest hosted-verified branch candidate on `thviet`: `e27a8ea`; hosted CI #167 passed all 28/28 steps on that exact SHA. HEAD/origin `thviet` is docs-only `283b9f3`; Render has not been verified at the latest candidate or redeployed from it.
+- Latest hosted-verified branch candidate on `thviet`: `e27a8ea`; hosted CI #167 passed all 28/28 steps on that exact SHA. HEAD/origin `thviet` is docs-only `7da48e1`; follow-up docs-only runs #169, #170 and #172 completed successfully, while #171 remains in progress at the last read-only poll. Render has not been verified at the latest candidate or redeployed from it.
 - Render Dashboard xác nhận service `code-forge-api-thviet` đang chạy deploy `388c584`, không phải source tip hiện tại. Probe readiness ngày 2026-10-27 trả HTTP 200 với database/Git/storage `up` và Git `2.39.5`; endpoint thực hiện `SELECT 1` qua Prisma và ghi/xóa file tạm trong storage. Đây chỉ là bằng chứng connectivity/readiness trên deploy `388c584`, không phải probe chỉ đọc hay smoke nghiệp vụ.
 - Read-only `GET /api/v1/health/live` ngày 2026-10-27 trả HTTP 200 nhưng body chỉ có `status` và `timestamp`, không có `commitSha`; không suy ra source revision live. Render Settings shows Auto-Deploy `After CI Checks Pass`; a push to `thviet` may redeploy this service.
 - Lịch sử có deploy `4407e7d` thất bại `P1001`; nguyên nhân gốc chưa được chứng minh. Readiness hiện tại cho thấy kết nối hoạt động tại thời điểm probe, không chứng minh đã xác định hoặc loại trừ nguyên nhân lỗi cũ.
