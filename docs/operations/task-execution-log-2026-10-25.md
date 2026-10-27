@@ -1472,3 +1472,8 @@ cloud status.
 
 - On the exact current worktree SHA, `corepack pnpm lint`, `corepack pnpm typecheck`, and `corepack pnpm build` all passed for backend and frontend. The build generated the existing Next.js routes successfully; no source files were changed by the gate run.
 - This is local verification for the current branch; hosted CI and cloud evidence remain separately recorded. User-owned untracked `frontend/AGENTS.md` and `frontend/CLAUDE.md` remain preserved.
+
+## T79-BTL NEON DASHBOARD PREFLIGHT — read-only
+
+- Browser Harness on the owner session inspected Neon project `Code Forge` (`green-mountain-81958216`), branch `production`, Singapore/Free. Backup & Restore showed a 6-hour history window, no snapshots and no schedule configured.
+- No Restore, Create snapshot, schedule, migration, billing change or data mutation was performed. This confirms the current provider UI state only; production backup/restore remains OPEN.

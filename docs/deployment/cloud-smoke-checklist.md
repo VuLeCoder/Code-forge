@@ -13,7 +13,7 @@ BTL demo slice P2 đã có bằng chứng cho readiness, public/private Git HTTP
 | Render auto-deploy | `After CI Checks Pass`; pushes to `thviet` may redeploy. Do not push until the documented source-recovery preflight is satisfied. |
 | Render service limits | Dashboard read-only check: `code-forge-api-thviet`, Free plan, no persistent disk; Live `388c584`; source can be lost on restart/redeploy. |
 | Neon resource | Dashboard read-only check: project `Code Forge` (`green-mountain-81958216`), branch `production`, Singapore, Free; separate from `BUS Ticket`. |
-| Neon history window | 6 hours; this is time-travel/instant-restore history, not a completed production export/restore rehearsal. T38 only rehearsed local PostgreSQL metadata backup/restore. |
+| Neon history window | Read-only dashboard check 2026-10-27: `production` has a 6-hour history window, with no snapshots and no backup schedule configured. This is time-travel/instant-restore history, not a completed production export/restore rehearsal; T38 only rehearsed local PostgreSQL metadata backup/restore. |
 | Frontend URL | Chưa có; Vercel deferred/out of scope |
 | Backend URL | `https://code-forge-api-thviet.onrender.com` |
 | Readiness probe | 2026-10-27: `GET /api/v1/health/ready` → HTTP 200; database/Git/storage đều `up`, Git `2.39.5`, trên deployed `388c584` (Render vẫn chưa ở CI-verified runtime candidate `f58ef3d`) |
