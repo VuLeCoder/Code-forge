@@ -8,7 +8,7 @@
 | --- | --- |
 | Last CI-verified runtime candidate | `thviet`: `70500d849f1d0e31e64618cc51f311161f716459` |
 | Code CI evidence | `MVP verification` #150 (`40359823730`) passed all 28/28 steps on the exact runtime candidate. |
-| Latest CI at check | Hosted runtime/test gates through #167 (`40437674377`) are green on exact `e27a8ea`; docs-only #169 (`40440248084`), #170 (`40440737174`), #171 (`40441046301`), #172 (`40441281021`), #173 (`40442228491`), #174 (`40442933565`), #175 (`40443649156`), #176 (`40444281060`) and #177 (`40444731371`) completed successfully on their exact documentation SHAs. These docs-only runs do not change the runtime candidate `70500d8`. |
+| Latest CI at check | Hosted runtime/test gates through #167 (`40437674377`) are green on exact `e27a8ea`; docs-only #169 (`40440248084`), #170 (`40440737174`), #171 (`40441046301`), #172 (`40441281021`), #173 (`40442228491`), #174 (`40442933565`), #175 (`40443649156`), #176 (`40444281060`), #177 (`40444731371`) and #178 (`40445667702`) completed successfully on their exact documentation SHAs. These docs-only runs do not change the runtime candidate `70500d8`. |
 | Render commit đang chạy | `388c584` theo Render Dashboard; chưa phải source tip hiện tại |
 | Render auto-deploy | `After CI Checks Pass`; pushes to `thviet` may redeploy. Do not push until the documented source-recovery preflight is satisfied. |
 | Render service limits | Dashboard read-only check: `code-forge-api-thviet`, Free plan, no persistent disk; Live `388c584`; source can be lost on restart/redeploy. |
