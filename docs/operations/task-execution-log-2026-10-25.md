@@ -1505,3 +1505,9 @@ cloud status.
 - On the current branch `codex/push-crash-proof` at `59d5d1b`, `corepack pnpm --filter backend exec jest --runInBand --runTestsByPath src/maintenance/maintenance-jobs.service.spec.ts` passed **18/18** in 4.297s.
 - The focused unit suite asserts that fresh `PENDING` merge journals are filtered by the 120-second grace cutoff while `NEEDS_RECONCILIATION` journals are selected without a `createdAt` delay. Expected warning logs were emitted by failure-path tests; no source, database, Git storage, Docker volume or cloud state changed.
 - This is local focused evidence only. It does not close the separate cloud P2/P8 migration, backup/restore, restart/source-loss or release gates.
+
+## T85-BTL HOSTED MAINTENANCE CHECKPOINT — exact checkpoint
+
+- GitHub Actions `MVP verification` #207 ([run `40462758067`](https://github.com/VuLeCoder/Code-forge/actions/runs/40462758067)) completed **success** on exact SHA `802be54ca30f215634ab527f9e40d5f6605ec497` pushed to `thviet`.
+- The single `verify` job completed in 4m38s (workflow duration 4m42s), including backend/frontend gates, Docker API/migration image smoke, disposable migration and whitespace checks. GitHub emitted only the existing Node.js 20 deprecation and Ubuntu 26 migration notices; no job failure occurred.
+- This is hosted CI evidence for the maintenance documentation checkpoint only. Cloud migration, backup/restore, restart/source-loss recovery and other P2/P8 gates remain open.
