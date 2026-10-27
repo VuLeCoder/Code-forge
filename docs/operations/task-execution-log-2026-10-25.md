@@ -1359,3 +1359,7 @@ cloud status.
 - After Docker Desktop became available, ran the full `backend/test/admin.e2e-spec.ts` suite in disposable container `codeforge-admin-regression-20261027` on loopback port `52353`, PostgreSQL 17 with tmpfs storage, all 7 migrations and a test-owned Git root.
 - Result: **4/4 tests passed** (user/private-source boundaries, T50 repository-lock receive-pack race, last-active-admin race and T51 login/refresh race). This confirms the T52 cleanup repair locally and resolves the transaction-timeout observation in this exact isolated run.
 - Cleanup removed exactly the labeled container; no existing Docker volume, database, Git storage or cloud resource was touched. This remains local evidence until the exact hosted `thviet` run completes.
+
+## T54-BTL HOSTED ADMIN REGRESSION — exact cleanup candidate
+
+- GitHub Actions `MVP verification` #164 ([run `40436650173`](https://github.com/VuLeCoder/Code-forge/actions/runs/40436650173)) completed **success, 28/28** on exact `thviet` SHA `cec57fa` in 6m07s. This verifies T50/T51/T52 code plus the existing workflow gates on hosted Linux; it is not cloud deploy/recovery evidence.
