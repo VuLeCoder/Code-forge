@@ -1387,7 +1387,7 @@ cloud status.
 
 ## T61-BTL CLOUD DOCUMENTATION CONSISTENCY
 
-- Updated the deployment README and cloud checklist to record the actual hosted candidate evidence (#167 on `e27a8ea`), the docs-only runs #169 (`40440248084`), #170 (`40440737174`), #171 (`40441046301`), #172 (`40441281021`) and #173 (`40442228491`) completed successfully. The verified basic Render Git/auth/PR smoke remains separate from the unverified full TLS/proxy, quota, admin/audit, migration, backup/restore and source-loss recovery gates.
+- Updated the deployment README and cloud checklist to record the actual hosted candidate evidence (#167 on `e27a8ea`), the docs-only runs #169 (`40440248084`), #170 (`40440737174`), #171 (`40441046301`), #172 (`40441281021`), #173 (`40442228491`) and #174 (`40442933565`) completed successfully. The verified basic Render Git/auth/PR smoke remains separate from the unverified full TLS/proxy, quota, admin/audit, migration, backup/restore and source-loss recovery gates.
 - Updated the implementation ledger, next-actions page and acceptance snapshot to remove obsolete “497fd5d pending” wording while preserving the runtime/cloud distinction. Read-only review found no actionable finding; `git diff --check` passed. No cloud state or secrets changed.
 
 ## T64-BTL RENDER PUBLIC READ-ONLY PROBE
