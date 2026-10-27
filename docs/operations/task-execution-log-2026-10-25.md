@@ -1418,3 +1418,8 @@ cloud status.
 - Bootstrap created local admin username `demo-admin`; API registration created local user `demo-user`. The demo contains one public repository (`demo-user/demo-repo`), one private repository (`demo-admin/admin-private-demo`), and a WRITE invitation accepted by the admin. Passwords and connection values are intentionally omitted from this log.
 - Local backend `http://localhost:44000` readiness returned HTTP 200 with database/Git/storage up; frontend `http://localhost:3001/login` returned HTTP 200. Admin stats returned two active users, two active repositories, and zero pull requests. Anonymous admin endpoint access remained HTTP 401. Anonymous public Git `ls-remote` resolved the local repository's `main` ref.
 - Backend build passed before startup. The demo processes/container remain running for the current walkthrough and are task-owned; they are not release evidence. The database and Git storage are ephemeral and must not be treated as cloud persistence. A temporary marker created during setup was removed. Existing Docker volumes and unrelated containers were not touched.
+
+## T69-BTL LOCAL DEMO AUTH SMOKE — session-backed API check
+
+- Rechecked the running isolated demo without printing credentials or cookies: admin login returned HTTP 200 and the authenticated admin stats endpoint returned HTTP 200 with 2 users, 2 repositories and 0 pull requests; user login returned HTTP 200 and the authenticated repository list returned HTTP 200.
+- The first probe intentionally used the wrong field name (`identifier`) and received the expected HTTP 400 validation envelope; the corrected session-cookie flow passed. This is local API evidence only; it does not establish browser UX or Render/Neon acceptance.
