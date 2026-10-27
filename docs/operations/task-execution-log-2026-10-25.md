@@ -1489,3 +1489,8 @@ cloud status.
 - Direct probes at the current service returned `/api/v1/health/ready` HTTP 200 with database/Git/storage `up` and Git `2.39.5`; `/api/v1/health/live` returned HTTP 200; `/api/v1/repositories?page=1&limit=20` returned HTTP 200 with the synthetic public `btl-demo-873496/btl-demo` fixture and direct Render clone URL. Anonymous `git -c protocol.version=2 ls-remote --heads` exited 0 and returned no refs because the fixture is empty.
 - Neon Browser Harness still showed project `Code Forge` (`green-mountain-81958216`), production branch `br-steep-snow-aod67yel`, Singapore/Free, 6-hour history; the Connect modal displayed `neondb`/`neondb_owner` and pooling without revealing a password. No deploy, restart, migration, backup/restore, Git ref, database, storage, Docker volume or secret was changed.
 - This refresh strengthens readiness/transport evidence only. Cloud content/auth/quota, migration, backup/restore, restart/source-loss recovery, admin/audit and release-drain acceptance remain OPEN.
+
+## T82-BTL HOSTED DOCUMENTATION GATE — exact checkpoint
+
+- GitHub Actions `MVP verification` #203 ([run `40461037109`](https://github.com/VuLeCoder/Code-forge/actions/runs/40461037109)) completed **success** on exact SHA `823c4b12cb0fbdbab162c59d1347ffe2d4ba9af5` pushed to `thviet`.
+- The run completed backend unit/E2E, lint, typecheck, build, frontend Playwright, full-stack Playwright, Docker API image/runtime smoke, migration image/runtime smoke, disposable migration and `git diff --check`. This is hosted CI evidence for the documentation checkpoint; it does not close cloud migration, backup/restore, source-loss recovery or other P2/P8 gates.
