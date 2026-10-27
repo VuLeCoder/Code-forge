@@ -14,6 +14,10 @@ import { normalizeEmail, normalizeUsername } from './normalization';
 
 type AuthResult = { user: PublicUser; accessToken: string; refreshToken: string };
 
+// Keep the password verification path comparable when the login identifier is
+// unknown. This is a fixed Argon2id hash of a value that is never accepted.
+const DUMMY_PASSWORD_HASH = '$argon2id$v=19$m=19456,p=1,t=2$rih3rhImYxa6HOcDcpF2FA$302mL1FByAxw/yCa7AZgzL6GDp+beh38JJLSTcgnaBs';
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -68,7 +72,9 @@ export class AuthService {
 
   async login(dto: LoginDto): Promise<AuthResult> {
     const user = await this.users.findByLogin(normalizeEmail(dto.login));
-    if (!user || !(await argon2.verify(user.passwordHash, dto.password))) {
+    const passwordHash = user?.passwordHash ?? DUMMY_PASSWORD_HASH;
+    const passwordMatches = await argon2.verify(passwordHash, dto.password);
+    if (!user || !passwordMatches) {
       throw new AuthError(HttpStatus.UNAUTHORIZED, 'INVALID_CREDENTIALS', 'Thông tin đăng nhập không chính xác.');
     }
     this.assertActive(user.status);
