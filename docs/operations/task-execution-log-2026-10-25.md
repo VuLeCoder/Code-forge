@@ -1451,3 +1451,8 @@ cloud status.
 - Added a visible Quick setup card to the repository page so users can see the clone or first-push workflow without opening the Clone dialog. It shows HTTPS commands, the default branch, PAT guidance for private repositories, write-permission guidance, and a copy-all-commands action; the existing Clone dialog and API contract remain unchanged.
 - Changed only `frontend/src/app/[username]/[repo]/quick-setup.tsx`, the repository page/CSS, and focused repository tests. User-owned untracked `frontend/AGENTS.md` and `frontend/CLAUDE.md` were preserved and not staged.
 - Local verification: frontend lint and typecheck passed; repository/reset plus M3.1–M3.7 Playwright suite passed **14/14**; independent read-only review reported **No findings**; `git diff --check` passed. Hosted CI is required after pushing the candidate. This task does not close P2/P8 cloud acceptance.
+
+## T75-BTL FULL-STACK FIXTURE ALIGNMENT
+
+- Hosted run #192 on `3edb282` failed twice at the full-stack PR journey because its fixture password lacked the new required digit (`mvp-pr-journey-password`). The auth policy was intentionally not weakened; the fixture now uses `mvp-pr-journey-password-1`.
+- Local full-stack execution could not reach the test because this shell has no `DATABASE_URL`; frontend lint/typecheck and the repository Playwright suite remain green. The fixture-only patch is isolated to `frontend/test-fullstack/pull-requests.spec.ts`; no production API or cloud state changed. A new hosted run is required for final CI evidence.

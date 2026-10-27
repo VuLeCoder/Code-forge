@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import type { PrismaClient as Database } from '../../backend/test/fullstack-types';
 
 const origin = 'http://localhost:3112';
-const password = 'mvp-pr-journey-password';
+const password = 'mvp-pr-journey-password-1';
 const run = promisify(execFile);
 const requireBackend = createRequire(resolve('../backend/package.json'));
 const { PrismaClient } = requireBackend('@prisma/client') as typeof import('../../backend/test/fullstack-types');
