@@ -1439,3 +1439,9 @@ cloud status.
 
 - GitHub Actions `MVP verification` #185 ([run `40448842247`](https://github.com/VuLeCoder/Code-forge/actions/runs/40448842247)) completed **success, 28/28** on exact SHA `4861c85`. This verifies the GitHub-inspired account menu, SVG icon refinement, existing frontend flows, backend gates, Docker image checks, migrations and whitespace gate on hosted CI.
 - No Render/Neon state, source storage, cloud migration or deployment was changed; cloud release/recovery remains a separate open acceptance boundary.
+
+## T73-BTL AUTH REGISTRATION HARDENING — local evidence
+
+- Commit `5cc5225` hardens the existing registration/login contract without introducing a mail-provider or 2FA bypass: unknown login identifiers now take the Argon2id dummy-verification path, and new passwords require 8–128 characters containing at least one letter and one digit. The registration hint is associated with the password input while the existing confirmation behavior is preserved.
+- Focused backend auth/DTO tests passed **13/13**; registration Playwright passed **1/1**; backend/frontend lint and typecheck passed; `git diff --check` passed. An independent read-only security review confirmed the timing-safe path; its suggestion to require special characters is not a project requirement and was not adopted.
+- Email verification and TOTP 2FA remain explicitly unimplemented and are documented in `docs/operations/auth-security-slice-2026-10-27.md`; they require a real provider/credential-storage contract and additional migrations/tests. No secret, mail credential, raw verification token, 2FA secret, database, Git storage, Docker volume or cloud resource was changed.
