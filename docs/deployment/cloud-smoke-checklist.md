@@ -18,7 +18,7 @@
 | Backend URL | `https://code-forge-api-thviet.onrender.com` |
 | Readiness probe | 2026-10-27: `GET /api/v1/health/ready` → HTTP 200; database/Git/storage đều `up`, Git `2.39.5`, trên deployed `388c584` (Render vẫn chưa ở CI-verified runtime candidate `70500d8`) |
 | Live revision endpoint | 2026-10-27: `GET /api/v1/health/live` → HTTP 200, body chỉ có `status` và `timestamp`; không có `commitSha` trên deployed `388c584`, nên source revision không được suy ra |
-| Public repository API | 2026-10-26: HTTP 200 sau cold start; initial wake requests returned `503 hibernate-pending-wake` |
+| Public repository API | 2026-10-26: HTTP 200 sau cold start; initial wake requests returned `503 hibernate-pending-wake`. Read-only 2026-10-27: `GET /api/v1/repositories?page=1` returned HTTP 200 with synthetic public fixture `btl-demo-873496/btl-demo` and direct Render clone URL `https://code-forge-api-thviet.onrender.com/api/v1/git/btl-demo-873496/btl-demo.git`. |
 | Git/PR HTTPS smoke | 2026-10-26: anonymous public clone/fetch; private PAT clone/push/fetch; owner PR merge/fetch `f8468c6063a70aea4306f6ab6de7a1c58cafb7bd`; WRITE invitation→accept→collaborator push/PR→owner merge/fetch `481d75d44f2ad2855bab853cb55d28c96235877b`. Both merge commits have two parents. Temporary PATs revoked and sessions logged out. Payload/quota, admin and recovery not tested. |
 | Người nghiệm thu | Codex; Render API/Git/PR integration smoke plus local T-COMPOSE/T37/T38/T40 evidence, not visual browser or full release acceptance |
 
@@ -39,6 +39,7 @@ Readiness implementation chạy `SELECT 1` qua Prisma và ghi/xóa file tạm tr
 ## Git HTTP trực tiếp Render
 
 - [ ] `git ls-remote <public-url>` hoạt động qua HTTPS/TLS.
+- Read-only 2026-10-27: `git ls-remote https://code-forge-api-thviet.onrender.com/api/v1/git/btl-demo-873496/btl-demo.git` exited 0 but returned no refs because the synthetic repository is empty; this proves endpoint/transport reachability only, not repository content, fetch, push or full cloud acceptance.
 - [x] Private clone, commit, push branch và fetch branch bằng PAT hoạt động (2026-10-26); SHA fetch khớp SHA push.
 - [x] Basic challenge trả về `401` cho request không có credential và authenticated private Git operation thành công qua Render, xác nhận Authorization tới được backend.
 - [ ] Push payload hợp lệ lớn hơn 4,5 MB qua URL Render trực tiếp; kiểm tra push sát quota hoạt động, vượt quota bị từ chối và ref không thay đổi. Git Smart HTTP phải đi trực tiếp backend Render, không đi qua frontend proxy.

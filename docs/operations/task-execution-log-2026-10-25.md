@@ -1389,3 +1389,8 @@ cloud status.
 
 - Updated the deployment README and cloud checklist to record the actual hosted candidate evidence (#167 on `e27a8ea`), the docs-only run #169 on `90ed237` currently in progress, and the verified basic Render Git/auth/PR smoke. Full TLS/proxy, quota, admin/audit, migration, backup/restore and source-loss recovery remain explicitly open.
 - Updated the implementation ledger, next-actions page and acceptance snapshot to remove obsolete “497fd5d pending” wording while preserving the runtime/cloud distinction. Read-only review found no actionable finding; `git diff --check` passed. No cloud state or secrets changed.
+
+## T64-BTL RENDER PUBLIC READ-ONLY PROBE
+
+- Read-only `GET https://code-forge-api-thviet.onrender.com/api/v1/repositories?page=1` returned HTTP 200 with the synthetic public fixture `btl-demo-873496/btl-demo` and a direct Render clone URL. `git ls-remote` against that URL exited 0 but returned no refs because the repository is empty.
+- This proves current public endpoint/transport reachability only; it does not prove content fetch, push, quota, admin/audit, persistence or release acceptance. No PAT, Git ref, database, storage, deployment or cloud setting was mutated.
