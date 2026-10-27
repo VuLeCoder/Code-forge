@@ -1511,3 +1511,9 @@ cloud status.
 - GitHub Actions `MVP verification` #207 ([run `40462758067`](https://github.com/VuLeCoder/Code-forge/actions/runs/40462758067)) completed **success** on exact SHA `802be54ca30f215634ab527f9e40d5f6605ec497` pushed to `thviet`.
 - The single `verify` job completed in 4m38s (workflow duration 4m42s), including backend/frontend gates, Docker API/migration image smoke, disposable migration and whitespace checks. GitHub emitted only the existing Node.js 20 deprecation and Ubuntu 26 migration notices; no job failure occurred.
 - This is hosted CI evidence for the maintenance documentation checkpoint only. Cloud migration, backup/restore, restart/source-loss recovery and other P2/P8 gates remain open.
+
+## T86-BTL HOSTED HANDOFF CHECKPOINT — exact checkpoint
+
+- GitHub Actions `MVP verification` #208 ([run `40463293976`](https://github.com/VuLeCoder/Code-forge/actions/runs/40463293976)) completed **success** on exact SHA `76766de` pushed to `thviet`.
+- The `verify` job completed in 5m23s (workflow duration 5m25s); backend/frontend tests, lint, typecheck, build, Docker API/migration image smoke, migration-image execution and `git diff --check` all passed. Only the existing Node.js 20 deprecation and Ubuntu 26 migration notices remained.
+- This confirms the hosted documentation checkpoint. It does not close cloud production migration, backup/restore, restart/source-loss recovery or other P2/P8 gates.
