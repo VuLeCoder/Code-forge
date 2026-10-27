@@ -1467,3 +1467,8 @@ cloud status.
 
 - Created a task-owned PostgreSQL database `codeforge_maintenance_20261027_test` inside the existing demo container, ran `corepack pnpm --filter backend exec jest --config test/jest-e2e.json --runInBand test/maintenance-cleanup.e2e-spec.ts`, and observed **6/6 passed** in 6.282s. The suite covered orphan-temp cleanup, retention/idempotence, 120-second pending grace, immediate `NEEDS_RECONCILIATION`, cross-type fail-closed behavior, and unresolved merge/push retention.
 - The suite emitted expected warning logs while intentionally blocking purge behind unresolved journals; assertions passed. The temporary database was dropped in `finally`; the existing `code_forge` database, Docker container and volumes were not reset or removed. This is local isolated evidence only and does not close cloud P2/P8.
+
+## T78-BTL WORKSPACE GATE RECHECK — current branch
+
+- On the exact current worktree SHA, `corepack pnpm lint`, `corepack pnpm typecheck`, and `corepack pnpm build` all passed for backend and frontend. The build generated the existing Next.js routes successfully; no source files were changed by the gate run.
+- This is local verification for the current branch; hosted CI and cloud evidence remain separately recorded. User-owned untracked `frontend/AGENTS.md` and `frontend/CLAUDE.md` remain preserved.
