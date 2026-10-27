@@ -1347,3 +1347,9 @@ cloud status.
 
 - Updated only `backend/test/admin.e2e-spec.ts` so the login/refresh-vs-account-lock race registers and promotes its own `AccountRaceAdmin` instead of depending on `adminAccount` from a preceding test. This makes the focused test-name run deterministic without changing production behavior or assertions.
 - Backend typecheck, targeted ESLint and `git diff --check` passed. Independent read-only review reported **No findings**. Focused E2E remains blocked before setup because Docker Desktop's Linux daemon is unavailable; no database/container/volume was touched.
+
+## T52-BTL ADMIN RACE FIXTURE CLEANUP — CI failure root-cause repair
+
+- CI #161 (`40436044748`) exposed that T50 left its newly promoted admin account in the isolated schema; the existing last-active-admin test then observed three active admins and received 200 instead of the expected 409. The same run also showed the pre-existing login/refresh race transaction timeout; that remains separately observed until a clean candidate proves it.
+- Added one cleanup assertion path in `backend/test/admin.e2e-spec.ts`: delete exactly T50's admin and owner fixtures after PAT/repository cleanup. No production behavior, schema, migration, cloud resource or shared fixture changes.
+- Typecheck, `git diff --check` and independent read-only review passed. Docker Desktop was unavailable, so no local E2E rerun was possible; the next exact `thviet` CI run is required to validate the repair.

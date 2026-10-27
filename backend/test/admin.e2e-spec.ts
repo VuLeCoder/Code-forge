@@ -461,6 +461,7 @@ process.exit(result.status ?? 1);
       openPack.mockRestore();
       await db!.personalAccessToken.deleteMany({ where: { id: token.id, userId: owner.user.id } });
       await db!.repository.deleteMany({ where: { id: stored.id } });
+      await db!.user.deleteMany({ where: { id: { in: [admin.user.id, owner.user.id] } } });
     }
   }, 60_000);
 
