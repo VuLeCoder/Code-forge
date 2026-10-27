@@ -2,7 +2,7 @@
 
 ## Current release gates (2026-10-27; older “Current” blocks below are historical)
 
-- Latest hosted-verified branch candidate is `4861c85`; `MVP verification` #185 (`40448842247`) passed all 28/28 steps on that exact SHA, including the account-menu UI changes. Docs-only run #186 on `3320ada` also completed successfully in 5m34s. HEAD/origin `thviet` is docs-only `30f5037`; docs-only run #187 was in progress at this checkpoint. Render deployment remains gated and has not been verified at the latest candidate.
+- Latest hosted-verified branch candidate is `4861c85`; `MVP verification` #185 (`40448842247`) passed all 28/28 steps on that exact SHA, including the account-menu UI changes. Docs-only run #186 on `3320ada` also completed successfully in 5m34s. HEAD/origin `thviet` is docs-only `0f5f406`; docs-only run #187 was in progress at the prior checkpoint and run #188 for this commit is currently in progress. Render deployment remains gated and has not been verified at the latest candidate.
 - Next release step remains cloud recovery rehearsal, not another blind redeploy: read-only Render/Neon dashboard preflight now verifies service identity, `thviet` binding, Auto-Deploy `After CI Checks Pass`, Free/no-persistent-disk limits, and the separate Neon `Code Forge` production branch with a 6-hour history window. Backup/restore capability and source-recovery behavior are still unverified; latest hosted candidate `4861c85` is CI-verified by #185. Issue #6 stays deferred/fail-closed; add more tests only for a demonstrated remaining acceptance gap.
 - Completed for the BTL demo: local full-stack owner/collaborator/PR journey, hosted CI #138 on source tip `7588c0a`, Render readiness/local-frontend→Render API, public anonymous clone/fetch, private PAT clone/push/fetch, owner PR merge/fetch and collaborator WRITE invite/accept/push/PR/owner-merge/fetch. Temporary PATs were revoked. Evidence is in the acceptance board, cloud checklist and task log.
 - Cloud/release still partial: admin/audit cloud, payload/quota boundaries, migration, backup/restore and restart/source-loss recovery are unverified. Render Free storage may lose Git source on restart; historical P1001 cause remains unknown. Do not redeploy/restart as a “fix” without a source recovery plan.
@@ -12,7 +12,7 @@
 - The account menu UI is complete and verified locally: avatar menu, keyboard Escape/focus restoration, outside-click dismissal, SVG icons and 375px no-overflow behavior. Focused header tests passed 2/2 and the full frontend milestone passed 18/18; hosted #185 is the authoritative CI evidence for the code candidate.
 - Do not mark P0–P8 complete from a green CI run alone; the BTL demo is usable before every production/recovery gate is closed.
 
-- T37 is locally verified and committed: the child API is killed after durable `GIT_CHILD_SUCCEEDED` but before journal finish, then replacement reconciliation completes the journal, emits one audit and permits a subsequent push. Keep this separate from hosted CI and cloud recovery until the feature commit is intentionally integrated.
+- T37 is integrated into hosted candidate `4861c85` (the local proof commit `34ba7b0` is an ancestor and CI #185 passed): the child API is killed after durable `GIT_CHILD_SUCCEEDED` but before journal finish, then replacement reconciliation completes the journal, emits one audit and permits a subsequent push. Keep this separate from cloud recovery evidence.
 
 Older “Current” paragraphs below are historical snapshots and must not override this section.
 
@@ -68,7 +68,7 @@ flowchart TD
   U6[Owner selects issue updates] --> C5
 ```
 
-## Current stop conditions
+## Historical stop conditions
 
 - Integration CI remains #138 on `7588c0a`; separate feature CI #139 (`40340975441`) succeeded on exact pushed SHA `200c22da92d72536b585d66769154283325d41e3`. Older run references are historical, not candidate status.
 - T27–T34 are pushed and CI-verified on the feature branch, but not merged to `thviet`/`main` or deployed. Preserve this distinction when integrating and handing off.
