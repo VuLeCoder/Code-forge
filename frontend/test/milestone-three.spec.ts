@@ -45,9 +45,13 @@ test('M3.6 clone dialog copies public URL, handles clipboard errors, keyboard an
 test('M3.7 private repository offers a clean URL and username/PAT instructions', async ({ page }) => {
   await page.route('**/api/v1/auth/*', (route) => route.fulfill({ status: 401, json: {} }));
   await page.route('**/api/v1/repos/alice/private', (route) => route.fulfill({ json: { repository: {
-    id: 'private', owner: { username: 'alice' }, name: 'private', visibility: 'PRIVATE', permissions: { canRead: true, canWrite: true, canManage: true }, defaultBranch: 'main',
+    id: 'private', owner: { username: 'alice' }, name: 'private', visibility: 'PRIVATE', permissions: { canRead: true, canWrite: true, canManage: true }, defaultBranch: 'main', cloneUrl: 'http://localhost:3111/git/alice/private.git',
   } } }));
   await page.goto('/alice/private');
+  const quickSetup = page.getByRole('region', { name: 'Bắt đầu với repository này' });
+  await expect(quickSetup).toBeVisible();
+  await expect(quickSetup).toContainText('git clone http://localhost:3111/git/alice/private.git');
+  await expect(quickSetup).toContainText('không đưa PAT vào URL');
   await page.getByRole('button', { name: 'Clone', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('Khi Git hỏi mật khẩu, nhập PAT');

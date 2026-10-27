@@ -115,6 +115,93 @@
   background: #fff8e7;
   line-height: 1.6;
 }
+.quickSetup {
+  margin-bottom: 20px;
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, var(--surface), var(--brand-50));
+}
+.quickSetupHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.quickSetupHeader h2 {
+  margin-top: 5px;
+  font-size: 1.25rem;
+  letter-spacing: -0.02em;
+}
+.quickSetupHeader p,
+.quickSetupAside p {
+  margin-top: 8px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.quickSetupGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(220px, 1fr);
+  gap: 18px;
+}
+.quickSetupGrid h3 {
+  margin-bottom: 10px;
+  font-size: 0.98rem;
+}
+.quickSetupSteps {
+  display: grid;
+  gap: 7px;
+  margin: 0 0 12px;
+  padding-left: 22px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+.quickSetupCode {
+  max-width: 100%;
+  margin: 0;
+  padding: 14px 16px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.82rem;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.quickSetupAside {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+}
+.cloneUrl {
+  display: block;
+  max-width: 100%;
+  padding: 8px 10px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--brand-700);
+  font-size: 0.78rem;
+}
+.quickSetupAside a {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--brand-700);
+  font-weight: 600;
+}
+.quickSetupStatus {
+  min-height: 1.4em;
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
 .readme {
   width: 100%;
   margin: 0;
@@ -126,6 +213,15 @@
   border-radius: var(--radius-sm);
 }
 @media (max-width: 600px) {
+  .quickSetup {
+    padding: 18px;
+  }
+  .quickSetupGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .quickSetupHeader .button {
+    width: 100%;
+  }
   .empty {
     padding: 42px 20px;
   }

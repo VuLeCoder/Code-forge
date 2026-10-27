@@ -5,7 +5,7 @@ const owner = {
   createdAt: "2026-10-01T00:00:00.000Z",
 };
 
-test("repository reset is clear while branch, history, and clone actions reflect empty storage", async ({ page }) => {
+test("repository reset is clear while branch, history, and clone actions reflect empty storage", async ({ page, context }) => {
   const cloneUrl = "https://git.example.test/api/v1/git/alice/lost-project.git";
   await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { user: owner } }));
   await page.route("**/api/v1/repos/alice/lost-project/branches*", (route) => route.fulfill({ json: {
@@ -25,6 +25,14 @@ test("repository reset is clear while branch, history, and clone actions reflect
 
   await expect(page.getByRole("status").filter({ hasText: "Mã nguồn của repository demo đã bị reset" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Repository chưa có mã nguồn" })).toBeVisible();
+  const quickSetup = page.getByRole("region", { name: "Bắt đầu với repository này" });
+  await expect(quickSetup).toBeVisible();
+  await expect(quickSetup).toContainText("git init -b main");
+  await expect(quickSetup).toContainText("git push -u origin main");
+  await expect(quickSetup).toContainText(cloneUrl);
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await quickSetup.getByRole("button", { name: "Sao chép lệnh" }).click();
+  await expect(quickSetup.getByRole("status")).toHaveText("Đã sao chép hướng dẫn Git.");
   await expect(page.getByRole("heading", { name: "README.md" })).toHaveCount(0);
   await expect(page.getByRole("combobox", { name: "Branch" })).toBeDisabled();
   await expect(page.getByRole("option", { name: "Chưa có branch" })).toBeAttached();
