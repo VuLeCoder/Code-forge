@@ -599,8 +599,8 @@ process.exit(result.status ?? 1);
       const body = await response.json() as { user: { id: string } };
       return { userId: body.user.id, cookie: cookie(response) };
     };
-    const admin = adminAccount;
-    if (!admin) throw new Error('Admin account fixture was not created by the preceding admin acceptance test.');
+    const admin = await register('AccountRaceAdmin');
+    await db!.user.update({ where: { id: admin.userId }, data: { systemRole: 'ADMIN' } });
 
     const waitForBlockedQuery = async (fragment: string) => {
       const deadline = Date.now() + 10_000;
