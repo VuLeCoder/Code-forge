@@ -8,7 +8,7 @@
 | --- | --- |
 | Last CI-verified runtime candidate | `thviet`: `70500d849f1d0e31e64618cc51f311161f716459` |
 | Code CI evidence | `MVP verification` #150 (`40359823730`) passed all 28/28 steps on the exact runtime candidate. |
-| Latest CI at check | Runtime #150 (`40359823730`) success on `70500d8`; test/docs follow-up runs #153/#154 are still pending |
+| Latest CI at check | Hosted runtime/test gates through #167 (`40437674377`) are green on exact `e27a8ea`; docs-only #169 (`40440248084`) for `90ed237` is currently in progress. This does not change the runtime candidate `70500d8`. |
 | Render commit đang chạy | `388c584` theo Render Dashboard; chưa phải source tip hiện tại |
 | Render auto-deploy | `After CI Checks Pass`; pushes to `thviet` may redeploy. Do not push until the documented source-recovery preflight is satisfied. |
 | Render service limits | Dashboard read-only check: `code-forge-api-thviet`, Free plan, no persistent disk; Live `388c584`; source can be lost on restart/redeploy. |

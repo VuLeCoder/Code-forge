@@ -12,7 +12,7 @@ Tạo image và chuẩn bị hướng dẫn không chứng minh dịch vụ clou
 - Render Dashboard xác nhận service `code-forge-api-thviet` đang chạy deploy `388c584`, không phải source tip hiện tại. Probe readiness ngày 2026-10-26 trả HTTP 200 với database/Git/storage `up`; endpoint thực hiện `SELECT 1` qua Prisma và ghi/xóa file tạm trong storage. Đây chỉ là bằng chứng connectivity/readiness trên deploy `388c584`, không phải probe chỉ đọc hay smoke nghiệp vụ.
 - Read-only `GET /api/v1/health/live` returned HTTP 200 but only `status` and `timestamp`, without `commitSha`; the health revision field from source commit `97d5d34` is not live yet. Render Settings shows Auto-Deploy `After CI Checks Pass`; a push to `thviet` may redeploy this service.
 - Lịch sử có deploy `4407e7d` thất bại `P1001`; nguyên nhân gốc chưa được chứng minh. Readiness hiện tại cho thấy kết nối hoạt động tại thời điểm probe, không chứng minh đã xác định hoặc loại trừ nguyên nhân lỗi cũ.
-- Chưa nghiệm thu migration/backup/restore, TLS/proxy, Git HTTP trực tiếp, auth/quyền, cold start, mất source khi restart và khôi phục. Không suy ra cloud acceptance từ CI hay local image smoke.
+- Basic Git/auth smoke trực tiếp đã được xác minh trên deploy `388c584` (anonymous public clone/fetch, private PAT clone/push/fetch và owner/collaborator PR smoke). Full TLS/proxy, quota payload, admin/audit, migration, backup/restore, cold start và mất source khi restart/khôi phục vẫn chưa nghiệm thu; không suy ra cloud release từ CI hay local image smoke.
 
 Chỉ đánh dấu cloud release đạt sau khi điền kết quả thật theo release commit vào [cloud smoke checklist](./cloud-smoke-checklist.md).
 

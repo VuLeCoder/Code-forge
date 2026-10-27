@@ -1384,3 +1384,8 @@ cloud status.
 - Docker `29.9.2` was available. A new loopback-only `postgres:17-alpine` container with tmpfs storage and database `code_forge_test` received all 7 migrations; no existing container or volume was used.
 - Focused `maintenance-cleanup.e2e-spec.ts` run for pending-grace, immediate `NEEDS_RECONCILIATION`, and cross-type fail-closed cases passed **3/3** (3 unrelated tests skipped by the name filter). The suite verified new PENDING stays unresolved under 120 seconds, `NEEDS_RECONCILIATION` is picked up immediately, and ambiguous cross-type state remains fenced.
 - The exact task-owned container was stopped with automatic removal; the test-owned Git root was cleaned by the suite. No cloud migration, deploy, restart or secret was used.
+
+## T61-BTL CLOUD DOCUMENTATION CONSISTENCY
+
+- Updated the deployment README and cloud checklist to record the actual hosted candidate evidence (#167 on `e27a8ea`), the docs-only run #169 on `90ed237` currently in progress, and the verified basic Render Git/auth/PR smoke. Full TLS/proxy, quota, admin/audit, migration, backup/restore and source-loss recovery remain explicitly open.
+- Updated the implementation ledger, next-actions page and acceptance snapshot to remove obsolete “497fd5d pending” wording while preserving the runtime/cloud distinction. Read-only review found no actionable finding; `git diff --check` passed. No cloud state or secrets changed.
