@@ -1517,3 +1517,10 @@ cloud status.
 - GitHub Actions `MVP verification` #208 ([run `40463293976`](https://github.com/VuLeCoder/Code-forge/actions/runs/40463293976)) completed **success** on exact SHA `76766de` pushed to `thviet`.
 - The `verify` job completed in 5m23s (workflow duration 5m25s); backend/frontend tests, lint, typecheck, build, Docker API/migration image smoke, migration-image execution and `git diff --check` all passed. Only the existing Node.js 20 deprecation and Ubuntu 26 migration notices remained.
 - This confirms the hosted documentation checkpoint. It does not close cloud production migration, backup/restore, restart/source-loss recovery or other P2/P8 gates.
+
+## T87-BTL VERCEL TYPECHECK FIX + HOSTED GATE — exact checkpoint
+
+- Vercel reported `TS7006` for `entry` in `frontend/test-fullstack/milestone-three.spec.ts` during a clean `pnpm run build`. The fix in `a7061c0` adds explicit structural types to the two audit assertions; it does not exclude tests, weaken strictness, or change runtime/API behavior.
+- Local verification on the current worktree: `corepack pnpm --filter frontend typecheck`, `corepack pnpm --filter frontend build`, targeted ESLint for `test-fullstack/milestone-three.spec.ts`, and `git diff --check` all passed.
+- GitHub Actions `MVP verification` #210 ([run `40464163263`](https://github.com/VuLeCoder/Code-forge/actions/runs/40464163263)) completed **success** on exact SHA `a7061c0` in 5m42s. Backend/frontend tests, lint, typecheck, build, Docker API/migration smoke, migration-image execution and whitespace passed.
+- This confirms the source/build fix and hosted CI only. Vercel deployment remains dependent on its project being connected to the intended `thviet` source; no Vercel project or secret was modified by Codex.
