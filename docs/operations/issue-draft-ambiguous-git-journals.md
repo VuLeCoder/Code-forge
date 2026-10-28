@@ -1,6 +1,6 @@
 # Draft issue — audited recovery for ambiguous Git journals
 
-**Status:** Published as open GitHub issue [#6 — Add an audited, fail-closed workflow for ambiguous Git journals](https://github.com/VuLeCoder/Code-forge/issues/6). This local document is a supporting copy of the published issue; do not create a duplicate. The ADMIN/operator and one/two-approver decisions remain unresolved and are tracked in `docs/next-actions.md`.
+**Status:** Published as open GitHub issue [#6 — Add an audited, fail-closed workflow for ambiguous Git journals](https://github.com/VuLeCoder/Code-forge/issues/6). This local document is a supporting copy of the published issue; do not create a duplicate. The 2026-10-28 feature candidate proceeds with the existing active `ADMIN` role and one operator; hosted review/CI and the issue status remain pending.
 
 ## Proposed title
 

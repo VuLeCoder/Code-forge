@@ -5,7 +5,7 @@ import { AdminListQueryDto } from './admin.dto';
 import { RepositoryLockService } from '../repositories/repository-lock.service';
 import { GitPushJournalService } from '../repositories/git-push-journal.service';
 
-const DETAIL_KEYS = new Set(['repositoryId', 'number', 'operationId', 'mergeCommitSha', 'changedRefCount', 'storageGeneration', 'from', 'to', 'invitationId', 'memberId', 'role', 'channel']);
+const DETAIL_KEYS = new Set(['repositoryId', 'number', 'operationId', 'mergeCommitSha', 'changedRefCount', 'storageGeneration', 'from', 'to', 'invitationId', 'memberId', 'role', 'channel', 'operationType', 'outcome', 'reasonCode', 'resolutionCode', 'originalActorId']);
 
 @Injectable()
 export class AdminService {
@@ -24,15 +24,17 @@ export class AdminService {
   }
 
   async stats() {
-    const [users, activeUsers, lockedUsers, repositories, activeRepositories, lockedRepositories, deletedRepositories, pullRequests, openPullRequests, pendingMerges] = await Promise.all([
+    const [users, activeUsers, lockedUsers, repositories, activeRepositories, lockedRepositories, deletedRepositories, pullRequests, openPullRequests, pendingMerges, pendingPushes] = await Promise.all([
       this.db.user.count(), this.db.user.count({ where: { status: 'ACTIVE' } }), this.db.user.count({ where: { status: 'LOCKED' } }),
       this.db.repository.count(), this.db.repository.count({ where: { status: 'ACTIVE' } }), this.db.repository.count({ where: { status: 'LOCKED' } }),
       this.db.repository.count({ where: { status: 'DELETED' } }), this.db.pullRequest.count(), this.db.pullRequest.count({ where: { status: 'OPEN' } }),
       this.db.pullRequestMergeOperation.count({ where: { status: { in: ['PENDING', 'NEEDS_RECONCILIATION'] } } }),
+      this.db.gitPushOperation.count({ where: { status: { in: ['PENDING', 'NEEDS_RECONCILIATION'] } } }),
     ]);
     return { users: { total: users, active: activeUsers, locked: lockedUsers },
       repositories: { total: repositories, active: activeRepositories, locked: lockedRepositories, deleted: deletedRepositories },
-      pullRequests: { total: pullRequests, open: openPullRequests, pendingMerges } };
+      pullRequests: { total: pullRequests, open: openPullRequests, pendingMerges },
+      gitJournals: { unresolved: pendingMerges + pendingPushes, pushes: pendingPushes, merges: pendingMerges } };
   }
 
   async listUsers(query: AdminListQueryDto) {

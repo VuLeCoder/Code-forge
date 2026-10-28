@@ -1,5 +1,11 @@
 # Code Forge completion checklist
 
+## Current feature work (2026-10-28)
+
+- [x] Implement the Issue #6 proof-based admin workflow on `feat/ambiguous-journal-resolution` under the chosen policy of one active `ADMIN`: allowlisted unresolved-journal listing, repository advisory lock, permission/revision/generation/storage/competition rechecks, bounded reason codes, atomic operator audit, idempotent retry, and no Git ref mutation.
+- [x] Local evidence: backend unit 23 suites / 214 tests; full PostgreSQL 17 + real-Git admin E2E 5/5; admin browser 4/4; backend/frontend lint and typecheck; frontend production build; `git diff --check`. The PostgreSQL E2E used a loopback-only tmpfs container which was stopped and auto-removed; no existing database or volume was reset.
+- [ ] Commit/push this feature branch and obtain hosted CI/review evidence before marking Issue #6 delivered or closing the issue. Cloud behavior remains unverified.
+
 ## Historical open release gates (2026-10-26; superseded)
 
 For current acceptance and remaining tasks, see [the acceptance board](../operations/acceptance-task-board-2026-10-25.md) and [next actions](../next-actions.md). The checklist below predates the latest Render Git/PR smoke and is retained as history.

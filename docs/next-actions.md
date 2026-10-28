@@ -1,5 +1,9 @@
 # Code Forge — remaining task plan
 
+## Current feature candidate (2026-10-28)
+
+Issue #6 is now implemented locally on `feat/ambiguous-journal-resolution` using the existing active `ADMIN` role and one operator. Resolution is evidence-based only: it never moves refs, uses a fixed `OPERATOR_REVIEW` reason, records original actor and resolving admin separately, and leaves unknown/contradictory or competing journals unresolved and fenced. Local unit, focused PostgreSQL/Git E2E, admin browser, lint, typecheck and build gates pass. Commit, hosted CI, independent review and any issue-status change remain pending; do not treat this branch-local evidence as a cloud or release result.
+
 ## Current release gates (2026-10-27; older “Current” blocks below are historical)
 
 - Latest hosted-verified branch candidate is `f58ef3d`; `MVP verification` #193 (`40453128999`) completed successfully in 6m31s on that exact SHA. The prior #192 attempt failed twice because the full-stack fixture password did not satisfy the already-enforced digit requirement; the fixture-only correction is now hosted and green. Render deployment remains gated and has not been verified at the latest candidate.
