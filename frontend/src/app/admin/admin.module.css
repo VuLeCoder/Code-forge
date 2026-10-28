@@ -9,7 +9,7 @@
 .tabs .activeTab { color: var(--brand-700); border-bottom-color: var(--brand-600); }
 .tabs button:focus-visible, .tableButton:focus-visible, .inlineButton:focus-visible, .filters input:focus-visible, .filters select:focus-visible { outline: 3px solid color-mix(in srgb, var(--brand-600), transparent 62%); outline-offset: 2px; }
 .panel { display: grid; gap: 1rem; min-width: 0; }
-.statsGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+.statsGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 1rem; }
 .statCard { display: grid; gap: .45rem; min-width: 0; padding: 1.25rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); }
 .statCard > span { color: var(--muted); font-size: .88rem; font-weight: 650; }
 .statCard strong { font-size: 2rem; letter-spacing: -.04em; }

@@ -2,6 +2,8 @@
 
 ## Current verified snapshot (2026-10-27)
 
+**Feature-branch update, 2026-10-28:** Issue #6 now has a local proof-based admin implementation on `feat/ambiguous-journal-resolution`. It adds privacy-bounded listing, lock/revision/permission/storage/generation/competition checks, provable push and two-parent merge outcomes, atomic bounded operator audit, idempotent retry, and an admin UI. Unknown evidence remains unresolved and keeps mutation gates closed; the workflow never moves Git refs. Local evidence is backend unit 23/23 suites (214 tests), full PostgreSQL 17 + Git admin E2E 5/5, admin Playwright 4/4, backend/frontend lint and typecheck, frontend build, and whitespace check. The implementation is committed locally but is not yet hosted-CI verified, merged, deployed, or reflected in GitHub issue status.
+
 For detailed evidence and residual acceptance cases, use [the acceptance board](operations/acceptance-task-board-2026-10-25.md), [next actions](next-actions.md), and [the cloud checklist](deployment/cloud-smoke-checklist.md). Historical snapshots below are not current status.
 
 - Latest hosted-verified code candidate is `f58ef3d`; MVP verification #193 (`40453128999`) passed in 6m31s. Documentation checkpoints #194 (`40453906441`) and #195 (`40454832579`) passed successfully; #195 verified exact HEAD/origin `thviet` SHA `b557d5a` in 5m33s. Render has not been redeployed or observed at the latest candidate.

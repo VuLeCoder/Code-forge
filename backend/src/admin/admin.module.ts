@@ -4,10 +4,11 @@ import { AdminController } from './admin.controller';
 import { AdminGuard } from './admin.guard';
 import { AdminService } from './admin.service';
 import { RepositoriesModule } from '../repositories/repositories.module';
+import { AdminGitJournalService } from './admin-git-journal.service';
 
 @Module({
   imports: [AuthModule, RepositoriesModule],
   controllers: [AdminController],
-  providers: [AdminService, AdminGuard],
+  providers: [AdminService, AdminGitJournalService, AdminGuard],
 })
 export class AdminModule {}

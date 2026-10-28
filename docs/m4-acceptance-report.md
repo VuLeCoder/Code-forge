@@ -1,6 +1,6 @@
 # Báo cáo nghiệm thu M4 — Git push
 
-Ngày nghiệm thu: **24/10/2026**
+Ngày nghiệm thu: **28/10/2026**
 
 Commit nền: `7f7e397`
 

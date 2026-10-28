@@ -6,12 +6,13 @@ import { useAuth } from "@/components/auth-provider";
 import { sessionFetch } from "@/lib/auth";
 import styles from "./admin.module.css";
 
-type Tab = "overview" | "users" | "repositories" | "audit";
+type Tab = "overview" | "users" | "repositories" | "journals" | "audit";
 type PageResult = { page: number; pageSize: number; total: number; hasMore: boolean };
 type AdminUser = { id: string; username: string; email: string; systemRole: "USER" | "ADMIN"; status: "ACTIVE" | "LOCKED"; lockedAt: string | null; createdAt: string };
 type AdminRepository = { id: string; name: string; description: string | null; visibility: "PUBLIC" | "PRIVATE"; status: "ACTIVE" | "LOCKED" | "DELETED"; defaultBranch: string | null; storageGeneration: number; createdAt: string; updatedAt: string; deletedAt: string | null; purgeAfter: string | null; owner: { id: string; username: string }; _count: { pullRequests: number; members: number } };
 type AuditEntry = { id: string; actorId: string | null; action: string; targetId: string; details: Record<string, string | number | boolean | null>; createdAt: string; actor: { id: string; username: string } | null };
-type Stats = { users: { total: number; active: number; locked: number }; repositories: { total: number; active: number; locked: number; deleted: number }; pullRequests: { total: number; open: number; pendingMerges: number } };
+type GitJournal = { type: "PUSH" | "MERGE"; operationId: string; actorId: string; actor: { id: string; username: string } | null; status: "PENDING" | "NEEDS_RECONCILIATION"; errorCode: string | null; storageGeneration: number; createdAt: string; updatedAt: string; pullRequestNumber?: number; repository: { id: string; name: string; owner: { id: string; username: string } } };
+type Stats = { users: { total: number; active: number; locked: number }; repositories: { total: number; active: number; locked: number; deleted: number }; pullRequests: { total: number; open: number; pendingMerges: number }; gitJournals: { unresolved: number; pushes: number; merges: number } };
 type RequestError = Error & { status?: number; code?: string };
 type PendingAction = { title: string; description: string; path: string; method: "PATCH" | "POST"; body?: unknown };
 
@@ -34,6 +35,9 @@ function formatDate(value: string | null) {
 function errorGuidance(error: RequestError) {
   if (error.status === 401) return "Phiên đăng nhập không còn hiệu lực. Hãy đăng nhập lại rồi thử lại.";
   if (error.status === 403) return "Tài khoản hiện tại không có quyền quản trị.";
+  if (error.status === 409 && ["COMPETING_GIT_JOURNAL", "GIT_OUTCOME_UNKNOWN", "MERGE_CANDIDATE_MISMATCH", "GIT_STORAGE_MISSING", "STORAGE_GENERATION_CHANGED", "INVALID_GIT_EVIDENCE"].includes(error.code ?? "")) {
+    return `${error.message} Journal vẫn chưa phân giải và repository tiếp tục bị chặn ghi.`;
+  }
   if (error.status === 409) return `${error.message} Dữ liệu đã thay đổi; hãy tải lại danh sách trước khi thử lại.`;
   return error.message;
 }
@@ -44,6 +48,7 @@ export default function AdminPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [repositories, setRepositories] = useState<AdminRepository[]>([]);
+  const [journals, setJournals] = useState<GitJournal[]>([]);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [pageInfo, setPageInfo] = useState<PageResult>({ page: 1, pageSize: 20, total: 0, hasMore: false });
   const [page, setPage] = useState(1);
@@ -70,16 +75,19 @@ export default function AdminPage() {
       } else {
         const params = new URLSearchParams({ page: String(page) });
         if (query) params.set("q", query);
-        if (statusFilter) params.set("status", statusFilter);
+        if (statusFilter) params.set(tab === "journals" ? "type" : "status", statusFilter);
         if (tab === "audit" && actionFilter) params.set("action", actionFilter);
         const result = tab === "users"
           ? await request<{ users: AdminUser[] } & PageResult>(`users?${params}`, { signal })
           : tab === "repositories"
             ? await request<{ repositories: AdminRepository[] } & PageResult>(`repositories?${params}`, { signal })
-            : await request<{ audit: AuditEntry[] } & PageResult>(`audit?${params}`, { signal });
+            : tab === "journals"
+              ? await request<{ journals: GitJournal[] } & PageResult>(`git-journals?${params}`, { signal })
+              : await request<{ audit: AuditEntry[] } & PageResult>(`audit?${params}`, { signal });
         if (signal?.aborted) return;
         if (tab === "users") setUsers((result as { users: AdminUser[] }).users);
         else if (tab === "repositories") setRepositories((result as { repositories: AdminRepository[] }).repositories);
+        else if (tab === "journals") setJournals((result as { journals: GitJournal[] }).journals);
         else setAudit((result as { audit: AuditEntry[] }).audit);
         setPageInfo({ page: result.page, pageSize: result.pageSize, total: result.total, hasMore: result.hasMore });
       }
@@ -173,7 +181,8 @@ export default function AdminPage() {
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "overview", label: "Tổng quan" }, { id: "users", label: "Người dùng" },
-    { id: "repositories", label: "Repositories" }, { id: "audit", label: "Nhật ký" },
+    { id: "repositories", label: "Repositories" }, { id: "journals", label: "Đối soát Git" },
+    { id: "audit", label: "Nhật ký" },
   ];
 
   return <main className={`container ${styles.shell}`}>
@@ -194,14 +203,15 @@ export default function AdminPage() {
           <article className={styles.statCard}><span>Người dùng</span><strong>{stats.users.total}</strong><small>{stats.users.active} hoạt động · {stats.users.locked} bị khóa</small></article>
           <article className={styles.statCard}><span>Repositories</span><strong>{stats.repositories.total}</strong><small>{stats.repositories.active} hoạt động · {stats.repositories.locked} khóa · {stats.repositories.deleted} đã xóa</small></article>
           <article className={styles.statCard}><span>Pull requests</span><strong>{stats.pullRequests.total}</strong><small>{stats.pullRequests.open} đang mở · {stats.pullRequests.pendingMerges} cần đối soát</small></article>
+          <article className={styles.statCard}><span>Git journals chưa phân giải</span><strong>{stats.gitJournals.unresolved}</strong><small>{stats.gitJournals.pushes} push · {stats.gitJournals.merges} merge</small></article>
         </div>}
         <p className={styles.privacyNote}>Thông tin source và diff không được hiển thị trong khu vực admin.</p>
       </>}
 
-      {(tab === "users" || tab === "repositories" || tab === "audit") && <>
+      {(tab === "users" || tab === "repositories" || tab === "journals" || tab === "audit") && <>
         <form className={styles.filters} onSubmit={search}>
-          <label className={styles.searchField}><span>{tab === "users" ? "Tìm username hoặc email" : tab === "repositories" ? "Tìm repository hoặc chủ sở hữu" : "Tìm hành động hoặc target ID"}</span><input type="search" value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder="Nhập từ khóa" /></label>
-          {tab !== "audit" ? <label><span>Trạng thái</span><select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }}><option value="">Tất cả</option>{tab === "users" ? <><option value="ACTIVE">Hoạt động</option><option value="LOCKED">Đã khóa</option></> : <><option value="ACTIVE">Hoạt động</option><option value="LOCKED">Đã khóa</option><option value="DELETED">Đã xóa</option></>}</select></label> : <label><span>Hành động</span><input value={actionFilter} onChange={(event) => { setActionFilter(event.target.value); setPage(1); }} placeholder="Ví dụ ADMIN_USER_LOCKED" /></label>}
+          <label className={styles.searchField}><span>{tab === "users" ? "Tìm username hoặc email" : tab === "repositories" ? "Tìm repository hoặc chủ sở hữu" : tab === "journals" ? "Tìm operation ID, repository hoặc chủ sở hữu" : "Tìm hành động hoặc target ID"}</span><input type="search" value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder="Nhập từ khóa" /></label>
+          {tab !== "audit" ? <label><span>{tab === "journals" ? "Loại thao tác" : "Trạng thái"}</span><select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }}><option value="">Tất cả</option>{tab === "users" ? <><option value="ACTIVE">Hoạt động</option><option value="LOCKED">Đã khóa</option></> : tab === "journals" ? <><option value="PUSH">Push</option><option value="MERGE">Merge</option></> : <><option value="ACTIVE">Hoạt động</option><option value="LOCKED">Đã khóa</option><option value="DELETED">Đã xóa</option></>}</select></label> : <label><span>Hành động</span><input value={actionFilter} onChange={(event) => { setActionFilter(event.target.value); setPage(1); }} placeholder="Ví dụ ADMIN_USER_LOCKED" /></label>}
           <button className="button buttonPrimary" type="submit">Tìm kiếm</button>
         </form>
 
@@ -209,6 +219,8 @@ export default function AdminPage() {
           {users.length === 0 ? <p className={styles.empty}>Không tìm thấy người dùng phù hợp.</p> : <div className={styles.tableWrap}><table><caption className="srOnly">Danh sách người dùng quản trị</caption><thead><tr><th scope="col">Tài khoản</th><th scope="col">Vai trò</th><th scope="col">Trạng thái</th><th scope="col">Ngày tạo</th><th scope="col">Thao tác</th></tr></thead><tbody>{users.map((item) => <tr key={item.id}><td data-label="Tài khoản"><strong>{item.username}</strong><small>{item.email}</small></td><td data-label="Vai trò">{item.systemRole === "ADMIN" ? "Admin" : "User"}</td><td data-label="Trạng thái"><span className={item.status === "ACTIVE" ? styles.statusActive : styles.statusLocked}>{item.status === "ACTIVE" ? "Hoạt động" : "Đã khóa"}</span></td><td data-label="Ngày tạo">{formatDate(item.createdAt)}</td><td data-label="Thao tác" className={styles.actionCell}>{item.id === user.id && item.status === "ACTIVE" ? <span className={styles.muted}>Tài khoản hiện tại</span> : <button className={styles.tableButton} type="button" onClick={(event) => openAction(event.currentTarget, { title: item.status === "ACTIVE" ? `Khóa ${item.username}?` : `Mở khóa ${item.username}?`, description: item.status === "ACTIVE" ? "Các phiên đăng nhập sẽ bị thu hồi; PAT sẽ không thể dùng khi tài khoản bị khóa." : "Tài khoản có thể đăng nhập và sử dụng lại các quyền hiện có.", path: `users/${encodeURIComponent(item.id)}/status`, method: "PATCH", body: { status: item.status === "ACTIVE" ? "LOCKED" : "ACTIVE" } })}>{item.status === "ACTIVE" ? "Khóa tài khoản" : "Mở khóa"}</button>}</td></tr>)}</tbody></table></div>}
         </> : tab === "repositories" ? <>
           {repositories.length === 0 ? <p className={styles.empty}>Không tìm thấy repository phù hợp.</p> : <div className={styles.tableWrap}><table><caption className="srOnly">Danh sách repository quản trị</caption><thead><tr><th scope="col">Repository</th><th scope="col">Quyền riêng tư</th><th scope="col">Trạng thái</th><th scope="col">PR · Thành viên</th><th scope="col">Thao tác</th></tr></thead><tbody>{repositories.map((item) => <tr key={item.id}><td data-label="Repository"><strong>{item.owner.username}/{item.name}</strong><small>{item.description || "Chưa có mô tả"}</small>{item.status === "DELETED" && <small>Hạn khôi phục: {formatDate(item.purgeAfter)}</small>}</td><td data-label="Quyền riêng tư">{item.visibility === "PRIVATE" ? "Riêng tư" : "Công khai"}</td><td data-label="Trạng thái"><span className={item.status === "ACTIVE" ? styles.statusActive : styles.statusLocked}>{item.status === "ACTIVE" ? "Hoạt động" : item.status === "LOCKED" ? "Đã khóa" : "Đã xóa"}</span></td><td data-label="PR · Thành viên">{item._count.pullRequests} · {item._count.members}</td><td data-label="Thao tác" className={styles.actionCell}>{item.status === "DELETED" ? <button className={styles.tableButton} type="button" onClick={(event) => openAction(event.currentTarget, { title: `Khôi phục ${item.owner.username}/${item.name}?`, description: "Repository sẽ hoạt động lại. Nếu storage đã reset, source có thể chưa tồn tại và cần push lại từ bản clone.", path: `repositories/${encodeURIComponent(item.id)}/restore`, method: "POST" })}>Khôi phục</button> : <button className={styles.tableButton} type="button" onClick={(event) => openAction(event.currentTarget, { title: item.status === "ACTIVE" ? `Khóa ${item.name}?` : `Mở khóa ${item.name}?`, description: item.status === "ACTIVE" ? "Repository sẽ tạm thời không cho đọc hoặc ghi." : "Repository sẽ được mở lại theo visibility và membership hiện có.", path: `repositories/${encodeURIComponent(item.id)}/status`, method: "PATCH", body: { status: item.status === "ACTIVE" ? "LOCKED" : "ACTIVE" } })}>{item.status === "ACTIVE" ? "Khóa repository" : "Mở khóa"}</button>}</td></tr>)}</tbody></table></div>}
+        </> : tab === "journals" ? <>
+          {journals.length === 0 ? <p className={styles.empty}>Không có Git journal nào đang chờ đối soát.</p> : <div className={styles.tableWrap}><table><caption className="srOnly">Git journals chưa phân giải</caption><thead><tr><th scope="col">Repository</th><th scope="col">Loại · Operation</th><th scope="col">Trạng thái</th><th scope="col">Người khởi tạo</th><th scope="col">Cập nhật</th><th scope="col">Thao tác</th></tr></thead><tbody>{journals.map((item) => <tr key={`${item.type}-${item.operationId}`}><td data-label="Repository"><strong>{item.repository.owner.username}/{item.repository.name}</strong><small>Storage generation {item.storageGeneration}{item.pullRequestNumber ? ` · PR #${item.pullRequestNumber}` : ""}</small></td><td data-label="Loại · Operation"><strong>{item.type === "PUSH" ? "Push" : "Merge"}</strong><small><code>{item.operationId}</code></small></td><td data-label="Trạng thái"><span className={styles.statusLocked}>{item.status === "PENDING" ? "Đang chờ" : "Cần đối soát"}</span><small>{item.errorCode ?? "Chưa có mã lỗi"}</small></td><td data-label="Người khởi tạo">{item.actor?.username ?? "Tài khoản không còn tồn tại"}</td><td data-label="Cập nhật">{formatDate(item.updatedAt)}</td><td data-label="Thao tác" className={styles.actionCell}><button className={styles.tableButton} type="button" onClick={(event) => openAction(event.currentTarget, { title: `Đối soát ${item.type.toLowerCase()} journal?`, description: "Hệ thống sẽ khóa repository và chỉ kết luận khi bằng chứng Git hiện tại chứng minh được kết quả. Thao tác này không dịch chuyển bất kỳ Git ref nào.", path: `git-journals/${item.type}/${encodeURIComponent(item.operationId)}/resolve`, method: "POST", body: { revision: item.updatedAt, reasonCode: "OPERATOR_REVIEW" } })}>Kiểm tra bằng chứng</button></td></tr>)}</tbody></table></div>}
         </> : <>
           {audit.length === 0 ? <p className={styles.empty}>Chưa có sự kiện phù hợp.</p> : <div className={styles.tableWrap}><table><caption className="srOnly">Nhật ký kiểm toán</caption><thead><tr><th scope="col">Thời điểm</th><th scope="col">Người thực hiện</th><th scope="col">Hành động</th><th scope="col">Target</th><th scope="col">Chi tiết an toàn</th></tr></thead><tbody>{audit.map((item) => <tr key={item.id}><td data-label="Thời điểm">{formatDate(item.createdAt)}</td><td data-label="Người thực hiện">{item.actorId === null ? "Hệ thống (bootstrap CLI)" : item.actor?.username ?? "Tài khoản không còn tồn tại"}</td><td data-label="Hành động"><code>{item.action}</code></td><td data-label="Target"><code>{item.targetId}</code></td><td data-label="Chi tiết an toàn">{Object.entries(item.details).map(([key, value]) => `${key}: ${value ?? "—"}`).join(" · ") || "—"}</td></tr>)}</tbody></table></div>}
         </>}

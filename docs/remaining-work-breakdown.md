@@ -1,5 +1,9 @@
 # Code Forge — remaining work breakdown
 
+## Current delta (2026-10-28)
+
+The previously missing Issue #6 admin/operator path is implemented locally on `feat/ambiguous-journal-resolution` under the assumed one-active-`ADMIN` / one-operator policy. The UI and API list only allowlisted journal metadata and perform proof-based resolution under the repository advisory lock. Unknown, contradictory, reset/missing-storage, stale-revision and competing-journal cases remain fail-closed; no ref rollback or manual terminal override was added. Local gates pass (backend unit 214/214, full PostgreSQL/Git admin E2E 5/5, admin browser 4/4, lint/typecheck/build). Hosted CI, code review, merge and GitHub issue updates are still open, so older statements below remain historical baselines rather than evidence for this candidate.
+
 ## Current verified snapshot (2026-10-27)
 
 - Code candidate `f58ef3d` passed hosted MVP verification #193 (`40453128999`) in 6m31s. Documentation checkpoints #194 (`40453906441`) and #195 (`40454832579`) passed; `b557d5a` is the current exact `thviet`/`origin/thviet` SHA.

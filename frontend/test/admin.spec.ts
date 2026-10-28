@@ -9,12 +9,15 @@ test("admin can inspect users, repositories and audit, then confirm a restore", 
   await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { user: admin } }));
   let userStatus = "ACTIVE";
   let repositoryStatus = "LOCKED";
+  let journalResolved = false;
+  let resolutionBody: unknown;
   await page.route("**/api/v1/admin/**", async (route) => {
     const url = new URL(route.request().url());
     const method = route.request().method();
     if (url.pathname.endsWith("/stats")) return route.fulfill({ json: {
       users: { total: 2, active: 2, locked: 0 }, repositories: { total: 1, active: 0, locked: 0, deleted: 1 },
       pullRequests: { total: 0, open: 0, pendingMerges: 0 },
+      gitJournals: { unresolved: 1, pushes: 1, merges: 0 },
     } });
     if (url.pathname.endsWith("/users") && method === "GET") {
       const allUsers = [
@@ -44,6 +47,18 @@ test("admin can inspect users, repositories and audit, then confirm a restore", 
     if (url.pathname.endsWith(`/repositories/repo-1/restore`) && method === "POST") {
       repositoryStatus = "ACTIVE";
       return route.fulfill({ json: { repository: { id: "repo-1", status: repositoryStatus }, sourceMayBeReset: true } });
+    }
+    if (url.pathname.endsWith("/git-journals") && method === "GET") return route.fulfill({ json: {
+      journals: journalResolved ? [] : [{ type: "PUSH", operationId: "11111111-1111-4111-8111-111111111111",
+        actorId: user.id, actor: { id: user.id, username: user.username }, status: "NEEDS_RECONCILIATION",
+        errorCode: "GIT_CHILD_SUCCEEDED", storageGeneration: 1, createdAt: user.createdAt, updatedAt: user.createdAt,
+        repository: { id: "repo-1", name: "demo", owner: { id: user.id, username: user.username } } }],
+      page: 1, pageSize: 20, total: journalResolved ? 0 : 1, hasMore: false,
+    } });
+    if (url.pathname.endsWith("/git-journals/PUSH/11111111-1111-4111-8111-111111111111/resolve") && method === "POST") {
+      resolutionBody = route.request().postDataJSON();
+      journalResolved = true;
+      return route.fulfill({ json: { changed: true, journal: { type: "PUSH", status: "COMPLETED" } } });
     }
     if (url.pathname.endsWith("/audit")) return route.fulfill({ json: {
       audit: [
@@ -100,6 +115,15 @@ test("admin can inspect users, repositories and audit, then confirm a restore", 
   await page.getByRole("button", { name: "Khôi phục" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Xác nhận" }).click();
   await expect(page.getByRole("table").getByText("Hoạt động", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Đối soát Git" }).click();
+  await expect(page.getByText("GIT_CHILD_SUCCEEDED")).toBeVisible();
+  await page.getByRole("button", { name: "Kiểm tra bằng chứng" }).click();
+  const journalDialog = page.getByRole("dialog", { name: "Đối soát push journal?" });
+  await expect(journalDialog).toContainText("không dịch chuyển bất kỳ Git ref nào");
+  await journalDialog.getByRole("button", { name: "Xác nhận" }).click();
+  await expect(page.getByText("Không có Git journal nào đang chờ đối soát.")).toBeVisible();
+  expect(resolutionBody).toEqual({ revision: user.createdAt, reasonCode: "OPERATOR_REVIEW" });
 
   await page.getByRole("button", { name: "Nhật ký" }).click();
   await expect(page.getByText("ADMIN_REPOSITORY_RESTORED")).toBeVisible();

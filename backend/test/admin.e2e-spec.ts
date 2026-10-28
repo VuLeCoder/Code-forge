@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -271,6 +271,191 @@ describe('Admin HTTP + isolated PostgreSQL + Git', () => {
     expect(JSON.stringify(auditBody)).not.toContain(tokenSecret);
     expect(JSON.stringify(auditBody)).not.toContain('password-fixture');
     expect(JSON.stringify(auditBody)).not.toContain(privateSource);
+  }, 60_000);
+
+  it('lists and safely resolves Git journals while ambiguous evidence remains fenced', async () => {
+    const register = async (username: string) => {
+      const response = await call('POST', 'auth/register', '', {
+        username, email: `${username.toLowerCase()}@example.test`, password,
+      });
+      expect(response.status).toBe(201);
+      const body = await response.json() as { user: { id: string } };
+      return { userId: body.user.id, cookie: cookie(response) };
+    };
+    const admin = await register('JournalResolutionAdmin');
+    const owner = await register('JournalResolutionOwner');
+    await db!.user.update({ where: { id: admin.userId }, data: { systemRole: 'ADMIN' } });
+    const repositoryIds: string[] = [];
+    const makeRepository = async (name: string) => {
+      const response = await call('POST', 'repositories', owner.cookie, { name, initializeReadme: true });
+      expect(response.status).toBe(201);
+      const body = await response.json() as { repository: { id: string } };
+      const repository = await db!.repository.findUniqueOrThrow({ where: { id: body.repository.id } });
+      repositoryIds.push(repository.id);
+      return { repository, bare: join(storageRoot, repository.storageKey) };
+    };
+    const resolveJournal = (type: 'PUSH' | 'MERGE', id: string, revision: Date) => call('POST',
+      `admin/git-journals/${type}/${id}/resolve`, admin.cookie,
+      { revision: revision.toISOString(), reasonCode: 'OPERATOR_REVIEW' });
+
+    try {
+      const success = await makeRepository('JournalProvenSuccess');
+      const before = runGit(['--git-dir', success.bare, 'rev-parse', 'refs/heads/main']);
+      const beforeRefs = { 'refs/heads/main': before };
+      const successOperationId = randomUUID();
+      const successOperation = await db!.gitPushOperation.create({ data: {
+        operationId: successOperationId, repositoryId: success.repository.id, actorId: owner.userId,
+        status: 'NEEDS_RECONCILIATION', storageGeneration: success.repository.storageGeneration,
+        beforeRefs, errorCode: 'GIT_CHILD_SUCCEEDED',
+      } });
+      const tree = runGit(['--git-dir', success.bare, 'rev-parse', `${before}^{tree}`]);
+      const next = runGit(['--git-dir', success.bare, '-c', 'user.name=Journal Test',
+        '-c', 'user.email=journal@example.test', 'commit-tree', tree, '-p', before, '-F', '-'], 'journal success\n');
+      runGit(['--git-dir', success.bare, 'update-ref', 'refs/heads/feature/proven', next]);
+
+      expect((await call('GET', `admin/git-journals?q=${successOperationId}`, owner.cookie)).status).toBe(403);
+      const listResponse = await call('GET', `admin/git-journals?q=${successOperationId}`, admin.cookie);
+      expect(listResponse.status).toBe(200);
+      const list = await listResponse.json() as { journals: Array<Record<string, unknown>> };
+      expect(list.journals).toHaveLength(1);
+      expect(list.journals[0]).toMatchObject({ type: 'PUSH', operationId: successOperationId,
+        storageGeneration: success.repository.storageGeneration, actor: { id: owner.userId, username: 'JournalResolutionOwner' },
+        repository: { id: success.repository.id, name: 'JournalProvenSuccess' } });
+      const serializedList = JSON.stringify(list);
+      expect(serializedList).not.toContain('refs/heads');
+      expect(serializedList).not.toContain(before);
+      expect(serializedList).not.toContain(next);
+      expect(serializedList).not.toContain('beforeRefs');
+
+      await db!.gitPushOperation.update({ where: { operationId: successOperationId }, data: { status: 'PENDING' } });
+      const staleResponse = await resolveJournal('PUSH', successOperationId, successOperation.updatedAt);
+      expect(staleResponse.status).toBe(409);
+      expect(await staleResponse.json()).toMatchObject({ error: { code: 'GIT_JOURNAL_CHANGED' } });
+      expect(await db!.gitPushOperation.findUniqueOrThrow({ where: { operationId: successOperationId } }))
+        .toMatchObject({ status: 'PENDING', changedRefCount: null });
+
+      const fresh = await db!.gitPushOperation.findUniqueOrThrow({ where: { operationId: successOperationId } });
+      const completedResponse = await resolveJournal('PUSH', successOperationId, fresh.updatedAt);
+      expect(completedResponse.status).toBe(200);
+      expect(await completedResponse.json()).toMatchObject({ changed: true, journal: { type: 'PUSH', status: 'COMPLETED' },
+        resolutionCode: 'CHILD_SUCCEEDED_REFS_CHANGED' });
+      expect(await db!.gitPushOperation.findUniqueOrThrow({ where: { operationId: successOperationId } }))
+        .toMatchObject({ status: 'COMPLETED', changedRefCount: 1, errorCode: null, beforeRefs: null });
+      expect(await db!.auditLog.count({ where: { action: 'GIT_PUSH_COMPLETED', targetId: success.repository.id } })).toBe(1);
+      expect(await db!.auditLog.count({ where: { action: 'ADMIN_GIT_JOURNAL_RESOLVED', targetId: success.repository.id,
+        actorId: admin.userId } })).toBe(1);
+      const retryResponse = await resolveJournal('PUSH', successOperationId, fresh.updatedAt);
+      expect(retryResponse.status).toBe(200);
+      expect(await retryResponse.json()).toMatchObject({ changed: false, journal: { status: 'COMPLETED' } });
+      expect(await db!.auditLog.count({ where: { action: 'ADMIN_GIT_JOURNAL_RESOLVED', targetId: success.repository.id } })).toBe(1);
+
+      const failure = await makeRepository('JournalProvenFailure');
+      const failureSha = runGit(['--git-dir', failure.bare, 'rev-parse', 'refs/heads/main']);
+      const failureOperation = await db!.gitPushOperation.create({ data: { operationId: randomUUID(),
+        repositoryId: failure.repository.id, actorId: owner.userId, status: 'NEEDS_RECONCILIATION',
+        storageGeneration: failure.repository.storageGeneration, beforeRefs: { 'refs/heads/main': failureSha },
+        errorCode: 'GIT_CHILD_OUTCOME_UNKNOWN' } });
+      expect((await resolveJournal('PUSH', failureOperation.operationId, failureOperation.updatedAt)).status).toBe(200);
+      expect(await db!.gitPushOperation.findUniqueOrThrow({ where: { operationId: failureOperation.operationId } }))
+        .toMatchObject({ status: 'FAILED', errorCode: 'NO_REF_CHANGE', beforeRefs: null });
+
+      const merge = await makeRepository('JournalProvenMerge');
+      const mergeTarget = runGit(['--git-dir', merge.bare, 'rev-parse', 'refs/heads/main']);
+      const mergeBlob = runGit(['--git-dir', merge.bare, 'hash-object', '-w', '--stdin'], 'operator merge evidence\n');
+      const mergeTree = runGit(['--git-dir', merge.bare, 'mktree', '-z'], `100644 blob ${mergeBlob}\tmerge.txt\0`);
+      const mergeSource = runGit(['--git-dir', merge.bare, '-c', 'user.name=Journal Test',
+        '-c', 'user.email=journal@example.test', 'commit-tree', mergeTree, '-p', mergeTarget, '-F', '-'], 'merge source\n');
+      runGit(['--git-dir', merge.bare, 'update-ref', 'refs/heads/feature/merge-proof', mergeSource]);
+      const pullResponse = await call('POST', 'repos/JournalResolutionOwner/JournalProvenMerge/pulls', owner.cookie, {
+        title: 'Prove merge journal outcome', sourceBranch: 'feature/merge-proof', targetBranch: 'main',
+      });
+      expect(pullResponse.status).toBe(201);
+      const pull = (await pullResponse.json() as { pullRequest: { id: string; number: number; sourceSha: string;
+        targetSha: string; storageGeneration: number } }).pullRequest;
+      const candidate = runGit(['--git-dir', merge.bare, '-c', 'user.name=Journal Test',
+        '-c', 'user.email=journal@example.test', 'commit-tree', mergeTree, '-p', mergeTarget, '-p', mergeSource, '-F', '-'],
+      'merge candidate\n');
+      const mergeOperation = await db!.pullRequestMergeOperation.create({ data: { operationId: randomUUID(),
+        repositoryId: merge.repository.id, pullRequestId: pull.id, actorId: owner.userId,
+        status: 'NEEDS_RECONCILIATION', storageGeneration: merge.repository.storageGeneration,
+        expectedSourceSha: pull.sourceSha, expectedTargetSha: pull.targetSha, oldTargetSha: mergeTarget,
+        candidateSha: candidate, errorCode: 'MERGE_METADATA_PENDING' } });
+      runGit(['--git-dir', merge.bare, 'update-ref', 'refs/heads/main', candidate, mergeTarget]);
+      const mergeResolution = await resolveJournal('MERGE', mergeOperation.operationId, mergeOperation.updatedAt);
+      expect(mergeResolution.status).toBe(200);
+      expect(await mergeResolution.json()).toMatchObject({ changed: true, journal: { type: 'MERGE', status: 'COMPLETED' },
+        resolutionCode: 'TWO_PARENT_CANDIDATE_REACHABLE' });
+      expect(await db!.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId: mergeOperation.operationId } }))
+        .toMatchObject({ status: 'COMPLETED', resultingSha: candidate, errorCode: null });
+      expect(await db!.pullRequest.findUniqueOrThrow({ where: { id: pull.id } }))
+        .toMatchObject({ status: 'MERGED', mergeCommitSha: candidate, mergedById: owner.userId });
+      expect(await db!.auditLog.count({ where: { action: 'PULL_REQUEST_MERGE_RECONCILED', targetId: pull.id } })).toBe(1);
+      expect(await db!.auditLog.count({ where: { action: 'ADMIN_GIT_JOURNAL_RESOLVED', targetId: merge.repository.id,
+        actorId: admin.userId } })).toBe(1);
+
+      const reset = await makeRepository('JournalGenerationReset');
+      const resetSha = runGit(['--git-dir', reset.bare, 'rev-parse', 'refs/heads/main']);
+      const resetOperation = await db!.gitPushOperation.create({ data: { operationId: randomUUID(),
+        repositoryId: reset.repository.id, actorId: owner.userId, status: 'NEEDS_RECONCILIATION',
+        storageGeneration: reset.repository.storageGeneration + 1, beforeRefs: { 'refs/heads/main': resetSha },
+        errorCode: 'GIT_CHILD_SUCCEEDED' } });
+      const resetResponse = await resolveJournal('PUSH', resetOperation.operationId, resetOperation.updatedAt);
+      expect(resetResponse.status).toBe(409);
+      expect(await resetResponse.json()).toMatchObject({ error: { code: 'STORAGE_GENERATION_CHANGED' } });
+
+      const missing = await makeRepository('JournalStorageMissing');
+      const missingSha = runGit(['--git-dir', missing.bare, 'rev-parse', 'refs/heads/main']);
+      const missingOperation = await db!.gitPushOperation.create({ data: { operationId: randomUUID(),
+        repositoryId: missing.repository.id, actorId: owner.userId, status: 'NEEDS_RECONCILIATION',
+        storageGeneration: missing.repository.storageGeneration, beforeRefs: { 'refs/heads/main': missingSha },
+        errorCode: 'GIT_CHILD_SUCCEEDED' } });
+      const parkedStorage = `${missing.bare}.missing`;
+      await rename(missing.bare, parkedStorage);
+      try {
+        const missingResponse = await resolveJournal('PUSH', missingOperation.operationId, missingOperation.updatedAt);
+        expect(missingResponse.status).toBe(409);
+        expect(await missingResponse.json()).toMatchObject({ error: { code: 'GIT_STORAGE_MISSING' } });
+      } finally { await rename(parkedStorage, missing.bare); }
+
+      const competing = await makeRepository('JournalCompeting');
+      const competingSha = runGit(['--git-dir', competing.bare, 'rev-parse', 'refs/heads/main']);
+      const firstCompeting = await db!.gitPushOperation.create({ data: { operationId: randomUUID(),
+        repositoryId: competing.repository.id, actorId: owner.userId, status: 'NEEDS_RECONCILIATION',
+        storageGeneration: competing.repository.storageGeneration, beforeRefs: { 'refs/heads/main': competingSha },
+        errorCode: 'GIT_CHILD_SUCCEEDED' } });
+      await db!.gitPushOperation.create({ data: { operationId: randomUUID(), repositoryId: competing.repository.id,
+        actorId: owner.userId, status: 'NEEDS_RECONCILIATION', storageGeneration: competing.repository.storageGeneration,
+        beforeRefs: { 'refs/heads/main': competingSha }, errorCode: 'GIT_CHILD_SUCCEEDED' } });
+      const competingResponse = await resolveJournal('PUSH', firstCompeting.operationId, firstCompeting.updatedAt);
+      expect(competingResponse.status).toBe(409);
+      expect(await competingResponse.json()).toMatchObject({ error: { code: 'COMPETING_GIT_JOURNAL' } });
+
+      const ambiguousBefore = await db!.gitPushOperation.create({ data: { operationId: randomUUID(),
+        repositoryId: success.repository.id, actorId: owner.userId, status: 'NEEDS_RECONCILIATION',
+        storageGeneration: success.repository.storageGeneration,
+        beforeRefs: { 'refs/heads/main': before, 'refs/heads/feature/proven': next },
+        errorCode: 'GIT_CHILD_OUTCOME_UNKNOWN' } });
+      runGit(['--git-dir', success.bare, 'update-ref', 'refs/heads/feature/unknown', next]);
+      const ambiguousResponse = await resolveJournal('PUSH', ambiguousBefore.operationId, ambiguousBefore.updatedAt);
+      expect(ambiguousResponse.status).toBe(409);
+      expect(await ambiguousResponse.json()).toMatchObject({ error: { code: 'GIT_OUTCOME_UNKNOWN' } });
+      const ambiguousStored = await db!.gitPushOperation.findUniqueOrThrow({ where: { operationId: ambiguousBefore.operationId } });
+      expect(ambiguousStored).toMatchObject({ status: 'NEEDS_RECONCILIATION' });
+      expect(ambiguousStored.beforeRefs).not.toBeNull();
+      const fencedMutation = await call('PATCH', `admin/repositories/${success.repository.id}/status`, admin.cookie, { status: 'LOCKED' });
+      expect(fencedMutation.status).toBe(409);
+      expect(await fencedMutation.json()).toMatchObject({ error: { code: 'GIT_PUSH_RECONCILIATION_REQUIRED' } });
+
+      const auditResponse = await call('GET', 'admin/audit?action=ADMIN_GIT_JOURNAL_RESOLVED', admin.cookie);
+      expect(auditResponse.status).toBe(200);
+      const auditBody = await auditResponse.json() as { audit: Array<{ details: Record<string, unknown> }> };
+      expect(auditBody.audit.some((item) => item.details.originalActorId === owner.userId)).toBe(true);
+      expect(JSON.stringify(auditBody)).not.toContain('refs/heads');
+      expect(JSON.stringify(auditBody)).not.toContain('beforeRefs');
+    } finally {
+      await db!.repository.deleteMany({ where: { id: { in: repositoryIds } } });
+      await db!.user.deleteMany({ where: { id: { in: [admin.userId, owner.userId] } } });
+    }
   }, 60_000);
 
   it('repository status lock waits for an in-flight receive-pack before applying LOCKED', async () => {

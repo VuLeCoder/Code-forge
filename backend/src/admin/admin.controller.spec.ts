@@ -10,7 +10,7 @@ describe('AdminController security metadata', () => {
     expect(Reflect.getMetadata(GUARDS_METADATA, AdminController)).toEqual([AccessTokenGuard, AdminGuard]);
   });
 
-  it.each(['setUserStatus', 'setRepositoryStatus', 'restoreRepository'] as const)(
+  it.each(['setUserStatus', 'setRepositoryStatus', 'restoreRepository', 'resolveGitJournal'] as const)(
     'requires same-origin protection for the %s mutation',
     (methodName) => {
       const handler = Object.getOwnPropertyDescriptor(AdminController.prototype, methodName)?.value as object | undefined;

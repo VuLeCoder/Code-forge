@@ -23,12 +23,20 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
       if (pathname.endsWith("/stats")) return route.fulfill({ json: {
         users: { total: 2, active: 2, locked: 0 }, repositories: { total: 1, active: 1, locked: 0, deleted: 0 },
         pullRequests: { total: 2, open: 2, pendingMerges: 0 },
+        gitJournals: { unresolved: 1, pushes: 1, merges: 0 },
       } });
       if (pathname.endsWith("/users")) return route.fulfill({ json: {
         users: [user, secondUser], page: 1, pageSize: 20, total: 2, hasMore: false,
       } });
       if (pathname.endsWith("/repositories")) return route.fulfill({ json: {
         repositories: [repo], page: 1, pageSize: 20, total: 1, hasMore: false,
+      } });
+      if (pathname.endsWith("/git-journals")) return route.fulfill({ json: {
+        journals: [{ type: "PUSH", operationId: "11111111-1111-4111-8111-111111111111", actorId: user.id,
+          actor: { id: user.id, username: user.username }, status: "NEEDS_RECONCILIATION", errorCode: "GIT_CHILD_SUCCEEDED",
+          storageGeneration: 1, createdAt: user.createdAt, updatedAt: user.createdAt,
+          repository: { id: repo.id, name: repo.name, owner: repo.owner } }],
+        page: 1, pageSize: 20, total: 1, hasMore: false,
       } });
       if (pathname.endsWith("/audit")) return route.fulfill({ json: {
         audit: [auditEntry], page: 1, pageSize: 20, total: 1, hasMore: false,
@@ -38,7 +46,7 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
 
     await page.goto("/admin");
     const tabs = page.getByRole("group", { name: "Các mục quản trị" });
-    const tabLabels = ["Tổng quan", "Người dùng", "Repositories", "Nhật ký"];
+    const tabLabels = ["Tổng quan", "Người dùng", "Repositories", "Đối soát Git", "Nhật ký"];
     const tabButtons = tabLabels.map((name) => tabs.getByRole("button", { name }));
     await expect(tabButtons[0]).toBeVisible();
 
@@ -135,8 +143,22 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
       }
     }
 
-    // --- Tab: Nhật ký (Audit) ---
+    // --- Tab: Đối soát Git ---
     await tabButtons[3].click();
+
+    const journalHeaders = page.getByRole("columnheader");
+    await expect(journalHeaders).toHaveCount(6);
+    await expect(journalHeaders).toHaveText(["Repository", "Loại · Operation", "Trạng thái", "Người khởi tạo", "Cập nhật", "Thao tác"]);
+    const journalRow = page.getByRole("row", { name: /GIT_CHILD_SUCCEEDED/ });
+    await expect(journalRow).toBeVisible();
+    if (viewport.name === "narrow") {
+      const journalCells = journalRow.getByRole("cell");
+      await expect(journalCells).toHaveCount(6);
+      for (let i = 0; i < 6; i += 1) await expect(journalCells.nth(i)).toHaveAttribute("data-label");
+    }
+
+    // --- Tab: Nhật ký (Audit) ---
+    await tabButtons[4].click();
 
     // Accessible column headers verification (Audit table)
     const auditHeaders = page.getByRole("columnheader");
