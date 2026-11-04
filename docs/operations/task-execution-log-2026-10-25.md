@@ -7,6 +7,15 @@ or private cloud values.
 This is a chronological log: entries labeled **historical/superseded** are
 snapshots, not current status. Current acceptance state is in the task board.
 
+## T-ISSUE4-WRITE-FREEZE-2026-11-05 — active candidate
+
+- Branch: `audit/issue-4-release-preflight`, based on `main` merge `3914ae1`.
+- Scope: application-wide release write-freeze, active-write drain, audited admin control and admin UI. No schema migration or dependency was added.
+- Behavior: production requires `WRITE_FREEZE_BOOTSTRAP=true`; frozen mode returns retryable `503 WRITE_FROZEN` for REST mutations and Git receive-pack. Reads plus login/refresh/logout and the protected admin control endpoint remain available. Enabling waits for admitted writes to finish; unfreeze stays fail-closed if its audit cannot persist.
+- Local evidence: full backend unit 26 suites / 229 tests; backend/frontend lint and typecheck; backend/frontend builds; full admin PostgreSQL 17/Git E2E 6/6 on a disposable loopback PostgreSQL 17 tmpfs container; focused admin browser 4/4 at desktop and 375px; `git diff --check` passed. The first E2E attempt correctly refused the configured non-`*_test` database. The disposable container and temporary corepack wrapper were removed after use.
+- Cloud evidence: read-only Render live probe returned HTTP 200 on 2026-11-05. Render still tracks `thviet`, which was 13 commits behind `main` at preflight; no GitHub deployment integration or repository secrets were present, and this environment has no Render/Neon CLI or cloud database URL. No deploy, restart, provider migration, backup or cloud mutation was performed.
+- Remaining gate: hosted CI; verified metadata backup/restore on an isolated target; source clone inventory; provider access to configure the required production env; then fixture-only deploy/restart/source recovery and remaining cloud smoke.
+
 ## T-CURRENT-RELEASE — historical/superseded snapshot
 
 The current evidence is recorded in T41–T44 below. This older entry names the

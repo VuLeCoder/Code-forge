@@ -54,16 +54,26 @@ describe('validateEnvironment', () => {
     expect(() => validateEnvironment({ ...validConfig, NODE_ENV: 'production' })).toThrow('RATE_LIMIT_PROXY_SECRET');
     expect(() => validateEnvironment({ ...validConfig, RATE_LIMIT_PROXY_SECRET: 'too-short' })).toThrow('RATE_LIMIT_PROXY_SECRET');
     expect(validateEnvironment({ ...validConfig, DATABASE_URL_UNPOOLED: validConfig.DATABASE_URL, COOKIE_SECURE: true,
-      NODE_ENV: 'production', RATE_LIMIT_PROXY_SECRET: 'x'.repeat(32) }).RATE_LIMIT_PROXY_SECRET)
+      NODE_ENV: 'production', RATE_LIMIT_PROXY_SECRET: 'x'.repeat(32), WRITE_FREEZE_BOOTSTRAP: true }).RATE_LIMIT_PROXY_SECRET)
       .toBe('x'.repeat(32));
   });
 
   it('requires secure cookies in production while allowing local and test defaults', () => {
     const production = { ...validConfig, DATABASE_URL_UNPOOLED: validConfig.DATABASE_URL,
-      NODE_ENV: 'production', RATE_LIMIT_PROXY_SECRET: 'x'.repeat(32) };
+      NODE_ENV: 'production', RATE_LIMIT_PROXY_SECRET: 'x'.repeat(32), WRITE_FREEZE_BOOTSTRAP: true };
     expect(validateEnvironment(validConfig).COOKIE_SECURE).toBe(false);
     expect(() => validateEnvironment(production)).toThrow('COOKIE_SECURE=true');
     expect(validateEnvironment({ ...production, COOKIE_SECURE: 'true' }).COOKIE_SECURE).toBe(true);
+  });
+
+  it('requires production to boot write-frozen and validates the drain timeout', () => {
+    const production = { ...validConfig, DATABASE_URL_UNPOOLED: validConfig.DATABASE_URL,
+      NODE_ENV: 'production', RATE_LIMIT_PROXY_SECRET: 'x'.repeat(32), COOKIE_SECURE: true };
+    expect(validateEnvironment(validConfig).WRITE_FREEZE_BOOTSTRAP).toBe(false);
+    expect(() => validateEnvironment(production)).toThrow('WRITE_FREEZE_BOOTSTRAP=true');
+    expect(validateEnvironment({ ...production, WRITE_FREEZE_BOOTSTRAP: 'true' }).WRITE_FREEZE_BOOTSTRAP).toBe(true);
+    expect(() => validateEnvironment({ ...validConfig, WRITE_FREEZE_DRAIN_TIMEOUT_MS: '99' }))
+      .toThrow('WRITE_FREEZE_DRAIN_TIMEOUT_MS');
   });
 
   it('requires secure cookies when SameSite is none', () => {

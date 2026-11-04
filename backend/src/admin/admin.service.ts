@@ -5,7 +5,7 @@ import { AdminListQueryDto } from './admin.dto';
 import { RepositoryLockService } from '../repositories/repository-lock.service';
 import { GitPushJournalService } from '../repositories/git-push-journal.service';
 
-const DETAIL_KEYS = new Set(['repositoryId', 'number', 'operationId', 'mergeCommitSha', 'changedRefCount', 'storageGeneration', 'from', 'to', 'invitationId', 'memberId', 'role', 'channel', 'operationType', 'outcome', 'reasonCode', 'resolutionCode', 'originalActorId']);
+const DETAIL_KEYS = new Set(['repositoryId', 'number', 'operationId', 'mergeCommitSha', 'changedRefCount', 'storageGeneration', 'from', 'to', 'invitationId', 'memberId', 'role', 'channel', 'operationType', 'outcome', 'reasonCode', 'resolutionCode', 'originalActorId', 'activeWriteCount']);
 
 @Injectable()
 export class AdminService {

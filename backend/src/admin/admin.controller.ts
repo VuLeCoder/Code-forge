@@ -2,21 +2,32 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Patc
 import type { AuthenticatedRequest } from '../auth/auth.types';
 import { AccessTokenGuard } from '../auth/access-token.guard';
 import { OriginGuard } from '../auth/origin.guard';
-import { AdminGitJournalListQueryDto, AdminListQueryDto, AdminResolveGitJournalDto, AdminStatusDto } from './admin.dto';
+import { AdminGitJournalListQueryDto, AdminListQueryDto, AdminReleaseWriteFreezeDto, AdminResolveGitJournalDto, AdminStatusDto } from './admin.dto';
 import { AdminGuard } from './admin.guard';
 import { AdminGitJournalService } from './admin-git-journal.service';
 import { AdminService } from './admin.service';
+import { AllowDuringWriteFreeze } from '../release-control/release-write-freeze.decorator';
+import { ReleaseWriteFreezeService } from '../release-control/release-write-freeze.service';
 
 @Controller('admin')
 @UseGuards(AccessTokenGuard, AdminGuard)
 export class AdminController {
-  constructor(private readonly admin: AdminService, private readonly journals: AdminGitJournalService) {}
+  constructor(private readonly admin: AdminService, private readonly journals: AdminGitJournalService,
+    private readonly writeFreeze: ReleaseWriteFreezeService) {}
 
   @Get('stats') stats() { return this.admin.stats(); }
   @Get('users') users(@Query() query: AdminListQueryDto) { return this.admin.listUsers(query); }
   @Get('repositories') repositories(@Query() query: AdminListQueryDto) { return this.admin.listRepositories(query); }
   @Get('audit') audit(@Query() query: AdminListQueryDto) { return this.admin.listAudit(query); }
   @Get('git-journals') gitJournals(@Query() query: AdminGitJournalListQueryDto) { return this.journals.list(query); }
+  @Get('release/write-freeze') writeFreezeStatus() { return this.writeFreeze.status(); }
+
+  @Patch('release/write-freeze')
+  @UseGuards(OriginGuard)
+  @AllowDuringWriteFreeze()
+  setWriteFreeze(@Body() dto: AdminReleaseWriteFreezeDto, @Req() request: AuthenticatedRequest) {
+    return this.writeFreeze.setFrozen(request.user.id, dto.frozen);
+  }
 
   @Post('git-journals/:type/:operationId/resolve')
   @HttpCode(HttpStatus.OK)

@@ -8,6 +8,8 @@ Tạo image và chuẩn bị hướng dẫn không chứng minh dịch vụ clou
 
 ### Bằng chứng hiện tại
 
+- Candidate `audit/issue-4-release-preflight` bổ sung release write-freeze: production bắt buộc `WRITE_FREEZE_BOOTSTRAP=true`, admin có thể chặn/mở ghi qua UI/API, thao tác bật chờ REST/Git writes đang chạy drain và cả hai chiều đều audit. Local unit, PostgreSQL/Git E2E, browser, lint/typecheck đã qua; chưa có hosted CI hoặc cloud deployment cho candidate này.
+
 - Latest hosted-verified branch candidate on `thviet`: `e27a8ea`; hosted CI #167 passed all 28/28 steps on that exact SHA. HEAD/origin `thviet` is docs-only `8f990e0`; follow-up docs-only runs #169 (`90ed237`), #170 (`283b9f3`), #171 (`4af099d`), #172 (`7da48e1`), #173 (`3ec4d21`), #174 (`0754ea0`), #175 (`3ff191b`), #176 (`97d87ab`), #177 (`e56c5dc`) and #178 (`8f990e0`) all completed successfully. These docs-only runs do not change the runtime evidence; Render has not been verified at the latest candidate or redeployed from it.
 - Render Dashboard xác nhận service `code-forge-api-thviet` đang chạy deploy `388c584`, không phải source tip hiện tại. Probe readiness ngày 2026-10-27 trả HTTP 200 với database/Git/storage `up` và Git `2.39.5`; endpoint thực hiện `SELECT 1` qua Prisma và ghi/xóa file tạm trong storage. Đây chỉ là bằng chứng connectivity/readiness trên deploy `388c584`, không phải probe chỉ đọc hay smoke nghiệp vụ.
 - Read-only `GET /api/v1/health/live` ngày 2026-10-27 trả HTTP 200 nhưng body chỉ có `status` và `timestamp`, không có `commitSha`; không suy ra source revision live. Render Settings shows Auto-Deploy `After CI Checks Pass`; a push to `thviet` may redeploy this service.
@@ -72,7 +74,7 @@ Các biến TTL mặc định hiện tại nằm trong `backend/.env.example`; c
 
 ### 2. Sao lưu metadata và migrate
 
-1. Trước release, xác định cơ chế operator/provider đã kiểm chứng để chặn mutation mới và xác nhận Git push/merge đang chạy đã drain. Hiện chưa có application-wide write gate được xác minh; maintenance jobs và readiness endpoint không chặn ghi. Nếu chưa có cơ chế thực tế kèm bằng chứng drain, **dừng tại đây: không migrate/deploy và không dùng restart thay cho drain**.
+1. Trước release, production phải có `WRITE_FREEZE_BOOTSTRAP=true`. Admin bật khóa ghi từ trang quản trị hoặc `PATCH /api/v1/admin/release/write-freeze`, rồi xác nhận `frozen=true`, `activeWriteCount=0` và audit tương ứng. Gate chặn REST mutations và Git receive-pack mới; login/refresh/logout và control endpoint được giữ để operator điều khiển. Nếu candidate chưa được deploy/kiểm chứng hoặc drain không về 0, **dừng tại đây: không migrate/deploy và không dùng restart thay cho drain**.
 2. Tạo bản sao Neon/pg_dump được mã hóa bởi provider/KMS hoặc công cụ mã hóa đã phê duyệt; giữ khóa trong secret manager, giới hạn quyền restore, ghi checksum/thời hạn lưu giữ và xóa artifact plaintext sau rehearsal. Kiểm tra bản sao đọc/khôi phục được. Không đưa dump, khóa hoặc connection string vào Git.
 3. Build migration image từ cùng commit:
 

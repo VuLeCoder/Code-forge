@@ -6,6 +6,7 @@ BTL demo slice P2 đã có bằng chứng cho readiness, public/private Git HTTP
 
 | Trường | Kết quả |
 | --- | --- |
+| Release write-freeze | Branch-local candidate `audit/issue-4-release-preflight` passes focused unit, PostgreSQL/Git admin E2E and browser checks. Production requires `WRITE_FREEZE_BOOTSTRAP=true`; enable/disable is admin-only and audited. Not deployed or cloud-verified. |
 | Last CI-verified runtime candidate | `thviet`: code candidate `f58ef3d` (exact SHA `f58ef3d33457a91d00e11a44da541b7bd8c5393b`) |
 | Code CI evidence | `MVP verification` #193 (`40453128999`) passed successfully in 6m31s on the exact runtime candidate. |
 | Latest CI at check | Docs-only checkpoints #194 (`40453906441`), #195 (`40454832579`), #196 (`40455544444`) and #197 (`40456342235`) passed; #197 passed in 5m57s on exact docs SHA `dfe735b`. These docs-only runs do not change the Render runtime candidate. |
@@ -28,6 +29,7 @@ Readiness implementation chạy `SELECT 1` qua Prisma và ghi/xóa file tạm tr
 
 ## Tài khoản và quyền truy cập
 
+- [ ] On the release candidate, confirm production starts frozen; admin login and `GET/PATCH /api/v1/admin/release/write-freeze` work; enabling reports `activeWriteCount=0` before backup/migration. Do not unfreeze until mandatory smoke passes.
 - [x] Backend readiness: `GET https://code-forge-api-thviet.onrender.com/api/v1/health/ready` trả HTTP 200; database, Git executable (`2.39.5`) và storage đều `up` (2026-10-27; deployed commit `388c584`).
 - [ ] Frontend HTTPS tải được. Chưa có frontend cloud host trong phạm vi hiện tại; không suy ra từ API readiness.
 - [ ] Kiểm tra rate limit qua Render với hai client độc lập; gửi `X-Forwarded-For`/`CF-Connecting-IP` và `X-CodeForge-Client-IP`/signature giả từ client, xác minh không chia sẻ bucket sai hoặc vượt giới hạn. Ghi lại số trusted proxy hop thực tế; backend phải bỏ qua IP chưa ký hợp lệ.

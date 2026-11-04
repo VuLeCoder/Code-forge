@@ -870,4 +870,63 @@ process.exit(result.status ?? 1);
     await raceLockAgainst('LoginRaceUser', 'login');
     await raceLockAgainst('RefreshRaceUser', 'refresh');
   }, 60_000);
+
+  it('freezes new REST and Git writes, keeps operator login/read access, audits, and safely reopens writes', async () => {
+    const registration = await call('POST', 'auth/register', '', {
+      username: 'ReleaseGateAdmin', email: 'release-gate-admin@example.test', password,
+    });
+    expect(registration.status).toBe(201);
+    const registered = await registration.json() as { user: { id: string } };
+    const admin = { userId: registered.user.id, cookie: cookie(registration) };
+    await db!.user.update({ where: { id: admin.userId }, data: { systemRole: 'ADMIN' } });
+    const readableRepository = await call('POST', 'repositories', admin.cookie, {
+      name: 'FreezeReadable', visibility: 'PUBLIC', initializeReadme: true,
+    });
+    expect(readableRepository.status).toBe(201);
+
+    const initial = await call('GET', 'admin/release/write-freeze', admin.cookie);
+    expect(initial.status).toBe(200);
+    expect(await initial.json()).toEqual({ frozen: false, activeWriteCount: 0 });
+
+    const freeze = await call('PATCH', 'admin/release/write-freeze', admin.cookie, { frozen: true });
+    expect(freeze.status).toBe(200);
+    expect(await freeze.json()).toEqual({ frozen: true, activeWriteCount: 0, changed: true });
+
+    const blockedRest = await call('POST', 'repositories', admin.cookie, {
+      name: 'BlockedDuringRelease', visibility: 'PRIVATE',
+    });
+    expect(blockedRest.status).toBe(503);
+    expect(blockedRest.headers.get('retry-after')).toBe('30');
+    expect(await blockedRest.json()).toMatchObject({ error: { code: 'WRITE_FROZEN' } });
+    expect(await db!.repository.count({ where: { normalizedName: 'blockedduringrelease' } })).toBe(0);
+
+    const blockedGit = await fetch(`${base}/git/ReleaseGateAdmin/does-not-matter.git/git-receive-pack`, {
+      method: 'POST', headers: { 'Content-Type': 'application/x-git-receive-pack-request' }, body: '0000',
+    });
+    expect(blockedGit.status).toBe(503);
+    expect(await blockedGit.json()).toMatchObject({ error: { code: 'WRITE_FROZEN' } });
+
+    const cloneRoot = await mkdtemp(join(tmpdir(), 'code-forge-freeze-read-'));
+    try {
+      await promisify(execFile)('git', ['clone', `${base}/git/ReleaseGateAdmin/FreezeReadable.git`, join(cloneRoot, 'clone')], {
+        timeout: 20_000, env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0' },
+      });
+    } finally {
+      await rm(cloneRoot, { recursive: true, force: true });
+    }
+
+    expect((await call('GET', 'admin/stats', admin.cookie)).status).toBe(200);
+    expect((await call('POST', 'auth/login', '', { login: 'ReleaseGateAdmin', password })).status).toBe(200);
+
+    const unfreeze = await call('PATCH', 'admin/release/write-freeze', admin.cookie, { frozen: false });
+    expect(unfreeze.status).toBe(200);
+    expect(await unfreeze.json()).toEqual({ frozen: false, activeWriteCount: 0, changed: true });
+
+    const admitted = await call('POST', 'repositories', admin.cookie, {
+      name: 'ReleaseReopened', visibility: 'PRIVATE',
+    });
+    expect(admitted.status).toBe(201);
+    expect(await db!.auditLog.count({ where: { actorId: admin.userId,
+      action: { in: ['RELEASE_WRITE_FREEZE_ENABLED', 'RELEASE_WRITE_FREEZE_DISABLED'] } } })).toBe(2);
+  });
 });

@@ -9,7 +9,7 @@
 - `GIT_PUBLIC_BASE_URL` cấu hình clone URL trực tiếp tới backend. Frontend dùng `BACKEND_URL`, `APP_ORIGIN` và `RATE_LIMIT_PROXY_SECRET` server-side.
 - Render Free dùng filesystem ephemeral; Git source có thể mất sau spin-down/restart/redeploy. Neon giữ metadata riêng, nhưng metadata còn lại không chứng minh Git objects còn tồn tại.
 - Read-only Neon dashboard check 2026-10-27 xác nhận project `Code Forge`/branch `production` ở Singapore trên Free, history window 6 giờ, hiện không có snapshot hoặc backup schedule. Không coi history window là export/restore backup; chưa có rehearsal production.
-- Maintenance jobs trong code không phải chế độ maintenance cho toàn ứng dụng. Tôi không thấy cờ/API được hỗ trợ để chặn toàn bộ mutation và drain request trước migration; phải xác minh cách đóng băng ghi trước release.
+- Maintenance jobs không phải chế độ maintenance cho toàn ứng dụng. Candidate `audit/issue-4-release-preflight` bổ sung write-freeze riêng: production chỉ khởi động khi `WRITE_FREEZE_BOOTSTRAP=true`; admin control chặn REST mutation/Git receive-pack mới và chờ các write request đang chạy drain. Candidate này phải được merge, qua CI và kiểm chứng trên cloud trước khi dùng làm bằng chứng release.
 - Read-only probe gần nhất (2026-10-27) xác minh HTTP 200 trên `/health/ready`, `/health/live` và `/repositories?page=1` của deploy `388c584`; anonymous `git ls-remote` cũng exit 0. Ngày 2026-10-26, anonymous public clone/fetch, private PAT clone/push/fetch, owner PR merge/fetch và WRITE invite→accept→collaborator push/PR→owner merge/fetch đã qua smoke test trực tiếp tới Render. Admin, payload quota, migration cloud, backup/restore hoặc khôi phục sau restart chưa được kiểm chứng. Deploy `4407e7d` từng gặp `P1001`; nguyên nhân lịch sử vẫn chưa được xác minh. Chi tiết có trong [cloud checklist](./cloud-smoke-checklist.md).
 - **Khôi phục source sau khi storage mất chưa được diễn tập.** Không coi khả năng có clone local là bằng chứng khôi phục thành công.
 
@@ -30,7 +30,7 @@ Không gửi connection string, password, PAT, cookie hay secret qua chat, issue
 ## 2. Cửa sổ ghi và migration
 
 1. Chọn cửa sổ bảo trì thông báo trước. Vì hiện chưa thấy application-wide write gate, không tuyên bố hệ thống đã ở maintenance chỉ dựa trên maintenance jobs hoặc readiness endpoint.
-2. Chỉ tiếp tục nếu operator có thể chặn mutation bằng cơ chế đã kiểm chứng và xác nhận Git push/merge đang chạy đã drain. Nếu không có cơ chế đó, dừng release và bổ sung/kiểm chứng phương án; không dùng restart làm cách thay thế cho drain an toàn.
+2. Đăng nhập bằng admin hiện có, gọi `PATCH /api/v1/admin/release/write-freeze` với `{"frozen":true}`, rồi xác nhận `GET` cùng endpoint trả `frozen=true` và `activeWriteCount=0`. Nếu endpoint không tồn tại, audit không được ghi, drain timeout hoặc trạng thái không rõ, dừng release; không dùng restart thay cho drain an toàn.
 3. Tạo/kiểm tra backup metadata và clone Git dự phòng trước mọi restart/redeploy. Render Free có thể làm mất filesystem source; chỉ thực hiện trên demo sau khi người vận hành chấp nhận rủi ro và đã chuẩn bị recovery.
 4. Build migration image từ đúng release commit, ở thư mục gốc repository:
 
