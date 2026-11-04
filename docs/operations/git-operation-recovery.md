@@ -94,6 +94,9 @@ boundaries are exercised in `backend/test/pull-requests.e2e-spec.ts`; active
 valid-pack lock loss is exercised in `backend/test/repository-lock.e2e-spec.ts`.
 The pull-request suite also terminates the exact advisory-lock holder before
 merge ref CAS and verifies unchanged refs/metadata/audit plus a successful
-new-operation retry. MVP verification run `41842692592` passed all hosted gates
-for that exact code commit. A cross-type state whose attribution cannot be
-proved remains intentionally fenced rather than being force-resolved.
+new-operation retry. The change was merged through PR #8; feature run
+`41842692592`, PR rerun `41845795345`, and post-merge `main` run `41847475419`
+passed all hosted gates, with the last run verifying exact merge SHA `1e35335`.
+This completes the enumerated Issue #3 recovery matrix, not cloud release or
+provider source-recovery acceptance. A cross-type state whose attribution
+cannot be proved remains intentionally fenced rather than being force-resolved.

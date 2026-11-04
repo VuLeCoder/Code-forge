@@ -1,10 +1,17 @@
 # Code Forge — remaining task plan
 
-## Current feature candidate (2026-10-28)
+## Current main acceptance state (2026-11-05)
+
+- `main` and `origin/main` contain [PR #8](https://github.com/VuLeCoder/Code-forge/pull/8) at merge commit `1e353351f6153defa6ffd3689655dc8d3b552e1d`. Post-merge MVP verification [`41847475419`](https://github.com/VuLeCoder/Code-forge/actions/runs/41847475419) passed every gate in 5m33s.
+- Issue #3's listed PostgreSQL/Git acceptance cases are covered, including the final pre-CAS advisory-lock-loss boundary. The next tracker action is to publish the evidence summary and close Issue #3 after review; no additional Issue #3 runtime change is currently demonstrated as necessary.
+- The next code/evidence audit should be Issue #5 against its own acceptance list. Cloud migration, backup/restore, restart/source-loss recovery and release handoff remain Issue #4 work and still require confirmed provider target/readiness/recovery authority. Do not infer cloud acceptance from the green `main` workflow.
+- Issue #6's proof-based admin resolution workflow was merged through PR #7 and Issue #6 is closed. Unknown/contradictory evidence remains fail-closed by design.
+
+## Historical feature candidate (2026-10-28)
 
 Issue #6 is now implemented and committed locally on `feat/ambiguous-journal-resolution` using the existing active `ADMIN` role and one operator. Resolution is evidence-based only: it never moves refs, uses a fixed `OPERATOR_REVIEW` reason, records original actor and resolving admin separately, and leaves unknown/contradictory or competing journals unresolved and fenced. Local unit, full PostgreSQL/Git admin E2E, admin browser, lint, typecheck and build gates pass. Push, hosted CI, independent review and any issue-status change remain pending; do not treat this branch-local evidence as a cloud or release result.
 
-## Current release gates (2026-10-27; older “Current” blocks below are historical)
+## Historical release gates (2026-10-27)
 
 - Latest hosted-verified branch candidate is `f58ef3d`; `MVP verification` #193 (`40453128999`) completed successfully in 6m31s on that exact SHA. The prior #192 attempt failed twice because the full-stack fixture password did not satisfy the already-enforced digit requirement; the fixture-only correction is now hosted and green. Render deployment remains gated and has not been verified at the latest candidate.
 - Next release step remains cloud recovery rehearsal, not another blind redeploy: read-only Render/Neon dashboard preflight now verifies service identity, `thviet` binding, Auto-Deploy `After CI Checks Pass`, Free/no-persistent-disk limits, and the separate Neon `Code Forge` production branch with a 6-hour history window. Backup/restore capability and source-recovery behavior are still unverified; latest hosted candidate `4861c85` is CI-verified by #185. Issue #6 stays deferred/fail-closed; add more tests only for a demonstrated remaining acceptance gap.

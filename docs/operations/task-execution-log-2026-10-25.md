@@ -1524,3 +1524,9 @@ cloud status.
 - Local verification on the current worktree: `corepack pnpm --filter frontend typecheck`, `corepack pnpm --filter frontend build`, targeted ESLint for `test-fullstack/milestone-three.spec.ts`, and `git diff --check` all passed.
 - GitHub Actions `MVP verification` #210 ([run `40464163263`](https://github.com/VuLeCoder/Code-forge/actions/runs/40464163263)) completed **success** on exact SHA `a7061c0` in 5m42s. Backend/frontend tests, lint, typecheck, build, Docker API/migration smoke, migration-image execution and whitespace passed.
 - This confirms the source/build fix and hosted CI only. Vercel deployment remains dependent on its project being connected to the intended `thviet` source; no Vercel project or secret was modified by Codex.
+
+## T88-ISSUE-3 ACCEPTANCE RECONCILIATION — implementation in progress
+
+- Owner: Codex. Branch: `docs/issue-3-acceptance`. Owned paths: `docs/implementation-status.md`, `docs/next-actions.md`, `docs/remaining-work-breakdown.md`, `docs/operations/acceptance-task-board-2026-10-25.md`, `docs/operations/git-operation-recovery.md`, and this execution log.
+- Reconciles Issue #3's live criteria against existing real PostgreSQL/Git coverage and records PR #8 merge commit `1e35335`, feature run `41842692592`, successful PR rerun `41845795345`, and successful post-merge `main` run `41847475419`. Cloud/release work remains explicitly separated under Issue #4; Issue #5 remains a separate acceptance audit.
+- No runtime code, dependency, schema, database, Git storage, Docker volume, provider setting, deployment or issue state is changed. `git diff --check` passed; exact documentation commit is recorded in the follow-up log checkpoint.
