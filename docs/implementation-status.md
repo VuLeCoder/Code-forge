@@ -1,8 +1,10 @@
 # MVP implementation ledger
 
-## Current verified snapshot (2026-10-27)
+## Current verified snapshot (2026-11-04)
 
-**Feature-branch update, 2026-10-28:** Issue #6 now has a local proof-based admin implementation on `feat/ambiguous-journal-resolution`. It adds privacy-bounded listing, lock/revision/permission/storage/generation/competition checks, provable push and two-parent merge outcomes, atomic bounded operator audit, idempotent retry, and an admin UI. Unknown evidence remains unresolved and keeps mutation gates closed; the workflow never moves Git refs. Local evidence is backend unit 23/23 suites (214 tests), full PostgreSQL 17 + Git admin E2E 5/5, admin Playwright 4/4, backend/frontend lint and typecheck, frontend build, and whitespace check. The implementation is committed locally but is not yet hosted-CI verified, merged, deployed, or reflected in GitHub issue status.
+**Feature-branch update, 2026-11-04:** commit `88a4600` on `feat/pr-recovery-matrix` adds a real PostgreSQL/Git merge lock-loss E2E at the pre-CAS boundary. It terminates only the session holding the repository advisory lock and verifies `503 MERGE_REF_UPDATE_FAILED`, unchanged refs and PR metadata, one `FAILED` operation, zero false merge audits, and a successful retry under a new operation ID. The focused test passed 1/1 and the complete PR E2E passed 19/19 on a disposable PostgreSQL 17 tmpfs container. MVP verification run `41842692592` passed every hosted gate in 4m35s on exact SHA `88a460076de2a06c78378b30ffff9097b771e665`; no cloud result is claimed.
+
+**Merged update, 2026-10-28:** Issue #6's proof-based admin workflow was merged to `main` through PR #7 at `62d8199`, after both MVP verification runs and Vercel checks passed, and Issue #6 closed automatically. It provides privacy-bounded listing, lock/revision/permission/storage/generation/competition checks, proof-only push and two-parent merge outcomes, bounded operator audit, idempotent retry and an admin UI. Unknown evidence remains unresolved and keeps mutation gates closed; the workflow never moves Git refs. This is hosted CI evidence, not a cloud deployment result.
 
 For detailed evidence and residual acceptance cases, use [the acceptance board](operations/acceptance-task-board-2026-10-25.md), [next actions](next-actions.md), and [the cloud checklist](deployment/cloud-smoke-checklist.md). Historical snapshots below are not current status.
 

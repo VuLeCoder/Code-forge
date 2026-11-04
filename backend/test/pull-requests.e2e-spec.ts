@@ -1609,6 +1609,135 @@ describe('Pull request HTTP + PostgreSQL + Git', () => {
     expect(await db.auditLog.count({ where: { targetId: racePullRequest.pullRequest.id, action: 'PULL_REQUEST_MERGED' } })).toBe(1);
   }, 60_000);
 
+  it('fails closed when the repository advisory-lock connection is lost before merge ref CAS', async () => {
+    const registration = await call('POST', 'auth/register', {
+      username: 'MergeLockLossOwner', email: 'merge-lock-loss-owner@example.test', password: 'test-password-123',
+    });
+    expect(registration.status).toBe(201);
+    const lockLossOwnerCookie = cookie(registration);
+    const createdRepo = await call('POST', 'repositories', {
+      name: 'MergeLockLoss', visibility: 'PRIVATE', initializeReadme: true,
+    }, lockLossOwnerCookie);
+    expect(createdRepo.status).toBe(201);
+    const { repository } = await responseJson<{ repository: { id: string } }>(createdRepo);
+    const storedRepo = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
+    const bare = join(storageRoot, storedRepo.storageKey);
+    const work = join(storageRoot, 'merge-lock-loss-clone');
+    const git = (args: string[]) => execFileSync('git', args, {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    git(['clone', bare, work]);
+    git(['-C', work, 'config', 'user.name', 'Merge Lock Loss Owner']);
+    git(['-C', work, 'config', 'user.email', 'merge-lock-loss-owner@example.test']);
+    git(['-C', work, 'switch', '-c', 'feature/lock-loss']);
+    await writeFile(join(work, 'lock-loss.txt'), 'merge must stop when its repository lock is lost\n');
+    git(['-C', work, 'add', 'lock-loss.txt']);
+    git(['-C', work, 'commit', '-m', 'Create merge lock-loss fixture']);
+    const sourceSha = git(['-C', work, 'rev-parse', 'HEAD']).trim();
+    git(['-C', work, 'push', '--set-upstream', 'origin', 'feature/lock-loss']);
+    const targetSha = git(['--git-dir', bare, 'rev-parse', 'refs/heads/main']).trim();
+    const refsBefore = git(['--git-dir', bare, 'for-each-ref', '--sort=refname',
+      '--format=%(refname)%09%(objectname)', 'refs/']);
+
+    const repoPath = 'repos/mergelocklossowner/mergelockloss/pulls';
+    const createdPull = await call('POST', repoPath, {
+      title: 'Fail closed after repository lock loss',
+      description: 'Terminate the exact lock-owning PostgreSQL session before ref CAS.',
+      sourceBranch: 'feature/lock-loss', targetBranch: 'main',
+    }, lockLossOwnerCookie);
+    expect(createdPull.status).toBe(201);
+    const { pullRequest } = await responseJson<{ pullRequest: { id: string; number: number } }>(createdPull);
+    const detailResponse = await call('GET', `${repoPath}/${pullRequest.number}`, undefined, lockLossOwnerCookie);
+    expect(detailResponse.status).toBe(200);
+    const detail = await responseJson<{ pullRequest: { version: number } }>(detailResponse);
+    const compareResponse = await call('GET', `${repoPath}/${pullRequest.number}/compare`, undefined, lockLossOwnerCookie);
+    expect(compareResponse.status).toBe(200);
+    const comparison = await responseJson<{ sourceSha: string; targetSha: string; storageGeneration: number }>(compareResponse);
+    expect(comparison).toMatchObject({ sourceSha, targetSha, storageGeneration: storedRepo.storageGeneration });
+
+    const storage = app.get(GitStorageService);
+    const compareAndSwap = storage.compareAndSwapBranch.bind(storage);
+    let releaseCas!: () => void;
+    let observeCas!: () => void;
+    let observeLockLoss!: () => void;
+    const casReached = new Promise<void>((resolveCas) => { observeCas = resolveCas; });
+    const casReleased = new Promise<void>((resolveCas) => { releaseCas = resolveCas; });
+    const lockLost = new Promise<void>((resolveLockLoss) => { observeLockLoss = resolveLockLoss; });
+    const compareAndSwapSpy = jest.spyOn(storage, 'compareAndSwapBranch').mockImplementation(async (
+      key, branch, nextSha, expectedSha, signal,
+    ) => {
+      if (!signal) throw new Error('Merge ref CAS did not receive the repository lock signal.');
+      if (signal.aborted) observeLockLoss();
+      else signal.addEventListener('abort', observeLockLoss, { once: true });
+      observeCas();
+      await casReleased;
+      return compareAndSwap(key, branch, nextSha, expectedSha, signal);
+    });
+    const monitorUrl = new URL(process.env.DATABASE_URL!);
+    monitorUrl.searchParams.set('application_name', `${lockApplicationName}-lock-loss-monitor`);
+    const monitor = new Client({ connectionString: monitorUrl.toString(), connectionTimeoutMillis: 5_000 });
+    const operationId = randomUUID();
+    let mergeRequest: Promise<Response> | undefined;
+    let mergeResponse: Response | undefined;
+    try {
+      await monitor.connect();
+      mergeRequest = call('POST', `${repoPath}/${pullRequest.number}/merge`, {
+        operationId, expectedSourceSha: comparison.sourceSha, expectedTargetSha: comparison.targetSha,
+        storageGeneration: comparison.storageGeneration, version: detail.pullRequest.version,
+      }, lockLossOwnerCookie);
+      await casReached;
+
+      const pending = await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId } });
+      expect(pending.status).toBe('PENDING');
+      expect(pending.candidateSha).toMatch(/^[a-f0-9]{40,64}$/);
+      const lockHolder = await monitor.query<{ pid: number }>(`SELECT activity.pid
+        FROM pg_stat_activity AS activity
+        JOIN pg_locks AS lock ON lock.pid = activity.pid
+        WHERE activity.application_name = $1 AND activity.datname = current_database()
+          AND activity.pid <> pg_backend_pid() AND lock.locktype = 'advisory' AND lock.granted
+        ORDER BY activity.backend_start DESC LIMIT 1`, [lockApplicationName]);
+      const lockPid = lockHolder.rows[0]?.pid;
+      if (!lockPid) throw new Error('The merge repository lock session was not found.');
+      const terminated = await monitor.query<{ terminated: boolean }>(
+        'SELECT pg_terminate_backend($1) AS terminated', [lockPid],
+      );
+      expect(terminated.rows[0]?.terminated).toBe(true);
+      await lockLost;
+      releaseCas();
+      mergeResponse = await mergeRequest;
+    } finally {
+      releaseCas();
+      compareAndSwapSpy.mockRestore();
+      if (mergeRequest && !mergeResponse) await mergeRequest.catch(() => undefined);
+      await monitor.end().catch(() => undefined);
+    }
+
+    expect(mergeResponse.status).toBe(503);
+    expect(await responseJson<{ error: { code: string } }>(mergeResponse))
+      .toMatchObject({ error: { code: 'MERGE_REF_UPDATE_FAILED' } });
+    expect(git(['--git-dir', bare, 'for-each-ref', '--sort=refname',
+      '--format=%(refname)%09%(objectname)', 'refs/'])).toBe(refsBefore);
+    expect(git(['--git-dir', bare, 'rev-parse', 'refs/heads/main']).trim()).toBe(targetSha);
+    expect(await db.pullRequest.findUniqueOrThrow({ where: { id: pullRequest.id } }))
+      .toMatchObject({ status: 'OPEN', mergeCommitSha: null, version: detail.pullRequest.version });
+    expect(await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId } }))
+      .toMatchObject({ status: 'FAILED', errorCode: 'MERGE_REF_UPDATE_FAILED', resultingSha: null });
+    expect(await db.auditLog.count({ where: { targetId: pullRequest.id, action: 'PULL_REQUEST_MERGED' } })).toBe(0);
+
+    const retryOperationId = randomUUID();
+    const retryResponse = await call('POST', `${repoPath}/${pullRequest.number}/merge`, {
+      operationId: retryOperationId, expectedSourceSha: comparison.sourceSha, expectedTargetSha: comparison.targetSha,
+      storageGeneration: comparison.storageGeneration, version: detail.pullRequest.version,
+    }, lockLossOwnerCookie);
+    expect(retryResponse.status).toBe(200);
+    const retryResult = await responseJson<{ status: string; operationId: string; mergeCommitSha: string }>(retryResponse);
+    expect(retryResult).toMatchObject({ status: 'MERGED', operationId: retryOperationId });
+    expect(git(['--git-dir', bare, 'rev-parse', 'refs/heads/main']).trim()).toBe(retryResult.mergeCommitSha);
+    expect(await db.pullRequestMergeOperation.findUniqueOrThrow({ where: { operationId: retryOperationId } }))
+      .toMatchObject({ status: 'COMPLETED', resultingSha: retryResult.mergeCommitSha, errorCode: null });
+    expect(await db.auditLog.count({ where: { targetId: pullRequest.id, action: 'PULL_REQUEST_MERGED' } })).toBe(1);
+  }, 60_000);
+
   it('rejects a merge over repository quota without moving refs or merging metadata, while an in-quota merge preserves both parents', async () => {
     const createdRepo = await call('POST', 'repositories', {
       name: 'MergeQuota', visibility: 'PRIVATE', initializeReadme: true,
