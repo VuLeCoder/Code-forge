@@ -1,10 +1,16 @@
 # Code Forge — remaining work breakdown
 
-## Current delta (2026-10-28)
+## Current delta (2026-11-05)
+
+PR #8 is merged to `main` at `1e353351f6153defa6ffd3689655dc8d3b552e1d`. Its real PostgreSQL/Git test terminates the exact advisory-lock holder immediately before merge ref CAS and proves fail-closed HTTP/journal/ref/audit behavior plus a clean retry. Local focused/full PR results were 1/1 and 19/19; feature, PR-rerun and post-merge hosted workflows passed, with post-merge run [`41847475419`](https://github.com/VuLeCoder/Code-forge/actions/runs/41847475419) green in 5m33s on exact merge SHA.
+
+Issue #3's enumerated matrix is now evidenced: invite/accept/push/PR/two-parent merge/fetch; default protection; quota/conflict/stale/version/deleted-ref/reset rejection; push–push, push–merge, merge–delete and concurrent merge ordering; same-operation replay; pre/post-CAS process failure and unresolved fencing; admin lock/unlock/restore; privacy-bounded audit. Issue #3 remains open only until the tracker evidence is reviewed and posted. Provider migration, backup/restore, source-loss recovery and release handoff are still Issue #4 work; Issue #5 remains a separate durable-push-audit acceptance review. No cloud completion is claimed.
+
+## Historical delta (2026-10-28)
 
 The previously missing Issue #6 admin/operator path is implemented locally on `feat/ambiguous-journal-resolution` under the assumed one-active-`ADMIN` / one-operator policy. The UI and API list only allowlisted journal metadata and perform proof-based resolution under the repository advisory lock. Unknown, contradictory, reset/missing-storage, stale-revision and competing-journal cases remain fail-closed; no ref rollback or manual terminal override was added. Local gates pass (backend unit 214/214, full PostgreSQL/Git admin E2E 5/5, admin browser 4/4, lint/typecheck/build). Hosted CI, code review, merge and GitHub issue updates are still open, so older statements below remain historical baselines rather than evidence for this candidate.
 
-## Current verified snapshot (2026-10-27)
+## Historical verified snapshot (2026-10-27)
 
 - Code candidate `f58ef3d` passed hosted MVP verification #193 (`40453128999`) in 6m31s. Documentation checkpoints #194 (`40453906441`) and #195 (`40454832579`) passed; `b557d5a` is the current exact `thviet`/`origin/thviet` SHA.
 - The GitHub-style repository Quick setup flow and the full-stack password-fixture correction are included in that verified code candidate. Local maintenance unit coverage is 18/18 on the current worktree.
