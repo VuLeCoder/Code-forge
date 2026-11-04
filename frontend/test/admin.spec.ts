@@ -9,6 +9,7 @@ test("admin can inspect users, repositories and audit, then confirm a restore", 
   await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { user: admin } }));
   let userStatus = "ACTIVE";
   let repositoryStatus = "LOCKED";
+  let writeFrozen = false;
   let journalResolved = false;
   let resolutionBody: unknown;
   await page.route("**/api/v1/admin/**", async (route) => {
@@ -19,6 +20,13 @@ test("admin can inspect users, repositories and audit, then confirm a restore", 
       pullRequests: { total: 0, open: 0, pendingMerges: 0 },
       gitJournals: { unresolved: 1, pushes: 1, merges: 0 },
     } });
+    if (url.pathname.endsWith("/release/write-freeze") && method === "GET") {
+      return route.fulfill({ json: { frozen: writeFrozen, activeWriteCount: 0 } });
+    }
+    if (url.pathname.endsWith("/release/write-freeze") && method === "PATCH") {
+      writeFrozen = route.request().postDataJSON().frozen;
+      return route.fulfill({ json: { frozen: writeFrozen, activeWriteCount: 0, changed: true } });
+    }
     if (url.pathname.endsWith("/users") && method === "GET") {
       const allUsers = [
         { ...user, status: userStatus, lockedAt: userStatus === "LOCKED" ? "2026-10-24T00:00:00.000Z" : null },
@@ -75,6 +83,14 @@ test("admin can inspect users, repositories and audit, then confirm a restore", 
   await page.goto("/admin");
   await expect(page.getByRole("link", { name: "Admin" })).toBeVisible();
   await expect(page.getByText("2", { exact: true }).first()).toBeVisible();
+  const releaseControl = page.getByRole("article", { name: "Khóa ghi khi release" });
+  await expect(releaseControl.getByRole("heading", { name: "Thao tác ghi đang mở" })).toBeVisible();
+  await releaseControl.getByRole("button", { name: "Khóa ghi" }).click();
+  await page.getByRole("dialog", { name: "Khóa thao tác ghi để release?" }).getByRole("button", { name: "Xác nhận" }).click();
+  await expect(releaseControl.getByRole("heading", { name: "Đang khóa thao tác ghi" })).toBeVisible();
+  await releaseControl.getByRole("button", { name: "Mở lại ghi" }).click();
+  await page.getByRole("dialog", { name: "Mở lại thao tác ghi?" }).getByRole("button", { name: "Xác nhận" }).click();
+  await expect(releaseControl.getByRole("heading", { name: "Thao tác ghi đang mở" })).toBeVisible();
   await page.getByRole("button", { name: "Người dùng" }).click();
   await expect(page.getByText("alice@example.test")).toBeVisible();
   const adminRow = page.getByRole("row", { name: /another-admin/ });
@@ -135,6 +151,9 @@ test("admin can inspect users, repositories and audit, then confirm a restore", 
 test("non-admin receives an authorization error and has no admin navigation link", async ({ page }) => {
   await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { user } }));
   await page.route("**/api/v1/admin/stats", (route) => route.fulfill({ status: 403, json: {
+    error: { code: "FORBIDDEN", message: "Tài khoản hiện tại không có quyền quản trị." },
+  } }));
+  await page.route("**/api/v1/admin/release/write-freeze", (route) => route.fulfill({ status: 403, json: {
     error: { code: "FORBIDDEN", message: "Tài khoản hiện tại không có quyền quản trị." },
   } }));
   await page.goto("/admin");

@@ -15,6 +15,10 @@
 .statCard strong { font-size: 2rem; letter-spacing: -.04em; }
 .statCard small { color: var(--muted); line-height: 1.5; }
 .privacyNote { color: var(--muted); font-size: .88rem; }
+.releaseControl { display: flex; align-items: center; justify-content: space-between; gap: 1.25rem; padding: 1rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); }
+.releaseControl h2, .releaseControl p { margin: .25rem 0 0; }
+.releaseControl p { max-width: 48rem; color: var(--muted); line-height: 1.5; }
+.releaseControl button { flex: 0 0 auto; }
 .filters { display: flex; align-items: flex-end; flex-wrap: wrap; gap: .8rem; padding: 1rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); }
 .filters label { display: grid; gap: .4rem; min-width: 12rem; color: #475467; font-size: .8rem; font-weight: 700; }
 .filters .searchField { flex: 1 1 20rem; }
@@ -50,6 +54,8 @@
   .shell { padding-block: 1.5rem 3rem; }
   .heading { flex-direction: column; }
   .statsGrid { grid-template-columns: 1fr; }
+  .releaseControl { align-items: stretch; flex-direction: column; }
+  .releaseControl button { width: 100%; }
   .filters { align-items: stretch; }
   .filters label { min-width: 100%; }
   .filters .button { width: 100%; }

@@ -12,6 +12,8 @@ import { RepositoriesModule } from './repositories/repositories.module';
 import { InvitationsModule } from './invitations/invitations.module';
 import { AdminModule } from './admin/admin.module';
 import { MaintenanceModule } from './maintenance/maintenance.module';
+import { ReleaseControlModule } from './release-control/release-control.module';
+import { ReleaseWriteFreezeGuard } from './release-control/release-write-freeze.guard';
 
 @Module({
   imports: [
@@ -19,6 +21,7 @@ import { MaintenanceModule } from './maintenance/maintenance.module';
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100,
       getTracker: (request) => getRateLimitClientIp(request, process.env.RATE_LIMIT_PROXY_SECRET) }]),
     DatabaseModule,
+    ReleaseControlModule,
     AuthModule,
     HealthModule,
     RepositoriesModule,
@@ -26,6 +29,8 @@ import { MaintenanceModule } from './maintenance/maintenance.module';
     AdminModule,
     MaintenanceModule,
   ],
-  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }, { provide: APP_FILTER, useClass: ApiExceptionFilter }],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: ReleaseWriteFreezeGuard },
+    { provide: APP_FILTER, useClass: ApiExceptionFilter }],
 })
 export class AppModule {}

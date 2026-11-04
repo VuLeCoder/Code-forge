@@ -95,6 +95,16 @@ class EnvironmentVariables {
 
   @IsBoolean()
   @Transform(({ value }: { value: unknown }) => value === true || value === 'true')
+  WRITE_FREEZE_BOOTSTRAP = false;
+
+  @IsInt()
+  @Min(100)
+  @Max(300_000)
+  @Type(() => Number)
+  WRITE_FREEZE_DRAIN_TIMEOUT_MS = 60_000;
+
+  @IsBoolean()
+  @Transform(({ value }: { value: unknown }) => value === true || value === 'true')
   COOKIE_SECURE = false;
 
   @IsIn(['lax', 'strict', 'none'])
@@ -115,6 +125,9 @@ export function validateEnvironment(config: Record<string, unknown>): Environmen
   }
   if (validated.NODE_ENV === 'production' && !validated.COOKIE_SECURE) {
     throw new Error('Cấu hình môi trường không hợp lệ: production cần COOKIE_SECURE=true');
+  }
+  if (validated.NODE_ENV === 'production' && !validated.WRITE_FREEZE_BOOTSTRAP) {
+    throw new Error('Cấu hình môi trường không hợp lệ: production cần WRITE_FREEZE_BOOTSTRAP=true để khởi động fail-closed');
   }
   if (validated.MAX_FILE_BYTES > validated.MAX_REPOSITORY_BYTES) {
     throw new Error('Cấu hình môi trường không hợp lệ: MAX_FILE_BYTES không được lớn hơn MAX_REPOSITORY_BYTES');

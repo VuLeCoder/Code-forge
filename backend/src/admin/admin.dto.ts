@@ -1,4 +1,4 @@
-import { IsISO8601, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsBoolean, IsISO8601, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class AdminStatusDto {
   @IsIn(['ACTIVE', 'LOCKED']) status!: 'ACTIVE' | 'LOCKED';
@@ -20,4 +20,8 @@ export class AdminGitJournalListQueryDto {
 export class AdminResolveGitJournalDto {
   @IsISO8601({ strict: true }) revision!: string;
   @IsIn(['OPERATOR_REVIEW']) reasonCode!: 'OPERATOR_REVIEW';
+}
+
+export class AdminReleaseWriteFreezeDto {
+  @IsBoolean() frozen!: boolean;
 }

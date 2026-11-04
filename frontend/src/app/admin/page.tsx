@@ -13,6 +13,7 @@ type AdminRepository = { id: string; name: string; description: string | null; v
 type AuditEntry = { id: string; actorId: string | null; action: string; targetId: string; details: Record<string, string | number | boolean | null>; createdAt: string; actor: { id: string; username: string } | null };
 type GitJournal = { type: "PUSH" | "MERGE"; operationId: string; actorId: string; actor: { id: string; username: string } | null; status: "PENDING" | "NEEDS_RECONCILIATION"; errorCode: string | null; storageGeneration: number; createdAt: string; updatedAt: string; pullRequestNumber?: number; repository: { id: string; name: string; owner: { id: string; username: string } } };
 type Stats = { users: { total: number; active: number; locked: number }; repositories: { total: number; active: number; locked: number; deleted: number }; pullRequests: { total: number; open: number; pendingMerges: number }; gitJournals: { unresolved: number; pushes: number; merges: number } };
+type WriteFreezeState = { frozen: boolean; activeWriteCount: number; changed?: boolean };
 type RequestError = Error & { status?: number; code?: string };
 type PendingAction = { title: string; description: string; path: string; method: "PATCH" | "POST"; body?: unknown };
 
@@ -46,6 +47,7 @@ export default function AdminPage() {
   const { user, loading: authLoading } = useAuth();
   const [tab, setTab] = useState<Tab>("overview");
   const [stats, setStats] = useState<Stats | null>(null);
+  const [writeFreeze, setWriteFreeze] = useState<WriteFreezeState | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [repositories, setRepositories] = useState<AdminRepository[]>([]);
   const [journals, setJournals] = useState<GitJournal[]>([]);
@@ -71,7 +73,12 @@ export default function AdminPage() {
     setError("");
     try {
       if (tab === "overview") {
-        setStats(await request<Stats>("stats", { signal }));
+        const [nextStats, nextWriteFreeze] = await Promise.all([
+          request<Stats>("stats", { signal }),
+          request<WriteFreezeState>("release/write-freeze", { signal }),
+        ]);
+        setStats(nextStats);
+        setWriteFreeze(nextWriteFreeze);
       } else {
         const params = new URLSearchParams({ page: String(page) });
         if (query) params.set("q", query);
@@ -205,6 +212,22 @@ export default function AdminPage() {
           <article className={styles.statCard}><span>Pull requests</span><strong>{stats.pullRequests.total}</strong><small>{stats.pullRequests.open} đang mở · {stats.pullRequests.pendingMerges} cần đối soát</small></article>
           <article className={styles.statCard}><span>Git journals chưa phân giải</span><strong>{stats.gitJournals.unresolved}</strong><small>{stats.gitJournals.pushes} push · {stats.gitJournals.merges} merge</small></article>
         </div>}
+        {writeFreeze && <article className={styles.releaseControl} aria-label="Khóa ghi khi release">
+          <div><span className="eyebrow">RELEASE SAFETY</span>
+            <h2>{writeFreeze.frozen ? "Đang khóa thao tác ghi" : "Thao tác ghi đang mở"}</h2>
+            <p>{writeFreeze.frozen
+              ? `REST mutations và Git push mới đang bị chặn. Còn ${writeFreeze.activeWriteCount} thao tác ghi đang drain.`
+              : "Bật khóa trước khi backup, migration, deploy hoặc diễn tập mất storage; hệ thống sẽ chờ thao tác đang chạy drain."}</p>
+          </div>
+          <button className={writeFreeze.frozen ? "button buttonPrimary" : "button buttonSecondary"} type="button"
+            onClick={(event) => openAction(event.currentTarget, {
+              title: writeFreeze.frozen ? "Mở lại thao tác ghi?" : "Khóa thao tác ghi để release?",
+              description: writeFreeze.frozen
+                ? "Chỉ mở lại sau khi backup, migration, deploy và smoke bắt buộc đã đạt. Thao tác này được ghi audit."
+                : "Hệ thống sẽ chặn REST mutations và Git push mới, chờ thao tác đang chạy drain, rồi ghi audit.",
+              path: "release/write-freeze", method: "PATCH", body: { frozen: !writeFreeze.frozen },
+            })}>{writeFreeze.frozen ? "Mở lại ghi" : "Khóa ghi"}</button>
+        </article>}
         <p className={styles.privacyNote}>Thông tin source và diff không được hiển thị trong khu vực admin.</p>
       </>}
 

@@ -2,9 +2,11 @@
 
 ## Current delta (2026-11-05)
 
+Issue #4 release-safety work is active on `audit/issue-4-release-preflight`. The branch adds a production fail-closed write gate, audited admin control, in-flight HTTP/Git write drain tracking, and an accessible admin control. Local evidence: full backend unit 26 suites / 229 tests, full admin PostgreSQL 17/Git E2E 6/6 on a disposable loopback tmpfs container, admin Playwright 4/4, backend/frontend lint/typecheck/build, and diff check. No cloud resource was mutated; Render remains on its previous deployment. Hosted CI, metadata backup/restore on an isolated cloud target, source clone inventory, deploy and source-loss recovery remain open.
+
 PR #9 is merged to `main` at `6c65f2b1b02c9ee653a8c6dd8384ef24870bbbcd`, and Issue #3 is closed. Its documentation checkpoint and the underlying PR #8 recovery code are verified by post-merge run [`41883724053`](https://github.com/VuLeCoder/Code-forge/actions/runs/41883724053), green in 6m18s on the exact merge SHA. The run passed 23 backend unit suites / 214 tests and 10 PostgreSQL/Git E2E suites / 73 tests plus the remaining frontend, build, Docker, migration and whitespace gates.
 
-Issue #5's enumerated durable push-audit matrix is now evidenced on `main`: exact authenticated actor and actual ref-change counts; create/update/delete multi-ref pushes; no success audit for rejected/aborted/no-op paths; atomic audit completion; DB-failure, concurrent and repeated reconciliation; storage-generation rejection; hard crash after durable child-success proof; and fail-closed push/merge/delete/reset fencing for unknown outcomes. Issue #6 supplies the proof-only admin resolution path without moving refs or force-resolving contradictory evidence. Issue #5 remains open only for review/publication of this acceptance record. Provider migration, backup/restore, source-loss recovery and release handoff remain Issue #4 work. No cloud completion is claimed.
+Issue #5's enumerated durable push-audit matrix was accepted through PR #10 at `3914ae1`; post-merge run `41896248140` passed and Issue #5 is closed. Provider migration, backup/restore, source-loss recovery and release handoff remain Issue #4 work. No cloud completion is claimed.
 
 ## Historical delta (2026-10-28)
 
@@ -90,7 +92,7 @@ State date: 2026-10-25. Branch: `thviet`. Code is pushed through `24e6abc69cb947
 - **Files:** Admin/auth/maintenance tests first; UI agent owns only `frontend/src/app/admin/page.tsx`, `frontend/src/app/admin/admin.module.css`, and `frontend/test/admin.spec.ts` if UI changes are required.
 - **Acceptance:** Isolated integration proves locked user session/PAT rejection, public repository anonymous reads still work, admin cannot read private source or merge, last active admin cannot be locked, restore retention works, and audit omits secrets/source. Maintenance jobs remain batch/idempotent after repeated startup/run.
 - **Progress:** Hosted DB-backed bootstrap create/promote is verified in `40136064222`; `40144424454` verifies AdminController lock/unlock, old session revoked, valid PAT Git request 200→401 after lock, non-member admin private source/PR/merge denial without ref movement, and audit API secret filtering. Unit/browser coverage includes final-admin/self-lock, expired restore behavior, audit allowlist, admin status UI and keyboard/focus.
-- **Acceptance gap:** DB-backed AdminController restore/source-reset disclosure, durable Git push journal/audit, session/admin-lock serialization, and maintenance multi-batch/retention/idempotence coverage are present. Issue #5's conservative triage runbook is drafted, but a supported resolution tool for permanently ambiguous journals remains missing. Sleeping-service timing, abrupt-kill cleanup, and upgrade-from-production snapshot remain to verify.
+- **Acceptance gap:** DB-backed AdminController restore/source-reset disclosure, durable Git push journal/audit, session/admin-lock serialization, maintenance multi-batch/retention/idempotence and Issue #6's proof-only resolution tool are present. Sleeping-service timing, upgrade-from-production snapshot and cloud release/recovery remain to verify under Issue #4.
 
 ### T5 — Accessibility and responsive review for existing PR/admin UI
 

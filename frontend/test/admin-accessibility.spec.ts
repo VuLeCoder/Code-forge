@@ -25,6 +25,9 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
         pullRequests: { total: 2, open: 2, pendingMerges: 0 },
         gitJournals: { unresolved: 1, pushes: 1, merges: 0 },
       } });
+      if (pathname.endsWith("/release/write-freeze")) return route.fulfill({ json: {
+        frozen: false, activeWriteCount: 0,
+      } });
       if (pathname.endsWith("/users")) return route.fulfill({ json: {
         users: [user, secondUser], page: 1, pageSize: 20, total: 2, hasMore: false,
       } });

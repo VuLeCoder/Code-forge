@@ -9,6 +9,7 @@ import type { AuthenticatedRequest } from './auth.types';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { OriginGuard } from './origin.guard';
+import { AllowDuringWriteFreeze } from '../release-control/release-write-freeze.decorator';
 
 @Controller('auth')
 export class AuthController {
@@ -24,6 +25,7 @@ export class AuthController {
   }
 
   @Post('login')
+  @AllowDuringWriteFreeze()
   @HttpCode(HttpStatus.OK)
   @UseGuards(OriginGuard)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
@@ -34,6 +36,7 @@ export class AuthController {
   }
 
   @Post('refresh')
+  @AllowDuringWriteFreeze()
   @HttpCode(HttpStatus.OK)
   @UseGuards(OriginGuard)
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
@@ -49,6 +52,7 @@ export class AuthController {
   }
 
   @Post('logout')
+  @AllowDuringWriteFreeze()
   @HttpCode(HttpStatus.NO_CONTENT)
   @UseGuards(OriginGuard)
   async logout(@Req() request: Request, @Res({ passthrough: true }) response: Response): Promise<void> {
