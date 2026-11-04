@@ -15,9 +15,11 @@ contradictory evidence remains unresolved and continues to fence writes.
 Relevant behavior is implemented in `backend/src/repositories/git-http.service.ts`,
 `backend/src/repositories/git-push-journal.service.ts`,
 `backend/src/maintenance/maintenance-jobs.service.ts`, and
-`backend/src/admin/admin-git-journal.service.ts`. This runbook does not
-claim that abrupt process-kill or lock-connection-loss recovery has been
-verified end to end.
+`backend/src/admin/admin-git-journal.service.ts`. Automated isolated coverage
+includes abrupt process-kill boundaries, valid receive-pack cancellation after
+repository lock loss, and a pre-CAS merge lock-loss case. The newest merge
+lock-loss case is local branch evidence only until hosted CI verifies it; none
+of these checks is cloud recovery evidence.
 
 ## Triage
 
@@ -87,8 +89,11 @@ merge reconciliation invariants in
 push audit recovery in `backend/test/push-audit.e2e-spec.ts`, and merge metadata
 failure recovery in `backend/test/pull-requests.e2e-spec.ts`. Operator recovery
 coverage is in `backend/src/admin/admin-git-journal.service.spec.ts`,
-`backend/test/admin.e2e-spec.ts`, and the admin browser tests. These tests do not
-simulate killing the backend during an active Git child or loss of the lock
-connection while the child is running. Those crash/restart and lock-loss cases
-remain open acceptance work. A cross-type state whose attribution cannot be
-proved remains intentionally fenced rather than being force-resolved.
+`backend/test/admin.e2e-spec.ts`, and the admin browser tests. Process-crash
+boundaries are exercised in `backend/test/pull-requests.e2e-spec.ts`; active
+valid-pack lock loss is exercised in `backend/test/repository-lock.e2e-spec.ts`.
+The pull-request suite also terminates the exact advisory-lock holder before
+merge ref CAS and verifies unchanged refs/metadata/audit plus a successful
+new-operation retry. The latter is branch-local evidence pending hosted CI. A
+cross-type state whose attribution cannot be proved remains intentionally
+fenced rather than being force-resolved.
