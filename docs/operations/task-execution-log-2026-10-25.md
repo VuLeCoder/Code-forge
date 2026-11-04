@@ -1525,8 +1525,8 @@ cloud status.
 - GitHub Actions `MVP verification` #210 ([run `40464163263`](https://github.com/VuLeCoder/Code-forge/actions/runs/40464163263)) completed **success** on exact SHA `a7061c0` in 5m42s. Backend/frontend tests, lint, typecheck, build, Docker API/migration smoke, migration-image execution and whitespace passed.
 - This confirms the source/build fix and hosted CI only. Vercel deployment remains dependent on its project being connected to the intended `thviet` source; no Vercel project or secret was modified by Codex.
 
-## T88-ISSUE-3 ACCEPTANCE RECONCILIATION — implementation in progress
+## T88-ISSUE-3 ACCEPTANCE RECONCILIATION — local documentation complete
 
 - Owner: Codex. Branch: `docs/issue-3-acceptance`. Owned paths: `docs/implementation-status.md`, `docs/next-actions.md`, `docs/remaining-work-breakdown.md`, `docs/operations/acceptance-task-board-2026-10-25.md`, `docs/operations/git-operation-recovery.md`, and this execution log.
 - Reconciles Issue #3's live criteria against existing real PostgreSQL/Git coverage and records PR #8 merge commit `1e35335`, feature run `41842692592`, successful PR rerun `41845795345`, and successful post-merge `main` run `41847475419`. Cloud/release work remains explicitly separated under Issue #4; Issue #5 remains a separate acceptance audit.
-- No runtime code, dependency, schema, database, Git storage, Docker volume, provider setting, deployment or issue state is changed. `git diff --check` passed; exact documentation commit is recorded in the follow-up log checkpoint.
+- Documentation commit: `06284a2` (`docs: reconcile issue 3 acceptance evidence`). No runtime code, dependency, schema, database, Git storage, Docker volume, provider setting, deployment or issue state changed. `git diff --check` passed. The next safe action is to push this branch, run hosted CI, review the evidence summary, then update/close Issue #3 without conflating it with Issue #4 cloud work.
