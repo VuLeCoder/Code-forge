@@ -18,8 +18,8 @@ Relevant behavior is implemented in `backend/src/repositories/git-http.service.t
 `backend/src/admin/admin-git-journal.service.ts`. Automated isolated coverage
 includes abrupt process-kill boundaries, valid receive-pack cancellation after
 repository lock loss, and a pre-CAS merge lock-loss case. The newest merge
-lock-loss case is local branch evidence only until hosted CI verifies it; none
-of these checks is cloud recovery evidence.
+lock-loss case passed MVP verification run `41842692592` on exact commit
+`88a4600`; none of these checks is cloud recovery evidence.
 
 ## Triage
 
@@ -94,6 +94,6 @@ boundaries are exercised in `backend/test/pull-requests.e2e-spec.ts`; active
 valid-pack lock loss is exercised in `backend/test/repository-lock.e2e-spec.ts`.
 The pull-request suite also terminates the exact advisory-lock holder before
 merge ref CAS and verifies unchanged refs/metadata/audit plus a successful
-new-operation retry. The latter is branch-local evidence pending hosted CI. A
-cross-type state whose attribution cannot be proved remains intentionally
-fenced rather than being force-resolved.
+new-operation retry. MVP verification run `41842692592` passed all hosted gates
+for that exact code commit. A cross-type state whose attribution cannot be
+proved remains intentionally fenced rather than being force-resolved.
