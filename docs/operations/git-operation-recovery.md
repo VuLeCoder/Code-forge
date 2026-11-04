@@ -94,9 +94,12 @@ boundaries are exercised in `backend/test/pull-requests.e2e-spec.ts`; active
 valid-pack lock loss is exercised in `backend/test/repository-lock.e2e-spec.ts`.
 The pull-request suite also terminates the exact advisory-lock holder before
 merge ref CAS and verifies unchanged refs/metadata/audit plus a successful
-new-operation retry. The change was merged through PR #8; feature run
-`41842692592`, PR rerun `41845795345`, and post-merge `main` run `41847475419`
-passed all hosted gates, with the last run verifying exact merge SHA `1e35335`.
-This completes the enumerated Issue #3 recovery matrix, not cloud release or
-provider source-recovery acceptance. A cross-type state whose attribution
-cannot be proved remains intentionally fenced rather than being force-resolved.
+new-operation retry. The change was merged through PR #8; PR #9 then merged the
+acceptance record and closed Issue #3 at `6c65f2b`. Post-merge `main` run
+`41883724053` passed all hosted gates on that exact SHA, including 214 backend
+unit and 73 PostgreSQL/Git E2E tests. This also verifies the enumerated Issue #5
+push-audit suites: exact actor/ref-delta attribution, bounded audit details,
+crash/DB recovery, idempotence, storage-generation rejection and mutation
+fencing. It does not establish cloud release or provider source recovery. A
+cross-type state whose attribution cannot be proved remains intentionally
+fenced rather than being force-resolved.

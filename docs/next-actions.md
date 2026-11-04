@@ -2,9 +2,10 @@
 
 ## Current main acceptance state (2026-11-05)
 
-- `main` and `origin/main` contain [PR #8](https://github.com/VuLeCoder/Code-forge/pull/8) at merge commit `1e353351f6153defa6ffd3689655dc8d3b552e1d`. Post-merge MVP verification [`41847475419`](https://github.com/VuLeCoder/Code-forge/actions/runs/41847475419) passed every gate in 5m33s.
-- Issue #3's listed PostgreSQL/Git acceptance cases are covered, including the final pre-CAS advisory-lock-loss boundary. The next tracker action is to publish the evidence summary and close Issue #3 after review; no additional Issue #3 runtime change is currently demonstrated as necessary.
-- The next code/evidence audit should be Issue #5 against its own acceptance list. Cloud migration, backup/restore, restart/source-loss recovery and release handoff remain Issue #4 work and still require confirmed provider target/readiness/recovery authority. Do not infer cloud acceptance from the green `main` workflow.
+- `main` and `origin/main` contain [PR #9](https://github.com/VuLeCoder/Code-forge/pull/9) at merge commit `6c65f2b1b02c9ee653a8c6dd8384ef24870bbbcd`. Post-merge MVP verification [`41883724053`](https://github.com/VuLeCoder/Code-forge/actions/runs/41883724053) passed every gate in 6m18s on that exact SHA.
+- Issue #3 is closed after its complete PostgreSQL/Git evidence summary was posted. No additional Issue #3 runtime work is indicated.
+- Issue #5's acceptance audit finds its listed durable push-audit cases covered on `main`: actor/ref-delta attribution, privacy bounds, rejected/aborted paths, crash and audit-transaction recovery, idempotence/concurrency, storage-generation checks and mutation fencing. Pre-proof unknown outcomes stay fenced and can be resolved only by Issue #6's proof-based workflow. The next safe tracker action is review/CI of the audit record, then Issue #5 closure if no contradictory evidence appears.
+- After Issue #5, cloud migration, backup/restore, restart/source-loss recovery and release handoff remain Issue #4 work. They still require confirmed provider target/readiness/recovery authority; do not infer cloud acceptance from green `main` CI.
 - Issue #6's proof-based admin resolution workflow was merged through PR #7 and Issue #6 is closed. Unknown/contradictory evidence remains fail-closed by design.
 
 ## Historical feature candidate (2026-10-28)
