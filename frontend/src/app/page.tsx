@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { headers } from "next/headers";
 import styles from "./page.module.css";
+import { HomeShowcase } from "./home-showcase";
 import { repositoryPath, type RepositorySummary } from "@/lib/repositories";
 import { withBackendClientIp } from "@/lib/backend-client-ip";
 
@@ -65,15 +66,50 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ q
     <main className={styles.main}>
       <section className={styles.hero}>
         <div className="container">
-          <div className={styles.heroContent}>
-            <span className="eyebrow">Code Forge</span>
-            <h1>Lưu trữ mã nguồn, cộng tác rõ ràng.</h1>
-            <p>Tạo repository, làm việc qua pull request và quản lý quyền truy cập trong một không gian gọn, tập trung vào dự án của bạn.</p>
-            <div className={styles.actions}>
-              <Link className="button buttonPrimary" href="/register">Tạo tài khoản</Link>
-              <a className="button buttonSecondary" href="#repositories">Khám phá repository</a>
+          <div className={styles.heroGrid}>
+            <div className={styles.heroContent}>
+              <span className="eyebrow">Code Forge · Không gian Git của bạn</span>
+              <h1>Mã nguồn tốt hơn khi cả nhóm cùng xây dựng.</h1>
+              <p>Tạo repository, gửi pull request và review từng thay đổi trong một quy trình cộng tác rõ ràng.</p>
+              <div className={styles.actions}>
+                <Link className="button buttonPrimary" href="/register">Tạo tài khoản</Link>
+                <a className="button buttonSecondary" href="#repositories">Khám phá repository</a>
+              </div>
+              <p className={styles.heroFootnote}>Dành cho dự án học tập và demo nhóm nhỏ.</p>
             </div>
+
+            <HomeShowcase />
           </div>
+        </div>
+      </section>
+
+      <section className={styles.architecture} aria-labelledby="architecture-title">
+        <div className="container">
+          <div className={styles.architectureHeading}>
+            <div>
+              <span className="eyebrow">Bên trong Code Forge</span>
+              <h2 id="architecture-title">Từ lệnh Git đến metadata repository</h2>
+            </div>
+            <p>Mã nguồn, xác thực Git và dữ liệu cộng tác đi qua các thành phần riêng biệt.</p>
+          </div>
+          <ol className={styles.flowTrack}>
+            <li>
+              <span className={styles.flowIcon} aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="12" rx="2" /><path d="M8 20h8m-4-4v4m-2-9 2-2 2 2m-2-2v5" /></svg></span>
+              <span><strong>Git client</strong><small>clone · fetch · push</small></span>
+            </li>
+            <li>
+              <span className={styles.flowIcon} aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.4 2.9 8.2 7 10 4.1-1.8 7-5.6 7-10V6l-7-3Z" /><path d="m9 12 2 2 4-4" /></svg></span>
+              <span><strong>Git qua HTTPS</strong><small>tài khoản · PAT</small></span>
+            </li>
+            <li>
+              <span className={styles.flowIcon} aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H10l2 2h7.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" /><path d="M7 12h10m-10 3h7" /></svg></span>
+              <span><strong>Git storage</strong><small>commit · branch · tag</small></span>
+            </li>
+            <li>
+              <span className={styles.flowIcon} aria-hidden="true"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" /></svg></span>
+              <span><strong>PostgreSQL</strong><small>user · repo · PR</small></span>
+            </li>
+          </ol>
         </div>
       </section>
 

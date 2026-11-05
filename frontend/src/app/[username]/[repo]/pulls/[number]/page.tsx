@@ -299,10 +299,16 @@ export default function PullRequestDetailPage() {
       {diffPage.files.map((file, index) => {
         const diffStatus = file.diffStatus ?? (typeof file.diff === "string" ? "TEXT" : "UNAVAILABLE");
         const label = diffStatus === "TEXT" ? "Văn bản" : diffStatus === "BINARY" ? "File nhị phân" : diffStatus === "TRUNCATED" ? "Đã rút gọn" : "Không khả dụng";
+        const diffLines = typeof file.diff === "string" ? file.diff.replace(/\n$/, "").split("\n") : [];
         return <article className={styles.fileDiff} key={`${file.path}-${index}`}>
           <h3><code>{file.previousPath ? `${file.previousPath} → ` : ""}{file.path}</code><span className={styles.diffState} role="status">{label}</span></h3>
           {diffStatus === "TEXT" && typeof file.diff === "string" && file.diff.length > 0
-            ? <pre className={styles.diff} tabIndex={0} aria-label={`Diff của ${file.path}`}>{file.diff}</pre>
+            ? <pre className={styles.diff} tabIndex={0} aria-label={`Diff của ${file.path}`}>{diffLines.map((line, lineIndex) => {
+              const lineClass = line.startsWith("+") && !line.startsWith("+++") ? styles.diffLineAdded
+                : line.startsWith("-") && !line.startsWith("---") ? styles.diffLineRemoved
+                  : line.startsWith("@@") || line.startsWith("diff --git ") || line.startsWith("index ") ? styles.diffLineMeta : "";
+              return <span className={`${styles.diffLine} ${lineClass}`} key={lineIndex}>{line || " "}</span>;
+            })}</pre>
             : diffStatus === "TEXT" && typeof file.diff === "string"
               ? <p className={styles.muted}>Không có dòng diff để hiển thị.</p>
               : diffStatus === "BINARY"

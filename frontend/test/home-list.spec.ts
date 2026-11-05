@@ -37,6 +37,26 @@ test("home renders only repositories returned by the API", async ({ page }) => {
   await expect(page.getByText("TypeScript", { exact: true })).toHaveCount(0);
 });
 
+test("Git Engine Lab interactions are labeled as examples and do not change repositories", async ({ page }) => {
+  await page.goto("/");
+
+  const lab = page.getByRole("region", { name: "Git Engine Lab — bản minh họa tương tác" });
+  await expect(lab.getByText("DỮ LIỆU MINH HỌA")).toBeVisible();
+  const commit = lab.getByRole("button", { name: /Commit a18d42c/ });
+  await commit.click();
+  await expect(commit).toHaveAttribute("aria-pressed", "true");
+  await expect(lab.getByText("Khởi tạo tài liệu dự án")).toBeVisible();
+
+  await lab.getByRole("tab", { name: "Xung đột" }).click();
+  await lab.getByRole("button", { name: "Dùng main" }).click();
+  await expect(lab.getByText("const requestTimeout = 120_000;", { exact: true }).last()).toBeVisible();
+  await expect(lab.getByText(/Không sửa file hoặc thực hiện merge/)).toBeVisible();
+
+  await lab.getByRole("tab", { name: "Split diff" }).click();
+  await expect(lab.getByText("+1 −1")).toBeVisible();
+  await expect(lab.getByText("timeoutMs: 150_000,", { exact: true })).toBeVisible();
+});
+
 test("home has no horizontal overflow at supported viewport widths", async ({ page }) => {
   await page.goto("/");
 

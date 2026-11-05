@@ -142,7 +142,10 @@ function InvitationsManager() {
                   <span className={styles.itemTitle}>
                     <Link href={repoPath}>{inv.repository.owner.username}/{inv.repository.name}</Link>
                   </span>
-                  <span className="badge">Quyền {inv.role === "WRITE" ? "Ghi (WRITE)" : "Đọc (READ)"}</span>
+                  <div className={styles.badges}>
+                    <span className={styles.pendingBadge}>Đang chờ phản hồi</span>
+                    <span className={styles.roleBadge}>Quyền {inv.role === "WRITE" ? "Ghi (WRITE)" : "Đọc (READ)"}</span>
+                  </div>
                 </div>
                 <div className={styles.meta}>
                   <span>Người mời: <strong>{inv.inviter.username}</strong></span>

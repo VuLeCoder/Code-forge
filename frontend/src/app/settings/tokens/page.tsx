@@ -93,12 +93,16 @@ function TokenManager() {
       {loading ? <p role="status">Đang tải token…</p> : <>
         <button className="button buttonSecondary" onClick={reload} disabled={busy}>Tải lại danh sách</button>
         {!tokens.length && !error && <p>Chưa có token nào.</p>}
-        <ul className={styles.list}>{tokens.map((token) => <li key={token.id}>
+        <ul className={styles.list}>{tokens.map((token) => {
+          const expired = new Date(token.expiresAt).getTime() <= now;
+          const stateClass = token.revokedAt ? styles.tokenRevoked : expired ? styles.tokenExpired : styles.tokenActive;
+          const stateLabel = token.revokedAt ? "Đã thu hồi" : expired ? "Đã hết hạn" : "Đang hoạt động";
+          return <li key={token.id}>
           <h3>{token.name}</h3><p>Prefix: <code>{token.tokenPrefix}</code> · {token.scopes.join(", ")}</p>
-          <p>{token.revokedAt ? "Đã thu hồi" : new Date(token.expiresAt).getTime() <= now ? "Đã hết hạn" : "Đang hoạt động"} · Hết hạn: {new Date(token.expiresAt).toLocaleString("vi-VN")}</p>
+          <p><span className={`${styles.tokenState} ${stateClass}`}>{stateLabel}</span> · Hết hạn: {new Date(token.expiresAt).toLocaleString("vi-VN")}</p>
           <p>Lần dùng gần nhất: {token.lastUsedAt ? new Date(token.lastUsedAt).toLocaleString("vi-VN") : "Chưa dùng"}</p>
           {!token.revokedAt && <button className="button buttonSecondary" disabled={busy} onClick={() => { setRevoking(token); confirmation.current?.showModal(); }}>Thu hồi {token.name}</button>}
-        </li>)}</ul>
+        </li>})}</ul>
       </>}
     </section>
     <dialog ref={confirmation} className={styles.dialog} aria-labelledby="revoke-token-title" aria-describedby="revoke-token-description" aria-busy={busy} onCancel={(event) => { if (busy) event.preventDefault(); }}>

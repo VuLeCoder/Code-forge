@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "./auth-provider";
 
@@ -21,6 +21,7 @@ export function SiteHeader() {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const pathname = usePathname();
   const router = useRouter();
 
   useEffect(() => {
@@ -68,7 +69,7 @@ export function SiteHeader() {
 
   return <header className="siteHeader"><div className="headerInner">
     <Link className="brand" href="/" aria-label="Code Forge - Trang chủ"><span className="brandMark" aria-hidden="true">CF</span><span>Code Forge</span></Link>
-    <nav className="mainNav" aria-label="Điều hướng chính"><Link href="/#repositories">Khám phá</Link><Link href="/new">Tạo repository</Link></nav>
+    <nav className="mainNav" aria-label="Điều hướng chính"><Link href="/#repositories" aria-current={pathname === "/" ? "page" : undefined}>Khám phá</Link><Link href="/new" aria-current={pathname === "/new" ? "page" : undefined}>Tạo repository</Link></nav>
     <div className="headerActions" aria-busy={loading}>
       {loading ? <span className="sessionSkeleton" aria-label="Đang kiểm tra phiên" /> : user ? <>
         <div className="userMenu" ref={menuRef}>
