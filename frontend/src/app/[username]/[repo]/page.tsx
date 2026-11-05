@@ -6,9 +6,10 @@ import { Suspense, useEffect, useState } from "react";
 import { SourceBrowser } from "./source-browser";
 import { CloneDialog } from "./clone-dialog";
 import { QuickSetup } from "./quick-setup";
+import { RepositoryNavigation } from "@/components/repository-navigation";
 import { useAuth } from "@/components/auth-provider";
 import { sessionFetch } from "@/lib/auth";
-import { repositoryPath, type RepositorySummary } from "@/lib/repositories";
+import type { RepositorySummary } from "@/lib/repositories";
 import styles from "./repository.module.css";
 
 type Repository = RepositorySummary & { defaultBranch: string; createdAt: string; status: string; storageState?: "READY" | "EMPTY" | "RESET"; readme?: string | null };
@@ -46,11 +47,7 @@ export default function RepositoryPage() {
       <span className="badge">{repo.visibility === "PRIVATE" ? "Riêng tư" : "Công khai"}</span>
     </div>
     <div className={styles.header}><div>{repo.description && <p>{repo.description}</p>}</div></div>
-    <nav className={styles.repositoryNav} aria-label="Điều hướng repository">
-      <Link aria-current="page" href={repositoryPath(repo)}>Mã nguồn</Link>
-      <Link href={`${repositoryPath(repo)}/pulls`}>Pull requests</Link>
-      {repo.permissions?.canManage && <Link href={`${repositoryPath(repo)}/settings`}>Cài đặt</Link>}
-    </nav>
+    <RepositoryNavigation owner={repo.owner.username} repository={repo.name} current="code" canManage={repo.permissions?.canManage ?? false} />
     {repo.storageState === "RESET" && <div className={styles.notice} role="status">Mã nguồn của repository demo đã bị reset. Bare repository rỗng đã được tạo lại; lịch sử commit trước đó không thể khôi phục.</div>}
     <CloneDialog key={`${repo.id}/${repo.name}/${repo.visibility}`} repository={repo} />
     <QuickSetup repository={repo} />

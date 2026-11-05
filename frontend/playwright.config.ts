@@ -18,6 +18,7 @@ export default defineConfig({
       timeout: 180_000,
       env: {
         BACKEND_URL: "http://127.0.0.1:4111",
+        HOME_REPOSITORY_TIMEOUT_MS: "750",
         APP_ORIGIN: "http://localhost:3111",
         RATE_LIMIT_PROXY_SECRET: "playwright-only-signing-secret-at-least-32-characters",
       },

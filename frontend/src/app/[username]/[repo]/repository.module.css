@@ -42,29 +42,6 @@
   line-height: 1.7;
   overflow-wrap: anywhere;
 }
-.repositoryNav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 16px;
-  border-bottom: 1px solid var(--border);
-}
-.repositoryNav a {
-  padding: 9px 12px;
-  border-bottom: 2px solid transparent;
-  color: var(--muted);
-  font-size: 0.9rem;
-  font-weight: 600;
-}
-.repositoryNav a:hover,
-.repositoryNav a:focus-visible {
-  color: var(--brand-700);
-  background: var(--brand-50);
-}
-.repositoryNav a[aria-current="page"] {
-  color: var(--text);
-  border-bottom-color: var(--primary);
-}
 .empty {
   display: grid;
   justify-items: center;
