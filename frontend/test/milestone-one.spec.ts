@@ -222,7 +222,7 @@ test('README option is sent on create and a storage reset is explained', async (
   } } }));
   await page.goto('/new');
   await page.getByRole('textbox', { name: 'Tên repository' }).fill('with-readme');
-  await page.getByRole('checkbox', { name: /Khởi tạo với README.md/ }).check();
+  await page.getByRole('checkbox', { name: /Thêm README/ }).check();
   await page.getByRole('button', { name: 'Tạo repository' }).click();
   await expect(page.getByRole('region', { name: 'README', exact: true }).getByRole('heading', { name: 'with-readme', exact: true })).toBeVisible();
   reset = true;

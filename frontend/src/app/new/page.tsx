@@ -79,7 +79,7 @@ function CreateForm() {
           <h2 id="configuration-title">Cấu hình</h2>
           <div className={styles.configuration}>
             <fieldset className={styles.visibility}><legend>Quyền xem</legend><label><input type="radio" name="visibility" value="PUBLIC" checked={visibility === "PUBLIC"} onChange={() => setVisibility("PUBLIC")} /><span><strong>Công khai</strong><small>Mọi người có thể xem repository.</small></span></label><label><input type="radio" name="visibility" value="PRIVATE" checked={visibility === "PRIVATE"} onChange={() => setVisibility("PRIVATE")} /><span><strong>Riêng tư</strong><small>Chỉ bạn và cộng tác viên được mời có thể xem repository.</small></span></label></fieldset>
-            <div className={styles.initialize}><label><input type="checkbox" name="initializeReadme" checked={initializeReadme} onChange={(event) => setInitializeReadme(event.target.checked)} /><span><strong>Khởi tạo với README.md</strong><small>Tạo sẵn commit đầu tiên để repository có thể sử dụng ngay.</small></span></label></div>
+            <div className={styles.initialize}><label><input type="checkbox" name="initializeReadme" checked={initializeReadme} onChange={(event) => setInitializeReadme(event.target.checked)} /><span><strong>Thêm README</strong><small>Tạo sẵn commit đầu tiên để repository có thể sử dụng ngay.</small></span></label></div>
           </div>
           <div className={styles.actions}><Link className="button buttonSecondary" href={user ? `/${encodeURIComponent(user.username)}` : "/"}>Hủy</Link><button className="button buttonPrimary" type="submit" disabled={submitting}>{submitting ? "Đang tạo…" : "Tạo repository"}</button></div>
         </div>
