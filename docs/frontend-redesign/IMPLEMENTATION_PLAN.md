@@ -8,19 +8,19 @@ Update the presentation layer for Code Forge pages while retaining Next.js App R
 
 | Phase | Scope | Status |
 | --- | --- | --- |
-| 0 — Audit | Inspect workspace/routes/data sources/tests and record unavailable data | Implemented in `ARCHITECTURE_AUDIT.md`; final test evidence pending |
-| 1 — Foundation | Shared visual tokens, light shell, typography, focus, reduced motion | Implemented in this candidate; lint/build verification pending |
+| 0 — Audit | Inspect workspace/routes/data sources/tests and record unavailable data | Completed in `ARCHITECTURE_AUDIT.md` |
+| 1 — Foundation | Shared visual tokens, light shell, typography, focus, reduced motion | Implemented; workspace lint/typecheck/build passed locally |
 | 2 — App shell | Header, account dropdown, global navigation, repository navigation | Implemented; active state and current routes retained |
-| 3 — Home | Concise hero, interactive Git Engine Lab, truthful API-backed discovery | Implemented; lab fixtures are labeled examples and browser checks pending |
-| 4 — Repository | Repository overview, actual tree/branch/commit/blob/README data, clone and quick setup | Presentation refreshed; file-type icons and full-text copy/download added; checks pending |
-| 5 — Collaboration | PR list/detail/forms/diff/merge state presentation | Presentation refreshed; backend rules and API unchanged; checks pending |
-| 6 — Profile and account | Profile, auth, create repository, invitations, PAT, admin | Presentation refreshed; checks pending |
-| 7 — Quality | E2E, lint, typecheck, build, diff review, responsive and keyboard checks | Pre-integration candidate passed frontend lint/typecheck and 70/70 Playwright tests; rerun after latest `origin/main` is integrated |
-| 8 — Release | Commit, push feature branch, integrate to main under branch protection, confirm remote SHA | Open until quality gates and remote checks pass |
+| 3 — Home | Concise hero, interactive Git Engine Lab, truthful API-backed discovery | Implemented; local browser E2E covers demo-only interactions, responsive layout, empty/error/timeout/retry |
+| 4 — Repository | Repository overview, actual tree/branch/commit/blob/README data, clone and quick setup | Implemented; local browser suite passed |
+| 5 — Collaboration | PR list/detail/forms/diff/merge state presentation | Implemented; full-stack invitation/push/merge journey passed |
+| 6 — Profile and account | Profile, auth, create repository, invitations, PAT, admin | Implemented; local browser and backend test suites passed |
+| 7 — Quality | E2E, lint, typecheck, build, diff review, responsive and keyboard checks | Local lint/typecheck/build passed; backend unit 26 suites/229 tests; backend E2E 10 suites/69 passed/5 skipped; frontend E2E 70/70; full-stack 3/3 |
+| 8 — Release | Commit, push feature branch, integrate to main under branch protection, confirm remote SHA | Open: push, GitHub CI, PR/merge, and cloud confirmation pending |
 
 ## Release guardrails
 
-1. Run checks on the exact candidate SHA; report local, CI, and cloud separately.
+1. Local checks above ran after integrating current `origin/main` (`45c91ac`); report local, CI, and cloud separately.
 2. Preserve user-owned and untracked files; stage only the redesign files.
 3. Fetch the remote before integration. Do not force-push or bypass required checks/branch protection.
 4. If `main` moved, integrate the latest remote main and rerun required checks on the resulting candidate.

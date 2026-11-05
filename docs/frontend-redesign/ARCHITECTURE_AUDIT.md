@@ -1,7 +1,7 @@
 # Code Forge frontend architecture audit
 
-Reviewed: 2026-11-06  
-Working branch: `codex/ui-refresh-v3`  
+Reviewed: 2026-11-06
+Working branch: `codex/ui-refresh-v3`
 Observed base: `7efff1d` (`feat(frontend): clarify repository and settings states`)
 
 ## Stack and boundaries
