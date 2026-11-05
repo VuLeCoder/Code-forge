@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { headers } from "next/headers";
 import styles from "./page.module.css";
+import { HomeShowcase } from "./home-showcase";
 import { AnonymousOnly } from "@/components/anonymous-only";
 import { SignedInDashboard } from "@/components/signed-in-dashboard";
 import { repositoryPath, type RepositorySummary } from "@/lib/repositories";
@@ -104,6 +105,12 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ q
               <div className={styles.previewFooter}><span><i />All checks passed</span><strong>Ready to merge</strong></div>
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className={styles.labSection} aria-label="Khám phá Git Engine Lab">
+        <div className="container">
+          <HomeShowcase />
         </div>
       </section>
 

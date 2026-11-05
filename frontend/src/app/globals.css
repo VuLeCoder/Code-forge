@@ -101,4 +101,16 @@ html[data-theme="dark"] .themeIconSun { display: block; }
   .headerActions { gap: 6px; } .themeToggle { width: 36px; height: 36px; flex-basis: 36px; }
   .headerActions .buttonSmall { padding-inline: 11px; }
 }
+@media (max-width: 480px) {
+  .headerInner {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 4px 8px;
+    padding-block: 7px;
+  }
+  .siteHeader .brand { grid-column: 1; }
+  .headerActions { grid-column: 3; min-width: 0; }
+  .mainNav { grid-row: 2; grid-column: 1 / -1; margin-left: 0; }
+  .mainNav a { flex: 1 1 auto; justify-content: center; }
+}
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *,*::before,*::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }

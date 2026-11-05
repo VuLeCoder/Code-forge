@@ -333,7 +333,12 @@
 }
 
 @media (max-width: 420px) {
+  .nameRow {
+    min-width: 0;
+  }
+
   .nameRow > span {
+    min-width: 0;
     max-width: 42%;
     overflow: hidden;
     text-overflow: ellipsis;
