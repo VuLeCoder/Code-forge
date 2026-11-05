@@ -7,7 +7,15 @@ or private cloud values.
 This is a chronological log: entries labeled **historical/superseded** are
 snapshots, not current status. Current acceptance state is in the task board.
 
-## T-ISSUE4-WRITE-FREEZE-2026-11-05 — active candidate
+## T-ISSUE4-POST-MERGE-2026-11-05 — merged code; cloud recovery open
+
+- PR #11 merged to `main` at `3b7ec51caed368710ae03b3faf5cbd57eff8eb38`. Head workflows `41902788424` and `41902832903` passed; post-merge workflow `41903915472` passed every gate in 6m09s on the exact merge SHA.
+- Local `main` was fast-forwarded to the merge SHA with a clean worktree before this documentation branch was created.
+- Read-only Render evidence: live HTTP 200 after 24.6s cold wake; readiness HTTP 200 with database/Git/storage `up`; synthetic public repository API HTTP 200; known private Git fixture HTTP 401 with the expected Basic challenge; anonymous public `git ls-remote` exit 0 with no refs. No provider state was changed.
+- Access inventory: no Render/Neon CLI or credential environment; no GitHub Environment, Actions variable/secret or Deployment record. Repository hook listing was unavailable to the current GitHub token and is not needed for release execution.
+- Safety decision: do not advance auto-deploy branch `thviet`, deploy/restart Render, migrate Neon or close Issue #4 until metadata backup is readable on an isolated restore target, source clones are inventoried, production freeze configuration is confirmed, and fixture-only recovery smoke can be run.
+
+## T-ISSUE4-WRITE-FREEZE-2026-11-05 — completed candidate phase
 
 - Branch: `audit/issue-4-release-preflight`, based on `main` merge `3914ae1`.
 - Scope: application-wide release write-freeze, active-write drain, audited admin control and admin UI. No schema migration or dependency was added.

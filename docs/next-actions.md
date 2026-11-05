@@ -2,10 +2,11 @@
 
 ## Current main acceptance state (2026-11-05)
 
-- `main` and `origin/main` contain [PR #10](https://github.com/VuLeCoder/Code-forge/pull/10) at merge commit `3914ae12f89a44a92286e670405c52a7f7646751`. Post-merge MVP verification [`41896248140`](https://github.com/VuLeCoder/Code-forge/actions/runs/41896248140) passed on rerun on that exact SHA.
+- `main` and `origin/main` contain [PR #11](https://github.com/VuLeCoder/Code-forge/pull/11) at merge commit `3b7ec51caed368710ae03b3faf5cbd57eff8eb38`. Head workflows `41902788424` and `41902832903` passed; post-merge MVP verification [`41903915472`](https://github.com/VuLeCoder/Code-forge/actions/runs/41903915472) passed every gate in 6m09s on that exact SHA.
 - Issue #3 is closed after its complete PostgreSQL/Git evidence summary was posted. No additional Issue #3 runtime work is indicated.
 - Issue #5 is closed after PR #10 reconciled its durable push-audit evidence. Issue #4 is the only open tracker item; cloud migration, backup/restore, restart/source-loss recovery and release handoff remain open.
-- Branch `audit/issue-4-release-preflight` now contains a locally verified write-freeze/drain candidate. It is not merged, CI-verified or deployed. Render still tracks `thviet`, which is 13 commits behind `main`; do not advance it until the candidate is integrated, `WRITE_FREEZE_BOOTSTRAP=true` is configured, source clones are secured and a readable metadata backup is restored on an isolated target.
+- The Issue #4 write-freeze/drain is merged and CI-verified but not deployed. Read-only Render probes on 2026-11-05 passed live/readiness, public API, private Basic challenge and public `ls-remote` against the existing revision. Render still tracks `thviet`, which was 13 commits behind `main` at preflight; do not advance it until `WRITE_FREEZE_BOOTSTRAP=true` is configured, source clones are inventoried, and a readable metadata backup is restored on an isolated target.
+- This machine has no Render/Neon CLI or credential environment, and the repository has no GitHub Environment, Actions variable/secret or Deployment record. The next executable cloud step requires an authorized provider session; do not substitute a blind auto-deploy for that missing recovery evidence.
 - Issue #6's proof-based admin resolution workflow was merged through PR #7 and Issue #6 is closed. Unknown/contradictory evidence remains fail-closed by design.
 
 ## Historical feature candidate (2026-10-28)
