@@ -62,7 +62,8 @@ export function RepositoryList({ username, initial }: { username: string; initia
     <Link className="button buttonSecondary" href={isOwner ? "/new" : "/"}>{isOwner ? "Tạo repository" : "Khám phá Code Forge"}</Link>
   </div> : <ul className={styles.repoList}>{repositories.map((repo) => <li key={repo.id}>
     <div><Link href={repositoryPath(repo)}>{repo.name}</Link><span className="badge">{repo.visibility === "PRIVATE" ? "Riêng tư" : "Công khai"}</span></div>
-    {repo.description && <p>{repo.description}</p>}
+    <p>{repo.description || "Chưa có mô tả cho repository này."}</p>
+    <small>Cập nhật {repo.updatedAt ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(repo.updatedAt)) : "gần đây"}</small>
   </li>)}</ul>;
 
   return <>

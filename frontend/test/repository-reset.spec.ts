@@ -43,7 +43,7 @@ test("repository reset is clear while branch, history, and clone actions reflect
   await expect(history.getByText("Chưa có commit trên branch này.", { exact: true })).toBeVisible();
   await expect(history.getByRole("list")).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Clone" }).click();
+  await page.getByRole("button", { name: "Code" }).click();
   const cloneDialog = page.getByRole("dialog", { name: "Clone repository" });
   await expect(cloneDialog).toBeVisible();
   await expect(cloneDialog.getByLabel("URL clone")).toHaveValue(cloneUrl);

@@ -14,7 +14,7 @@ const auditEntry = {
   targetId: user.id, details: { previousStatus: "ACTIVE", nextStatus: "LOCKED" }, createdAt: "2026-10-04T00:00:00.000Z",
 };
 
-for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "narrow", width: 375, height: 812 }]) {
+for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "narrow", width: 375, height: 812 }, { name: "compact", width: 320, height: 812 }]) {
   test(`admin controls support keyboard navigation and dialog focus return at ${viewport.name} width`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { user: admin } }));
@@ -42,7 +42,7 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
         page: 1, pageSize: 20, total: 1, hasMore: false,
       } });
       if (pathname.endsWith("/audit")) return route.fulfill({ json: {
-        audit: [auditEntry], page: 1, pageSize: 20, total: 1, hasMore: false,
+        audit: [{ ...auditEntry, details: viewport.name === "compact" ? { unbroken: "x".repeat(220) } : auditEntry.details }], page: 1, pageSize: 20, total: 1, hasMore: false,
       } });
       return route.fulfill({ status: 204 });
     });
@@ -76,7 +76,7 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
     const lockButton = aliceRow.getByRole("button", { name: "Khóa tài khoản" });
     await expect(lockButton).toBeVisible();
 
-    if (viewport.name === "narrow") {
+    if (viewport.name !== "desktop") {
       const aliceCells = aliceRow.getByRole("cell");
       await expect(aliceCells).toHaveCount(5);
       for (let i = 0; i < 5; i += 1) {
@@ -131,7 +131,7 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
 
     const repoRow = page.getByRole("row", { name: new RegExp(repo.name) });
     await expect(repoRow).toBeVisible();
-    if (viewport.name === "narrow") {
+    if (viewport.name !== "desktop") {
       const repoCells = repoRow.getByRole("cell");
       await expect(repoCells).toHaveCount(5);
       for (let i = 0; i < 5; i += 1) {
@@ -154,7 +154,7 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
     await expect(journalHeaders).toHaveText(["Repository", "Loại · Operation", "Trạng thái", "Người khởi tạo", "Cập nhật", "Thao tác"]);
     const journalRow = page.getByRole("row", { name: /GIT_CHILD_SUCCEEDED/ });
     await expect(journalRow).toBeVisible();
-    if (viewport.name === "narrow") {
+    if (viewport.name !== "desktop") {
       const journalCells = journalRow.getByRole("cell");
       await expect(journalCells).toHaveCount(6);
       for (let i = 0; i < 6; i += 1) await expect(journalCells.nth(i)).toHaveAttribute("data-label");
@@ -170,13 +170,15 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
 
     const auditRow = page.getByRole("row", { name: /ADMIN_USER_LOCKED/ });
     await expect(auditRow).toBeVisible();
-    if (viewport.name === "narrow") {
+    if (viewport.name !== "desktop") {
       const auditCells = auditRow.getByRole("cell");
       await expect(auditCells).toHaveCount(5);
       for (let i = 0; i < 5; i += 1) {
         await expect(auditCells.nth(i)).toHaveAttribute("data-label");
       }
     }
+
+    if (viewport.name === "compact") await expect(auditRow.getByText("x".repeat(220))).toBeVisible();
 
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });

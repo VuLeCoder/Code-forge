@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { sessionFetch } from "@/lib/auth";
 import { repositoryPath, type RepositorySummary } from "@/lib/repositories";
@@ -31,6 +31,7 @@ type ApiBody = {
   invitations?: RepoInvitation[];
   error?: { code?: string; message?: string };
 };
+type AccessLoadState = "idle" | "loading" | "ready" | "error";
 
 function errorMessage(body: ApiBody, fallback: string) {
   const messages: Record<string, string> = {
@@ -70,10 +71,42 @@ export default function RepositorySettingsPage() {
   const [confirmation, setConfirmation] = useState("");
   const [members, setMembers] = useState<Member[]>([]);
   const [invitations, setInvitations] = useState<RepoInvitation[]>([]);
+  const [memberState, setMemberState] = useState<AccessLoadState>("idle");
+  const [invitationState, setInvitationState] = useState<AccessLoadState>("idle");
+  const [memberError, setMemberError] = useState("");
+  const [invitationError, setInvitationError] = useState("");
   const [inviteUsername, setInviteUsername] = useState("");
   const [inviteRole, setInviteRole] = useState<"READ" | "WRITE">("READ");
   const visibilityDialog = useRef<HTMLDialogElement>(null);
   const deleteDialog = useRef<HTMLDialogElement>(null);
+
+  const loadMembers = useCallback(async () => {
+    setMemberState("loading"); setMemberError("");
+    try {
+      const response = await sessionFetch(`${path}/members`, { cache: "no-store" });
+      const body = await readBody(response);
+      if (!response.ok) throw new Error(errorMessage(body, "Không thể tải danh sách thành viên."));
+      setMembers(body.members ?? []);
+      setMemberState("ready");
+    } catch (error) {
+      setMemberError(error instanceof Error ? error.message : "Không thể tải danh sách thành viên.");
+      setMemberState("error");
+    }
+  }, [path]);
+
+  const loadInvitations = useCallback(async () => {
+    setInvitationState("loading"); setInvitationError("");
+    try {
+      const response = await sessionFetch(`${path}/invitations`, { cache: "no-store" });
+      const body = await readBody(response);
+      if (!response.ok) throw new Error(errorMessage(body, "Không thể tải danh sách lời mời."));
+      setInvitations(body.invitations ?? []);
+      setInvitationState("ready");
+    } catch (error) {
+      setInvitationError(error instanceof Error ? error.message : "Không thể tải danh sách lời mời.");
+      setInvitationState("error");
+    }
+  }, [path]);
 
   useEffect(() => {
     if (loading) return;
@@ -87,18 +120,17 @@ export default function RepositorySettingsPage() {
       if (active) {
         setResult(next);
         if (next.repository?.permissions?.canManage) {
-          const [mRes, iRes] = await Promise.all([
-            sessionFetch(`${path}/members`, { cache: "no-store" }),
-            sessionFetch(`${path}/invitations`, { cache: "no-store" }),
-          ]);
-          if (active && mRes.ok) {
-            const mData = await readBody(mRes);
-            if (mData.members) setMembers(mData.members);
-          }
-          if (active && iRes.ok) {
-            const iData = await readBody(iRes);
-            if (iData.invitations) setInvitations(iData.invitations);
-          }
+          setMemberState("loading"); setInvitationState("loading");
+          void sessionFetch(`${path}/members`, { cache: "no-store" }).then(readBody).then((body) => {
+            if (!active) return;
+            if (body.members) { setMembers(body.members); setMemberState("ready"); return; }
+            setMemberError(errorMessage(body, "Không thể tải danh sách thành viên.")); setMemberState("error");
+          }).catch(() => { if (active) { setMemberError("Không thể tải danh sách thành viên."); setMemberState("error"); } });
+          void sessionFetch(`${path}/invitations`, { cache: "no-store" }).then(readBody).then((body) => {
+            if (!active) return;
+            if (body.invitations) { setInvitations(body.invitations); setInvitationState("ready"); return; }
+            setInvitationError(errorMessage(body, "Không thể tải danh sách lời mời.")); setInvitationState("error");
+          }).catch(() => { if (active) { setInvitationError("Không thể tải danh sách lời mời."); setInvitationState("error"); } });
         }
       }
     })
@@ -132,6 +164,7 @@ export default function RepositorySettingsPage() {
       }
       const newInv = (data as { invitation: RepoInvitation }).invitation;
       setInvitations((prev) => [newInv, ...prev]);
+      setInvitationState("ready");
       setInviteUsername("");
       setMessage(`Đã gửi lời mời tới ${newInv.invitee.username}.`);
     } catch (e) {
@@ -222,7 +255,7 @@ export default function RepositorySettingsPage() {
       const updated = await update({ visibility: desiredVisibility }, "Không thể đổi quyền xem repository.");
       setResult({ key: routeKey, repository: updated, error: null });
       visibilityDialog.current?.close();
-      setMessage(updated.visibility === "PRIVATE" ? "Repository hiện chỉ owner có thể xem." : "Repository hiện được công khai.");
+      setMessage(updated.visibility === "PRIVATE" ? "Repository hiện riêng tư; chủ sở hữu và cộng tác viên được cấp quyền vẫn truy cập được." : "Repository hiện được công khai.");
     } catch (error) { setFailure(error instanceof Error ? error.message : "Không thể đổi quyền xem repository."); visibilityDialog.current?.close(); }
     finally { setPending(false); }
   }
@@ -262,7 +295,7 @@ export default function RepositorySettingsPage() {
     <section className={styles.card} aria-labelledby="visibility-title">
       <h2 id="visibility-title">Quyền xem</h2>
       <p>Hiện tại: <strong>{repo.visibility === "PUBLIC" ? "Công khai" : "Riêng tư"}</strong></p>
-      <p>{repo.visibility === "PUBLIC" ? "Mọi người có thể xem repository." : "Chỉ bạn có thể xem repository."}</p>
+      <p>{repo.visibility === "PUBLIC" ? "Mọi người có thể xem repository." : "Chủ sở hữu và cộng tác viên được cấp quyền vẫn có thể xem repository."}</p>
       <button className="button buttonSecondary" type="button" disabled={pending} onClick={() => { setDesiredVisibility(repo.visibility === "PUBLIC" ? "PRIVATE" : "PUBLIC"); visibilityDialog.current?.showModal(); }}>Đổi quyền xem</button>
     </section>
     <section className={styles.card} aria-labelledby="access-title">
@@ -294,8 +327,10 @@ export default function RepositorySettingsPage() {
         </button>
       </form>
 
-      <h3 style={{ marginTop: "16px" }}>Thành viên hiện tại</h3>
-      {members.length === 0 ? (
+      <h3 className={styles.subheading}>Thành viên hiện tại</h3>
+      {memberState === "loading" ? <p className={styles.emptyHint} role="status">Đang tải thành viên…</p> : memberState === "error" ? (
+        <div className={styles.inlineError} aria-live="polite"><span>{memberError}</span><button type="button" onClick={() => void loadMembers()}>Thử lại</button></div>
+      ) : members.length === 0 ? (
         <p className={styles.emptyHint}>Chưa có thành viên cộng tác nào.</p>
       ) : (
         <ul className={styles.memberList}>
@@ -330,9 +365,11 @@ export default function RepositorySettingsPage() {
         </ul>
       )}
 
-      {invitations.length > 0 && (
+      <h3 className={styles.subheading}>Lời mời đang chờ</h3>
+      {invitationState === "loading" ? <p className={styles.emptyHint} role="status">Đang tải lời mời…</p> : invitationState === "error" ? (
+        <div className={styles.inlineError} aria-live="polite"><span>{invitationError}</span><button type="button" onClick={() => void loadInvitations()}>Thử lại</button></div>
+      ) : invitations.length > 0 ? (
         <>
-          <h3 style={{ marginTop: "16px" }}>Lời mời đang chờ</h3>
           <ul className={styles.memberList}>
             {invitations.map((inv) => (
               <li key={inv.id} className={styles.memberItem}>
@@ -356,7 +393,7 @@ export default function RepositorySettingsPage() {
             ))}
           </ul>
         </>
-      )}
+      ) : <p className={styles.emptyHint}>Chưa có lời mời nào đang chờ.</p>}
     </section>
     <section className={`${styles.card} ${styles.danger}`} aria-labelledby="delete-title">
       <h2 id="delete-title">Xóa repository</h2>
@@ -365,7 +402,7 @@ export default function RepositorySettingsPage() {
     </section>
     <dialog ref={visibilityDialog} className={styles.dialog} aria-labelledby="visibility-confirm-title" onClose={() => setDesiredVisibility(repo.visibility)}>
       <h2 id="visibility-confirm-title">Xác nhận đổi quyền xem</h2>
-      <p>{desiredVisibility === "PRIVATE" ? "Sau khi chuyển sang riêng tư, người khác sẽ không thể xem repository này." : "Sau khi chuyển sang công khai, mọi người có thể xem repository này."}</p>
+      <p>{desiredVisibility === "PRIVATE" ? "Sau khi chuyển sang riêng tư, người dùng không có quyền sẽ không thể xem repository này. Cộng tác viên được cấp quyền vẫn truy cập được." : "Sau khi chuyển sang công khai, mọi người có thể xem repository này."}</p>
       <div className={styles.actions}><button className="button buttonSecondary" type="button" disabled={pending} onClick={() => visibilityDialog.current?.close()}>Hủy</button><button className="button buttonPrimary" type="button" disabled={pending} onClick={changeVisibility}>Xác nhận đổi quyền xem</button></div>
     </dialog>
     <dialog ref={deleteDialog} className={styles.dialog} aria-labelledby="delete-confirm-title" onClose={() => setConfirmation("")}>

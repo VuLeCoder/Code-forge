@@ -46,8 +46,8 @@ export default function LoginPage() {
     <div className={styles.heading}><span className="eyebrow">Chào mừng trở lại</span><h1>Đăng nhập Code Forge</h1><p>Tiếp tục với repository và các pull request của bạn.</p></div>
     {error && <div className={styles.error} role="alert" tabIndex={-1} ref={errorRef}><span aria-hidden="true">!</span><p>{error}</p></div>}
     <form className={styles.form} onSubmit={handleSubmit} aria-busy={submitting}>
-      <div className={styles.field}><label htmlFor="identity">Email hoặc username</label><input id="identity" name="identity" autoComplete="username" maxLength={320} required autoFocus /></div>
-      <div className={styles.field}><label htmlFor="password">Mật khẩu</label><input id="password" name="password" type="password" autoComplete="current-password" minLength={8} maxLength={128} required /></div>
+      <div className={styles.field}><label htmlFor="identity">Email hoặc username</label><input id="identity" name="identity" autoComplete="username" maxLength={320} required autoFocus aria-describedby="identity-hint" /><span className={styles.hint} id="identity-hint">Dùng email hoặc username đã đăng ký.</span></div>
+      <div className={styles.field}><label htmlFor="password">Mật khẩu</label><input id="password" name="password" type="password" autoComplete="current-password" minLength={8} maxLength={128} required aria-describedby="password-hint" /><span className={styles.hint} id="password-hint">Mật khẩu của tài khoản Code Forge.</span></div>
       <button className={`button buttonPrimary ${styles.submit}`} type="submit" disabled={submitting}>{submitting ? <><span className={styles.spinner} aria-hidden="true" />Đang đăng nhập…</> : "Đăng nhập"}</button>
     </form>
     <p className={styles.switch}>Chưa có tài khoản? <AuthSwitchLink href="/register">Đăng ký miễn phí</AuthSwitchLink></p>

@@ -26,17 +26,13 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ q
       <section className={styles.hero}>
         <div className="container">
           <div className={styles.heroContent}>
-            <span className="eyebrow">Xây dựng cùng nhau</span>
-            <h1>Nơi những dòng code<br />trở thành sản phẩm.</h1>
-            <p>Lưu trữ repository, cộng tác qua pull request và quản lý quyền truy cập — trong một không gian đơn giản, rõ ràng.</p>
+            <span className="eyebrow">Code Forge</span>
+            <h1>Lưu trữ mã nguồn, cộng tác rõ ràng.</h1>
+            <p>Tạo repository, làm việc qua pull request và quản lý quyền truy cập trong một không gian gọn, tập trung vào dự án của bạn.</p>
             <div className={styles.actions}>
-              <Link className="button buttonPrimary" href="/register">Bắt đầu miễn phí</Link>
+              <Link className="button buttonPrimary" href="/register">Tạo tài khoản</Link>
               <a className="button buttonSecondary" href="#repositories">Khám phá repository</a>
             </div>
-          </div>
-          <div className={styles.codeWindow} aria-label="Ví dụ sử dụng Git">
-            <div className={styles.windowBar}><span /><span /><span /><p>terminal</p></div>
-            <pre><code><span className={styles.comment}># Bắt đầu cộng tác</span>{"\n"}<span className={styles.prompt}>$</span> git clone codeforge.dev/ban/du-an.git{"\n"}<span className={styles.prompt}>$</span> git checkout -b feature/y-tuong-moi{"\n"}<span className={styles.prompt}>$</span> git push origin feature/y-tuong-moi{"\n\n"}<span className={styles.success}>✓ Sẵn sàng tạo pull request</span></code></pre>
           </div>
         </div>
       </section>
@@ -52,11 +48,11 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ q
           <div className={styles.repoGrid}>
             {repositories.map((repo) => (
               <article className={styles.repoCard} key={repo.id}>
-                <div className={styles.repoIcon} aria-hidden="true">◇</div>
+                <div className={styles.repoIcon} aria-hidden="true">⌘</div>
                 <div className={styles.repoBody}>
                   <div className={styles.repoTitle}><Link href={repositoryPath(repo)}><span>{repo.owner.username} / </span>{repo.name}</Link><span className="badge">Công khai</span></div>
                   <p>{repo.description || "Chưa có mô tả."}</p>
-                  <div className={styles.repoMeta}><span>Cập nhật {new Intl.DateTimeFormat("vi-VN", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(repo.updatedAt))}</span></div>
+                  <div className={styles.repoMeta}><span>Cập nhật {repo.updatedAt ? new Intl.DateTimeFormat("vi-VN", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(repo.updatedAt)) : "gần đây"}</span></div>
                 </div>
               </article>
             ))}

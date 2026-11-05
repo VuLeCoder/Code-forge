@@ -10,7 +10,7 @@ test('M3.6 clone dialog copies public URL, handles clipboard errors, keyboard an
   await page.route('**/api/v1/auth/*', (route) => route.fulfill({ status: 401, json: {} }));
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.goto('/alice/hello-world');
-  await page.getByRole('button', { name: 'Clone', exact: true }).click();
+  await page.getByRole('button', { name: 'Code', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Clone repository' });
   await expect(dialog).toBeVisible();
   const url = 'http://localhost:3111/git/alice/hello-world.git';
@@ -21,8 +21,8 @@ test('M3.6 clone dialog copies public URL, handles clipboard errors, keyboard an
   expect(await dialog.evaluate((element) => { const r = element.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; })).toBe(true);
   await page.keyboard.press('Escape');
   await expect(dialog).not.toBeVisible();
-  await expect(page.getByRole('button', { name: 'Clone', exact: true })).toBeFocused();
-  await page.getByRole('button', { name: 'Clone', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Code', exact: true })).toBeFocused();
+  await page.getByRole('button', { name: 'Code', exact: true }).click();
   await page.evaluate(() => Object.defineProperty(navigator.clipboard, 'writeText', { value: async () => { throw new Error('Denied'); } }));
   await dialog.getByRole('button', { name: 'Sao chép URL' }).click();
   await expect(dialog.getByRole('status')).toContainText('Hãy sao chép URL đã chọn');
@@ -52,7 +52,7 @@ test('M3.7 private repository offers a clean URL and username/PAT instructions',
   await expect(quickSetup).toBeVisible();
   await expect(quickSetup).toContainText('git clone http://localhost:3111/git/alice/private.git');
   await expect(quickSetup).toContainText('không đưa PAT vào URL');
-  await page.getByRole('button', { name: 'Clone', exact: true }).click();
+  await page.getByRole('button', { name: 'Code', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('Khi Git hỏi mật khẩu, nhập PAT');
   await expect(dialog).toContainText('repo:write');

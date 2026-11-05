@@ -1,22 +1,23 @@
-.layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 48px; padding-block: 56px 88px; min-height: 70vh; }
+.layout { display: grid; grid-template-columns: 224px minmax(0, 1fr); gap: 32px; padding-block: 32px 64px; min-height: 70vh; }
 .identity { overflow-wrap: anywhere; }
-.avatar { display: grid; place-items: center; width: 156px; height: 156px; margin-bottom: 28px; border: 8px solid white; border-radius: 32px; background: var(--brand-100); color: var(--brand-700); font-size: 4rem; font-weight: 800; box-shadow: var(--shadow-sm); }
-.identity h1 { font-size: 1.8rem; letter-spacing: -.04em; margin-bottom: 6px; }
+.avatar { display: grid; place-items: center; width: 96px; height: 96px; margin-bottom: 20px; border: 1px solid var(--border); border-radius: 50%; background: var(--brand-50); color: var(--brand-700); font-size: 2.25rem; font-weight: 800; }
+.identity h1 { font-size: 1.5rem; letter-spacing: -.025em; margin-bottom: 6px; }
 .identity p { color: var(--muted); line-height: 1.7; }
-.joined { margin-top: 24px; font-size: .85rem; }
-.repositories { align-self: start; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
-.heading { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; padding: 22px 26px; border-bottom: 1px solid var(--border); }
+.joined { margin-top: 12px; font-size: .85rem; }
+.repositories { align-self: start; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.heading { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border); }
 .heading h2 { font-size: 1rem; }
 .empty { display: grid; justify-items: center; gap: 18px; text-align: center; padding: 58px 28px; }
 .empty h3 { font-size: 1.15rem; }
 .empty p { max-width: 420px; color: var(--muted); line-height: 1.8; }
 .repoIcon { display: grid; place-items: center; width: 60px; height: 60px; border-radius: 18px; color: var(--brand-600); background: var(--brand-50); font-size: 1.5rem; font-weight: 700; }
 .repoList { list-style: none; padding: 0; margin: 0; }
-.repoList li { padding: 20px 26px; border-bottom: 1px solid var(--border); }
+.repoList li { padding: 16px 20px; border-bottom: 1px solid var(--border); }
 .repoList li:last-child { border-bottom: 0; }
 .repoList li > div { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .repoList a { color: var(--brand-700); font-weight: 700; overflow-wrap: anywhere; }
 .repoList p { color: var(--muted); margin-top: 8px; line-height: 1.6; overflow-wrap: anywhere; }
+.repoList small { display: block; margin-top: 10px; color: var(--muted); font-size: .78rem; }
 .deletedSection { padding: 24px 26px; border-top: 1px solid var(--border); }
 .deletedSection h3 { font-size: 1rem; margin-bottom: 8px; }
 .deletedSection p { color: var(--muted); line-height: 1.6; }

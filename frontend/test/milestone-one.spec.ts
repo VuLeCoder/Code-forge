@@ -232,12 +232,13 @@ test('owner can edit repository settings, confirm visibility, and confirm deleti
   await page.getByRole('button', { name: 'Lưu thay đổi' }).click();
   await expect(page).toHaveURL('/alice/renamed/settings');
   await page.getByRole('button', { name: 'Đổi quyền xem' }).click();
-  await expect(page.getByRole('dialog', { name: 'Xác nhận đổi quyền xem' })).toContainText('người khác sẽ không thể xem');
+  await expect(page.getByRole('dialog', { name: 'Xác nhận đổi quyền xem' })).toContainText('người dùng không có quyền sẽ không thể xem');
+  await expect(page.getByRole('dialog', { name: 'Xác nhận đổi quyền xem' })).toContainText('Cộng tác viên được cấp quyền vẫn truy cập được');
   await page.getByRole('dialog').getByRole('button', { name: 'Hủy' }).click();
   expect(mutations.filter((entry) => entry.body?.visibility)).toHaveLength(0);
   await page.getByRole('button', { name: 'Đổi quyền xem' }).click();
   await page.getByRole('button', { name: 'Xác nhận đổi quyền xem' }).click();
-  await expect(page.getByRole('status')).toContainText('chỉ owner có thể xem');
+  await expect(page.getByRole('status')).toContainText('chủ sở hữu và cộng tác viên được cấp quyền');
   await page.getByRole('button', { name: 'Xóa repository', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Xác nhận xóa repository' }).getByRole('button', { name: 'Xác nhận xóa' })).toBeDisabled();
   await page.getByRole('dialog', { name: 'Xác nhận xóa repository' }).getByRole('textbox', { name: 'Tên repository' }).fill('renamed');
@@ -298,7 +299,8 @@ test('expired access refreshes once and logout removes protected content', async
   await page.goto('/new');
   await expect(page.getByRole('heading', { name: 'Tạo repository' })).toBeVisible();
   expect(refreshes).toBe(1);
-  await page.getByRole('button', { name: 'Đăng xuất' }).click();
+  await page.getByRole('button', { name: 'Mở menu tài khoản alice' }).click();
+  await page.getByRole('menuitem', { name: 'Đăng xuất' }).click();
   await expect(page.getByRole('link', { name: 'Hồ sơ alice' })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Tạo repository' })).toHaveCount(0);
 });

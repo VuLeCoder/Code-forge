@@ -1,28 +1,32 @@
 .page {
   min-height: 70vh;
-  padding-block: 38px 88px;
+  padding-block: 24px 72px;
 }
 .page > p {
   color: var(--muted);
   margin: 14px 0 24px;
   line-height: 1.7;
 }
-.breadcrumb {
+.repositoryTitle {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 1.25rem;
+  letter-spacing: -0.02em;
 }
-.breadcrumb a {
+.repositoryTitle h1 {
+  min-width: 0;
+  font-size: inherit;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.repositoryTitle a {
   color: var(--brand-700);
 }
-.breadcrumb strong {
+.repositoryTitle strong {
   color: var(--text);
-}
-.breadcrumb .badge {
-  margin-left: 4px;
 }
 .header {
   display: flex;
@@ -30,12 +34,7 @@
   align-items: flex-start;
   flex-wrap: wrap;
   gap: 16px;
-  margin: 36px 0 28px;
-}
-.header h1 {
-  font-size: clamp(1.8rem, 4vw, 2.5rem);
-  letter-spacing: -0.04em;
-  overflow-wrap: anywhere;
+  margin: 10px 0 16px;
 }
 .header p {
   color: var(--muted);
@@ -43,11 +42,28 @@
   line-height: 1.7;
   overflow-wrap: anywhere;
 }
-.actions {
+.repositoryNav {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.repositoryNav a {
+  padding: 9px 12px;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.repositoryNav a:hover,
+.repositoryNav a:focus-visible {
+  color: var(--brand-700);
+  background: var(--brand-50);
+}
+.repositoryNav a[aria-current="page"] {
+  color: var(--text);
+  border-bottom-color: var(--primary);
 }
 .empty {
   display: grid;
@@ -97,16 +113,6 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.bottom {
-  display: flex;
-  flex-wrap: wrap;
-  overflow-wrap: anywhere;
-  gap: 20px;
-  margin-top: 20px;
-  color: var(--brand-700);
-  font-size: 0.85rem;
-  font-weight: 700;
-}
 .notice {
   margin-bottom: 18px;
   padding: 14px 18px;
@@ -117,11 +123,29 @@
 }
 .quickSetup {
   margin-bottom: 20px;
-  padding: 22px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: linear-gradient(135deg, var(--surface), var(--brand-50));
+  border-radius: var(--radius-md);
+  background: var(--surface);
 }
+.quickSetupSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  cursor: pointer;
+  list-style: none;
+}
+.quickSetupSummary::-webkit-details-marker { display: none; }
+.quickSetupSummary strong,
+.quickSetupSummary small { display: block; }
+.quickSetupSummary strong { color: var(--text); font-size: .9rem; }
+.quickSetupSummary small { margin-top: 3px; color: var(--muted); font-size: .78rem; }
+.summaryChevron { width: 8px; height: 8px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(45deg); transition: transform .15s ease; }
+.quickSetup[open] .summaryChevron { transform: rotate(225deg); }
+.quickSetupBody { padding: 0 16px 16px; border-top: 1px solid var(--border); }
+.codeMenu { display: flex; justify-content: flex-end; margin-bottom: 16px; }
+.codeMenu .button { gap: 6px; }
 .quickSetupHeader {
   display: flex;
   align-items: flex-start;
@@ -169,8 +193,7 @@
   color: var(--text);
   font-size: 0.82rem;
   line-height: 1.75;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  white-space: pre;
 }
 .quickSetupAside {
   min-width: 0;
@@ -213,9 +236,11 @@
   border-radius: var(--radius-sm);
 }
 @media (max-width: 600px) {
+  .repositoryTitle { font-size: 1.05rem; }
   .quickSetup {
-    padding: 18px;
+    margin-inline: 0;
   }
+  .quickSetupSummary { padding: 12px; } .quickSetupBody { padding: 0 12px 12px; }
   .quickSetupGrid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -313,12 +338,12 @@
 .sourceTabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 20px;
-  margin-block: 20px;
+  gap: 16px;
+  margin-block: 16px;
   border-bottom: 1px solid var(--border);
 }
 .sourceTabs a {
-  padding-block: 12px;
+  padding-block: 10px;
   color: var(--brand-700);
 }
 .sourceTabs a[aria-current] {
@@ -473,7 +498,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 10px 16px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   transition: background-color 0.12s ease;
 }

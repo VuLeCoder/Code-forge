@@ -101,10 +101,10 @@ function TokenManager() {
         </li>)}</ul>
       </>}
     </section>
-    <dialog ref={confirmation} className={styles.dialog} onCancel={(event) => { if (busy) event.preventDefault(); }}>
-      <h2>Thu hồi token {revoking?.name}?</h2><p>Các yêu cầu Git tiếp theo dùng token này sẽ bị từ chối.</p>
+    <dialog ref={confirmation} className={styles.dialog} aria-labelledby="revoke-token-title" aria-describedby="revoke-token-description" aria-busy={busy} onCancel={(event) => { if (busy) event.preventDefault(); }}>
+      <h2 id="revoke-token-title">Thu hồi token {revoking?.name}?</h2><p id="revoke-token-description">Các yêu cầu Git tiếp theo dùng token này sẽ bị từ chối.</p>
       {error && <p role="alert">{error}</p>}
-      <div className={styles.actions}><button className="button buttonPrimary" disabled={busy} onClick={revoke}>Xác nhận thu hồi</button><button className="button buttonSecondary" disabled={busy} onClick={() => confirmation.current?.close()}>Hủy</button></div>
+      <div className={styles.actions}><button className="button buttonPrimary" disabled={busy} onClick={revoke}>{busy ? "Đang thu hồi…" : "Xác nhận thu hồi"}</button><button className="button buttonSecondary" disabled={busy} onClick={() => confirmation.current?.close()}>Hủy</button></div>
     </dialog>
   </div>;
 }

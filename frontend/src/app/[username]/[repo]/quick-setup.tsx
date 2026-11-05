@@ -36,8 +36,13 @@ export function QuickSetup({ repository }: { repository: QuickSetupRepository })
     }
   }
 
-  return <section className={styles.quickSetup} aria-labelledby="quick-setup-title">
-    <div className={styles.quickSetupHeader}>
+  return <details className={styles.quickSetup} open={isEmpty} role="region" aria-labelledby="quick-setup-title">
+    <summary className={styles.quickSetupSummary}>
+      <span><strong>{isEmpty ? "Quick setup" : "Hướng dẫn clone và thiết lập"}</strong><small>{isEmpty ? "Tạo commit đầu tiên và push từ máy local" : "Mở khi cần các lệnh Git cơ bản"}</small></span>
+      <span aria-hidden="true" className={styles.summaryChevron} />
+    </summary>
+    <div className={styles.quickSetupBody}>
+      <div className={styles.quickSetupHeader}>
       <div>
         <span className="eyebrow">Quick setup</span>
         <h2 id="quick-setup-title">Bắt đầu với repository này</h2>
@@ -68,6 +73,7 @@ export function QuickSetup({ repository }: { repository: QuickSetupRepository })
         {isPrivate && <Link href="/settings/tokens">Tạo hoặc quản lý PAT</Link>}
       </aside>
     </div>
-    <p className={styles.quickSetupStatus} role="status" aria-live="polite">{message}</p>
-  </section>;
+      <p className={styles.quickSetupStatus} role="status" aria-live="polite">{message}</p>
+    </div>
+  </details>;
 }

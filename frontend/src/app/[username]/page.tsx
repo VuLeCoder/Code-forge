@@ -23,9 +23,8 @@ export default async function ProfilePage({ params, searchParams }: { params: Pr
   return <main className={`container ${styles.layout}`}>
     <aside className={styles.identity}>
       <div className={styles.avatar} aria-hidden="true">{user.username.slice(0, 1).toUpperCase()}</div>
-      <span className="eyebrow">Thành viên Code Forge</span>
+      <span className="eyebrow">Hồ sơ</span>
       <h1>{user.username}</h1>
-      <p>@{user.username}</p>
       <p className={styles.joined}>Tham gia {new Intl.DateTimeFormat("vi-VN", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(user.createdAt))}</p>
     </aside>
     <section className={styles.repositories} aria-labelledby="repositories-title">

@@ -23,6 +23,11 @@ test("account avatar opens an accessible menu and Escape restores focus", async 
   await expect(trigger).toHaveAttribute("aria-expanded", "true");
   await expect(menu.getByRole("menuitem", { name: "Hồ sơ của tôi" })).toHaveAttribute("href", "/alice");
   await expect(menu.getByRole("menuitem", { name: "Lời mời cộng tác" })).toHaveAttribute("href", "/invitations");
+  await expect(menu.getByRole("menuitem", { name: "Đăng xuất" })).toBeVisible();
+  await page.keyboard.press("End");
+  await expect(menu.getByRole("menuitem", { name: "Đăng xuất" })).toBeFocused();
+  await page.keyboard.press("Home");
+  await expect(menu.getByRole("menuitem", { name: "Hồ sơ của tôi" })).toBeFocused();
 
   await page.keyboard.press("Escape");
   await expect(menu).toHaveCount(0);

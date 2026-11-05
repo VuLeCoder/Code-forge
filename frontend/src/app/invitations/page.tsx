@@ -29,12 +29,12 @@ function InvitationsManager() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const alive = useRef(false);
 
   useEffect(() => {
     alive.current = true;
     let cancelled = false;
-
     sessionFetch("/api/v1/invitations", { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) throw new Error("Không thể tải danh sách lời mời.");
@@ -52,7 +52,13 @@ function InvitationsManager() {
       cancelled = true;
       alive.current = false;
     };
-  }, []);
+  }, [attempt]);
+
+  function retry() {
+    setLoading(true);
+    setError("");
+    setAttempt((value) => value + 1);
+  }
 
   async function handleAccept(invitation: Invitation) {
     setBusyId(invitation.id);
@@ -116,6 +122,8 @@ function InvitationsManager() {
 
       {loading ? (
         <p role="status">Đang tải lời mời…</p>
+      ) : error ? (
+        <div className={styles.empty}><p role="alert">{error}</p><button type="button" className="button buttonSecondary" onClick={retry}>Thử lại</button></div>
       ) : invitations.length === 0 ? (
         <div className={styles.empty}>
           <p>Bạn không có lời mời cộng tác nào đang chờ xử lý.</p>

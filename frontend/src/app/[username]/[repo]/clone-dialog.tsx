@@ -21,8 +21,8 @@ export function CloneDialog({ repository }: { repository: RepositorySummary }) {
     try { await navigator.clipboard.writeText(url); setMessage("Đã sao chép URL clone."); }
     catch { input.current?.focus(); input.current?.select(); setMessage("Không thể sao chép tự động. Hãy sao chép URL đã chọn."); }
   }
-  return <>
-    <button ref={trigger} className="button buttonSecondary" onClick={open}>Clone</button>
+  return <div className={styles.codeMenu}>
+    <button ref={trigger} className="button buttonPrimary buttonSmall" onClick={open} aria-haspopup="dialog">Code <span aria-hidden="true">⌄</span></button>
     <dialog ref={dialog} className={styles.cloneDialog} aria-labelledby="clone-title" onClose={() => trigger.current?.focus()}>
       <h2 id="clone-title">Clone repository</h2>
       <>
@@ -42,5 +42,5 @@ export function CloneDialog({ repository }: { repository: RepositorySummary }) {
       <p role="status">{message}</p>
       <button className="button buttonSecondary" onClick={() => dialog.current?.close()}>Đóng</button>
     </dialog>
-  </>;
+  </div>;
 }
