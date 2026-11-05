@@ -23,7 +23,7 @@ test("repository reset is clear while branch, history, and clone actions reflect
 
   await page.goto("/alice/lost-project");
 
-  await expect(page.getByRole("status").filter({ hasText: "Mã nguồn của repository demo đã bị reset" })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Kho lưu trữ Git đã được khởi tạo lại" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Repository chưa có mã nguồn" })).toBeVisible();
   const quickSetup = page.getByRole("region", { name: "Bắt đầu với repository này" });
   await expect(quickSetup).toBeVisible();

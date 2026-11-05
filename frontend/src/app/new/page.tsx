@@ -59,18 +59,35 @@ function CreateForm() {
   }
 
   return <div className={styles.layout}>
-    <div className={styles.heading}><span className="eyebrow">Không gian làm việc</span><h1>Tạo repository</h1><p>Lưu trữ dự án mới trong tài khoản của bạn.</p></div>
+    <header className={styles.heading}>
+      <h1>Tạo repository mới</h1>
+      <p>Repository lưu trữ mã nguồn và lịch sử thay đổi của dự án. Các trường có dấu <strong>*</strong> là bắt buộc.</p>
+    </header>
     <form className={styles.form} onSubmit={handleSubmit} aria-busy={submitting}>
       {error && <div className={styles.error} role="alert" tabIndex={-1} ref={errorRef}>{error}</div>}
-      <div className={styles.field}><label htmlFor="repo-name">Tên repository <span aria-hidden="true">*</span></label><div className={styles.nameRow}><span>{user?.username ?? "…"} /</span><input id="repo-name" name="name" required maxLength={100} autoFocus placeholder="du-an-cua-ban" aria-describedby="name-hint" /></div><p id="name-hint">Dùng chữ cái, số, dấu chấm, gạch dưới hoặc gạch ngang. Không dùng “..” hay đuôi .git.</p></div>
-      <div className={styles.field}><label htmlFor="repo-description">Mô tả <span className={styles.optional}>(không bắt buộc)</span></label><textarea id="repo-description" name="description" maxLength={2000} rows={3} placeholder="Dự án này dùng để làm gì?" /></div>
-      <fieldset className={styles.visibility}><legend>Quyền xem</legend><label><input type="radio" name="visibility" value="PUBLIC" checked={visibility === "PUBLIC"} onChange={() => setVisibility("PUBLIC")} /><span><strong>Công khai</strong><small>Mọi người có thể xem repository.</small></span></label><label><input type="radio" name="visibility" value="PRIVATE" checked={visibility === "PRIVATE"} onChange={() => setVisibility("PRIVATE")} /><span><strong>Riêng tư</strong><small>Chỉ bạn và cộng tác viên được mời có thể xem repository.</small></span></label></fieldset>
-      <div className={styles.visibility}><label><input type="checkbox" name="initializeReadme" checked={initializeReadme} onChange={(event) => setInitializeReadme(event.target.checked)} /><span><strong>Thêm README.md</strong><small>Tạo commit đầu tiên với tên repository.</small></span></label></div>
-      <div className={styles.actions}><button className="button buttonPrimary" type="submit" disabled={submitting}>{submitting ? "Đang tạo…" : "Tạo repository"}</button><Link className="button buttonSecondary" href={user ? `/${encodeURIComponent(user.username)}` : "/"}>Hủy</Link></div>
+      <section className={styles.step} aria-labelledby="general-title">
+        <span className={styles.stepNumber} aria-hidden="true">1</span>
+        <div className={styles.stepContent}>
+          <h2 id="general-title">Thông tin chung</h2>
+          <div className={styles.field}><label htmlFor="repo-name">Tên repository <span aria-hidden="true">*</span></label><div className={styles.nameRow}><span>{user?.username ?? "…"} /</span><input id="repo-name" name="name" required maxLength={100} autoFocus placeholder="du-an-cua-ban" aria-describedby="name-hint" /></div><p id="name-hint">Dùng chữ cái, số, dấu chấm, gạch dưới hoặc gạch ngang. Không dùng “..” hay đuôi .git.</p></div>
+          <div className={styles.field}><label htmlFor="repo-description">Mô tả <span className={styles.optional}>(không bắt buộc)</span></label><textarea id="repo-description" name="description" maxLength={2000} rows={3} placeholder="Dự án này dùng để làm gì?" /></div>
+        </div>
+      </section>
+      <section className={styles.step} aria-labelledby="configuration-title">
+        <span className={styles.stepNumber} aria-hidden="true">2</span>
+        <div className={styles.stepContent}>
+          <h2 id="configuration-title">Cấu hình</h2>
+          <div className={styles.configuration}>
+            <fieldset className={styles.visibility}><legend>Quyền xem</legend><label><input type="radio" name="visibility" value="PUBLIC" checked={visibility === "PUBLIC"} onChange={() => setVisibility("PUBLIC")} /><span><strong>Công khai</strong><small>Mọi người có thể xem repository.</small></span></label><label><input type="radio" name="visibility" value="PRIVATE" checked={visibility === "PRIVATE"} onChange={() => setVisibility("PRIVATE")} /><span><strong>Riêng tư</strong><small>Chỉ bạn và cộng tác viên được mời có thể xem repository.</small></span></label></fieldset>
+            <div className={styles.initialize}><label><input type="checkbox" name="initializeReadme" checked={initializeReadme} onChange={(event) => setInitializeReadme(event.target.checked)} /><span><strong>Khởi tạo với README.md</strong><small>Tạo sẵn commit đầu tiên để repository có thể sử dụng ngay.</small></span></label></div>
+          </div>
+          <div className={styles.actions}><Link className="button buttonSecondary" href={user ? `/${encodeURIComponent(user.username)}` : "/"}>Hủy</Link><button className="button buttonPrimary" type="submit" disabled={submitting}>{submitting ? "Đang tạo…" : "Tạo repository"}</button></div>
+        </div>
+      </section>
     </form>
   </div>;
 }
 
 export default function NewRepositoryPage() {
-  return <main className="container"><RequireAuth><CreateForm /></RequireAuth></main>;
+  return <main className={styles.page}><div className="container"><RequireAuth><CreateForm /></RequireAuth></div></main>;
 }

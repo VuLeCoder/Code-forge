@@ -30,6 +30,7 @@ test('mobile navigation opens create and refreshes an expired session during sub
   });
   await page.goto('/');
   await page.getByRole('navigation', { name: 'Điều hướng chính' }).getByRole('link', { name: 'Tạo repository' }).click();
+  await expect(page).toHaveTitle('Tạo repository mới | Code Forge');
   await page.getByRole('textbox', { name: 'Tên repository' }).fill('hello-world');
   await page.getByRole('button', { name: 'Tạo repository' }).click();
   await expect(page).toHaveURL('/alice/hello-world');
@@ -121,12 +122,40 @@ test('public profile is accessible anonymously and fits a mobile viewport', asyn
 test('explore lists public repositories and searches real API results', async ({ page }) => {
   await anonymous(page);
   await page.goto('/');
-  await expect(page.getByText('Lần mở đầu có thể chậm khi máy chủ vừa thức dậy.', { exact: false })).toBeVisible();
-  await expect(page.getByText('Git storage không bền vững', { exact: false })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Repository đang được xây dựng' })).toBeVisible();
+  await expect(page.getByText('Đây là môi trường demo.', { exact: false })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'alice / hello-world' })).toBeVisible();
   await page.getByRole('searchbox', { name: 'Tìm repository' }).fill('khong-co');
   await page.getByRole('button', { name: 'Tìm kiếm' }).click();
   await expect(page.getByRole('heading', { name: 'Không tìm thấy repository phù hợp' })).toBeVisible();
+});
+
+test('signed-in home shows a personal dashboard instead of the public landing page', async ({ page }) => {
+  const repository = {
+    id: 'project-alpha', name: 'project-alpha', description: 'Dashboard fixture', visibility: 'PRIVATE',
+    updatedAt: '2026-11-06T08:00:00.000Z', owner: { username: 'alice' },
+    permissions: { canRead: true, canWrite: true, canManage: true },
+  };
+  await page.route('**/api/v1/auth/me', (route) => route.fulfill({ json: { user } }));
+  await page.route('**/api/v1/users/alice', (route) => route.fulfill({ json: { repositories: [repository] } }));
+  await page.route('**/api/v1/invitations', (route) => route.fulfill({ json: { invitations: [{
+    id: 'invite-1', role: 'WRITE', expiresAt: '2026-12-01T00:00:00.000Z',
+    repository: { id: 'shared-project', name: 'shared-project', owner: { username: 'bob' } },
+    inviter: { id: 'bob-id', username: 'bob' },
+  }] } }));
+  await page.route('**/api/v1/repos/alice/project-alpha/pulls?status=OPEN', (route) => route.fulfill({ json: { pullRequests: [{
+    id: 'pull-1', number: 7, title: 'Hoàn thiện dashboard', status: 'OPEN', updatedAt: '2026-11-06T09:00:00.000Z',
+    author: { id: 'alice-id', username: 'alice' },
+  }] } }));
+
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: /alice$/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Repository của bạn' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'project-alpha' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Hoàn thiện dashboard' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'bob/shared-project' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Đưa mã nguồn từ ý tưởng đến sản phẩm.' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Repository đang được xây dựng' })).toHaveCount(0);
 });
 
 test('public repository opens its empty page', async ({ page }) => {
@@ -193,12 +222,12 @@ test('README option is sent on create and a storage reset is explained', async (
   } } }));
   await page.goto('/new');
   await page.getByRole('textbox', { name: 'Tên repository' }).fill('with-readme');
-  await page.getByRole('checkbox', { name: /Thêm README.md/ }).check();
+  await page.getByRole('checkbox', { name: /Khởi tạo với README.md/ }).check();
   await page.getByRole('button', { name: 'Tạo repository' }).click();
   await expect(page.getByRole('region', { name: 'README', exact: true }).getByRole('heading', { name: 'with-readme', exact: true })).toBeVisible();
   reset = true;
   await page.reload();
-  await expect(page.getByRole('status').filter({ hasText: 'Mã nguồn của repository demo đã bị reset' })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'Kho lưu trữ Git đã được khởi tạo lại' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Repository chưa có mã nguồn' })).toBeVisible();
   await expect(page.getByRole('region', { name: 'README', exact: true })).toHaveCount(0);
 });

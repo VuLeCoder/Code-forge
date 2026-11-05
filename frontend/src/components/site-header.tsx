@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAuth } from "./auth-provider";
+import { BrandLogo } from "./brand-logo";
+import { ThemeToggle } from "./theme-toggle";
 
 type MenuIconName = "profile" | "invitations" | "token" | "admin" | "logout";
 
@@ -72,9 +74,10 @@ export function SiteHeader() {
   }
 
   return <header className="siteHeader"><div className="headerInner">
-    <Link className="brand" href="/" aria-label="Code Forge - Trang chủ"><span className="brandMark" aria-hidden="true">CF</span><span>Code Forge</span></Link>
+    <Link className="brand" href="/" aria-label="Code Forge - Trang chủ"><BrandLogo /><span>Code Forge</span></Link>
     <nav className="mainNav" aria-label="Điều hướng chính"><Link href="/#repositories" aria-current={pathname === "/" ? "page" : undefined}>Khám phá</Link><Link href="/new" aria-current={pathname === "/new" ? "page" : undefined}>Tạo repository</Link></nav>
     <div className="headerActions" aria-busy={loading}>
+      <ThemeToggle />
       {loading ? <span className="sessionSkeleton" aria-label="Đang kiểm tra phiên" /> : user ? <>
         <div className="userMenu" ref={menuRef}>
           <Link className="userProfileLink" href={`/${encodeURIComponent(user.username)}`} aria-label={`Hồ sơ ${user.username}`}>

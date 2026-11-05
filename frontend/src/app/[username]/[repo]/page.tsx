@@ -48,7 +48,7 @@ export default function RepositoryPage() {
     </div>
     <div className={styles.header}><div>{repo.description && <p>{repo.description}</p>}</div></div>
     <RepositoryNavigation owner={repo.owner.username} repository={repo.name} current="code" canManage={repo.permissions?.canManage ?? false} />
-    {repo.storageState === "RESET" && <div className={styles.notice} role="status">Mã nguồn của repository demo đã bị reset. Bare repository rỗng đã được tạo lại; lịch sử commit trước đó không thể khôi phục.</div>}
+    {repo.storageState === "RESET" && <div className={styles.notice} role="status">Kho lưu trữ Git đã được khởi tạo lại. Hãy khôi phục các branch và tag từ một bản sao tin cậy trước khi tiếp tục làm việc.</div>}
     <CloneDialog key={`${repo.id}/${repo.name}/${repo.visibility}`} repository={repo} />
     <QuickSetup repository={repo} />
     <Suspense fallback={<p role="status">Đang tải branch…</p>}><SourceBrowser endpoint={`/api/v1/repos/${encodeURIComponent(params.username)}/${encodeURIComponent(params.repo)}`}>

@@ -48,3 +48,21 @@ test("account menu stays inside a narrow viewport and closes on outside click", 
   await expect(menu).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test("theme follows the system preference and persists an explicit choice", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.goto("/");
+
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  const toggle = page.getByRole("button", { name: "Chuyển sang giao diện sáng" });
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await toggle.click();
+
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(page.getByRole("button", { name: "Chuyển sang giao diện tối" })).toHaveAttribute("aria-pressed", "false");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("code-forge-theme"))).toBe("light");
+
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await expect(page.getByRole("button", { name: "Chuyển sang giao diện tối" })).toBeVisible();
+});

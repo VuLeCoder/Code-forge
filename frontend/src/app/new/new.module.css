@@ -1,53 +1,105 @@
+.page {
+  min-height: calc(100vh - 72px);
+  padding: 52px 0 88px;
+  background: var(--canvas);
+}
+
 .layout {
-  width: min(760px, 100%);
-  min-height: 70vh;
+  width: min(880px, 100%);
   margin: 0 auto;
-  padding-block: 40px 72px;
 }
 
 .heading {
-  margin-bottom: 24px;
-}
-
-.heading .eyebrow {
-  margin-bottom: 8px;
+  margin-bottom: 34px;
+  padding-left: 64px;
 }
 
 .heading h1 {
   color: var(--text);
-  font-size: clamp(1.85rem, 4vw, 2.35rem);
-  font-weight: 740;
-  letter-spacing: -.04em;
-  line-height: 1.15;
+  font-size: clamp(1.75rem, 4vw, 2.2rem);
+  line-height: 1.16;
+  letter-spacing: -0.035em;
 }
 
 .heading p {
-  margin-top: 8px;
+  max-width: 720px;
+  margin-top: 9px;
   color: var(--muted);
-  font-size: .95rem;
-  line-height: 1.55;
+  font-size: 0.92rem;
+  line-height: 1.6;
+}
+
+.heading strong {
+  color: var(--danger);
 }
 
 .form {
+  display: block;
+}
+
+.step {
+  position: relative;
   display: grid;
-  gap: 22px;
-  padding: 28px 30px;
-  background: var(--surface);
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 24px;
+  padding-bottom: 48px;
+}
+
+.step:last-child {
+  padding-bottom: 0;
+}
+
+.step:not(:last-child)::after {
+  position: absolute;
+  top: 38px;
+  bottom: 0;
+  left: 19px;
+  width: 1px;
+  background: var(--border-strong);
+  content: "";
+}
+
+.stepNumber {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  color: var(--text-secondary);
+  background: var(--surface-hover);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
+  border-radius: 50%;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.stepContent {
+  min-width: 0;
+}
+
+.stepContent > h2 {
+  margin: 5px 0 22px;
+  color: var(--text);
+  font-size: 1.14rem;
+  letter-spacing: -0.015em;
 }
 
 .field {
   display: grid;
   gap: 8px;
+  margin-top: 22px;
+}
+
+.stepContent > .field:first-of-type {
+  margin-top: 0;
 }
 
 .field label,
 .visibility legend {
-  color: var(--text);
-  font-size: .88rem;
-  font-weight: 680;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  font-weight: 700;
 }
 
 .field label > span:not(.optional) {
@@ -56,206 +108,235 @@
 
 .optional {
   color: var(--muted);
-  font-weight: 400;
+  font-weight: 450;
 }
 
 .field input,
 .field textarea {
   width: 100%;
-  padding: 11px 12px;
+  padding: 11px 13px;
   color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  font-size: .92rem;
-  transition: border-color .15s ease, box-shadow .15s ease;
+  background: var(--canvas);
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  outline: none;
+  font-size: 0.9rem;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
 }
 
 .field input:focus,
 .field textarea:focus {
   border-color: var(--brand-600);
-  box-shadow: 0 0 0 3px var(--brand-50);
-  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-600), transparent 78%);
 }
 
 .field textarea {
-  min-height: 96px;
+  min-height: 82px;
   resize: vertical;
   line-height: 1.55;
 }
 
 .field p {
   color: var(--muted);
-  font-size: .78rem;
-  line-height: 1.5;
+  font-size: 0.74rem;
+  line-height: 1.55;
 }
 
 .nameRow {
   display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-  padding: 0 12px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  transition: border-color .15s ease, box-shadow .15s ease;
+  align-items: stretch;
+  overflow: hidden;
+  background: var(--canvas);
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
 }
 
 .nameRow:focus-within {
   border-color: var(--brand-600);
-  box-shadow: 0 0 0 3px var(--brand-50);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-600), transparent 78%);
 }
 
 .nameRow > span {
+  display: inline-flex;
   flex: 0 0 auto;
-  color: var(--muted);
+  align-items: center;
+  padding: 0 13px;
+  color: var(--text-secondary);
+  background: var(--surface-subtle);
+  border-right: 1px solid var(--border);
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: .9rem;
-  font-weight: 600;
+  font-size: 0.82rem;
+  font-weight: 650;
 }
 
 .nameRow input {
   min-width: 0;
-  padding-inline: 0;
   border: 0;
+  border-radius: 0;
   box-shadow: none;
 }
 
 .nameRow input:focus {
-  border: 0;
   box-shadow: none;
+}
+
+.configuration {
+  overflow: hidden;
+  background: color-mix(in srgb, var(--surface) 58%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 10px;
 }
 
 .visibility {
   display: grid;
-  gap: 10px;
-  margin: 0;
   padding: 0;
+  margin: 0;
   border: 0;
 }
 
 .visibility legend {
-  margin-bottom: 5px;
+  width: 100%;
+  padding: 17px 18px 12px;
 }
 
-.visibility label {
+.visibility label,
+.initialize label {
   display: flex;
-  min-height: 68px;
-  gap: 12px;
   align-items: flex-start;
-  padding: 14px 15px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  gap: 12px;
+  padding: 14px 18px;
+  border-top: 1px solid var(--border);
   cursor: pointer;
-  transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
+  transition: background-color 0.16s ease;
 }
 
-.visibility label:hover {
-  background: var(--canvas);
-  border-color: var(--brand-100);
+.visibility label:hover,
+.initialize label:hover {
+  background: var(--surface-hover);
 }
 
-.visibility label:has(input:checked) {
+.visibility label:has(input:checked),
+.initialize label:has(input:checked) {
   background: var(--brand-50);
-  border-color: var(--brand-600);
-  box-shadow: inset 3px 0 var(--brand-600);
 }
 
-.visibility input {
+.visibility input,
+.initialize input {
+  flex: 0 0 auto;
   width: 17px;
   height: 17px;
-  flex: 0 0 auto;
-  margin-top: 3px;
-  accent-color: var(--brand-600);
+  margin-top: 2px;
+  accent-color: var(--primary);
 }
 
-.visibility span {
+.visibility span,
+.initialize span {
   display: grid;
   gap: 4px;
 }
 
-.visibility span strong {
+.visibility strong,
+.initialize strong {
   color: var(--text);
-  font-size: .92rem;
+  font-size: 0.87rem;
 }
 
-.visibility small {
+.visibility small,
+.initialize small {
   color: var(--muted);
-  font-size: .82rem;
+  font-size: 0.76rem;
   line-height: 1.5;
+}
+
+.initialize {
+  border-top: 1px solid var(--border);
+}
+
+.initialize label {
+  border-top: 0;
 }
 
 .actions {
   display: flex;
   flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 10px;
-  padding-top: 6px;
+  margin-top: 26px;
 }
 
 .actions button:disabled {
-  opacity: .72;
+  opacity: 0.65;
   cursor: wait;
 }
 
 .error {
+  margin: 0 0 26px 64px;
   padding: 12px 14px;
-  color: #a40e26;
-  background: #ffebe9;
-  border: 1px solid #ff8182;
-  border-radius: var(--radius-sm);
-  font-size: .85rem;
+  color: var(--danger-text);
+  background: var(--danger-surface);
+  border: 1px solid var(--danger-border);
+  border-radius: 8px;
+  font-size: 0.82rem;
   line-height: 1.5;
   outline: none;
 }
 
-@media (max-width: 600px) {
-  .layout {
-    padding-block: 28px 48px;
+@media (max-width: 700px) {
+  .page {
+    min-height: calc(100vh - 56px);
+    padding: 34px 0 60px;
   }
 
-  .nameRow {
-    flex-wrap: wrap;
-    gap: 3px 8px;
-    padding-block: 8px;
+  .heading {
+    margin-bottom: 28px;
+    padding-left: 0;
   }
 
-  .nameRow > span,
-  .nameRow input {
-    flex: 1 1 100%;
+  .step {
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 14px;
+    padding-bottom: 38px;
   }
 
-  .nameRow > span {
-    min-width: 0;
-    overflow-wrap: anywhere;
+  .stepNumber {
+    width: 30px;
+    height: 30px;
+    font-size: 0.78rem;
   }
 
-  .form {
-    gap: 20px;
-    padding: 22px 18px;
+  .step:not(:last-child)::after {
+    top: 32px;
+    left: 14px;
+  }
+
+  .stepContent > h2 {
+    margin-top: 3px;
+  }
+
+  .error {
+    margin-left: 0;
+  }
+
+  .visibility label,
+  .initialize label {
+    padding: 14px;
+  }
+
+  .visibility legend {
+    padding-inline: 14px;
   }
 
   .actions > * {
-    flex: 1 1 132px;
+    flex: 1 1 130px;
   }
 }
 
-@media (max-width: 380px) {
-  .nameRow {
-    padding-inline: 9px;
-  }
-
+@media (max-width: 420px) {
   .nameRow > span {
-    font-size: .78rem;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .field input,
-  .field textarea,
-  .nameRow,
-  .visibility label {
-    transition: none;
+    max-width: 42%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }

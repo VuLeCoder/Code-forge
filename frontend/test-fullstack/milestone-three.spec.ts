@@ -114,7 +114,7 @@ test('M3.8 real registration, source browser desktop/mobile, history and public 
     await git(['clone', `${origin}/git/M38Owner/Empty.git`, join(state.root, 'empty-clone')]);
     await rm(bare, { recursive: true });
     await publicPage.goto(`${origin}/M38Owner/Source`);
-    await expect(publicPage.getByText('Mã nguồn của repository demo đã bị reset.', { exact: false })).toBeVisible();
+    await expect(publicPage.getByText('Kho lưu trữ Git đã được khởi tạo lại.', { exact: false })).toBeVisible();
     await expect(publicPage.getByRole('heading', { name: 'Repository chưa có mã nguồn' })).toBeVisible();
     expect((await db.repository.findUniqueOrThrow({ where: { id: repo.id } })).storageGeneration).toBe(1);
   } finally { await anonymous.close(); }
