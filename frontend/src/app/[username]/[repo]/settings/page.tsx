@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
+import { RepositoryNavigation } from "@/components/repository-navigation";
 import { sessionFetch } from "@/lib/auth";
 import { repositoryPath, type RepositorySummary } from "@/lib/repositories";
 import styles from "./settings.module.css";
@@ -32,6 +33,7 @@ type ApiBody = {
   error?: { code?: string; message?: string };
 };
 type AccessLoadState = "idle" | "loading" | "ready" | "error";
+type AccessListState<T> = { key: string; items: T[]; state: AccessLoadState; error: string };
 
 function errorMessage(body: ApiBody, fallback: string) {
   const messages: Record<string, string> = {
@@ -62,6 +64,7 @@ export default function RepositorySettingsPage() {
   const { loading } = useAuth();
   const path = `/api/v1/repos/${encodeURIComponent(params.username)}/${encodeURIComponent(params.repo)}`;
   const routeKey = `${params.username}/${params.repo}`;
+  const routeAbortRef = useRef<AbortController | null>(null);
   const [result, setResult] = useState<{ key: string; repository: Repository | null; error: "not-found" | "unavailable" | null }>({ key: "", repository: null, error: null });
   const [attempt, setAttempt] = useState(0);
   const [pending, setPending] = useState(false);
@@ -69,77 +72,84 @@ export default function RepositorySettingsPage() {
   const [failure, setFailure] = useState("");
   const [desiredVisibility, setDesiredVisibility] = useState<"PUBLIC" | "PRIVATE">("PUBLIC");
   const [confirmation, setConfirmation] = useState("");
-  const [members, setMembers] = useState<Member[]>([]);
-  const [invitations, setInvitations] = useState<RepoInvitation[]>([]);
-  const [memberState, setMemberState] = useState<AccessLoadState>("idle");
-  const [invitationState, setInvitationState] = useState<AccessLoadState>("idle");
-  const [memberError, setMemberError] = useState("");
-  const [invitationError, setInvitationError] = useState("");
+  const [memberList, setMemberList] = useState<AccessListState<Member>>({ key: "", items: [], state: "idle", error: "" });
+  const [invitationList, setInvitationList] = useState<AccessListState<RepoInvitation>>({ key: "", items: [], state: "idle", error: "" });
   const [inviteUsername, setInviteUsername] = useState("");
   const [inviteRole, setInviteRole] = useState<"READ" | "WRITE">("READ");
   const visibilityDialog = useRef<HTMLDialogElement>(null);
   const deleteDialog = useRef<HTMLDialogElement>(null);
 
-  const loadMembers = useCallback(async () => {
-    setMemberState("loading"); setMemberError("");
+  const loadMembers = useCallback(async (signal?: AbortSignal) => {
+    const requestSignal = signal ?? routeAbortRef.current?.signal;
+    const isCurrent = () => !requestSignal?.aborted;
+    if (!isCurrent()) return;
+    setMemberList((previous) => ({ key: routeKey, items: previous.key === routeKey ? previous.items : [], state: "loading", error: "" }));
     try {
-      const response = await sessionFetch(`${path}/members`, { cache: "no-store" });
+      const response = await sessionFetch(`${path}/members`, { cache: "no-store", signal: requestSignal });
       const body = await readBody(response);
       if (!response.ok) throw new Error(errorMessage(body, "Không thể tải danh sách thành viên."));
-      setMembers(body.members ?? []);
-      setMemberState("ready");
+      if (!Array.isArray(body.members)) throw new Error("Không thể tải danh sách thành viên.");
+      if (!isCurrent()) return;
+      setMemberList({ key: routeKey, items: body.members, state: "ready", error: "" });
     } catch (error) {
-      setMemberError(error instanceof Error ? error.message : "Không thể tải danh sách thành viên.");
-      setMemberState("error");
+      if (!isCurrent()) return;
+      setMemberList({ key: routeKey, items: [], state: "error", error: error instanceof Error ? error.message : "Không thể tải danh sách thành viên." });
     }
-  }, [path]);
+  }, [path, routeKey]);
 
-  const loadInvitations = useCallback(async () => {
-    setInvitationState("loading"); setInvitationError("");
+  const loadInvitations = useCallback(async (signal?: AbortSignal) => {
+    const requestSignal = signal ?? routeAbortRef.current?.signal;
+    const isCurrent = () => !requestSignal?.aborted;
+    if (!isCurrent()) return;
+    setInvitationList((previous) => ({ key: routeKey, items: previous.key === routeKey ? previous.items : [], state: "loading", error: "" }));
     try {
-      const response = await sessionFetch(`${path}/invitations`, { cache: "no-store" });
+      const response = await sessionFetch(`${path}/invitations`, { cache: "no-store", signal: requestSignal });
       const body = await readBody(response);
       if (!response.ok) throw new Error(errorMessage(body, "Không thể tải danh sách lời mời."));
-      setInvitations(body.invitations ?? []);
-      setInvitationState("ready");
+      if (!Array.isArray(body.invitations)) throw new Error("Không thể tải danh sách lời mời.");
+      if (!isCurrent()) return;
+      setInvitationList({ key: routeKey, items: body.invitations, state: "ready", error: "" });
     } catch (error) {
-      setInvitationError(error instanceof Error ? error.message : "Không thể tải danh sách lời mời.");
-      setInvitationState("error");
+      if (!isCurrent()) return;
+      setInvitationList({ key: routeKey, items: [], state: "error", error: error instanceof Error ? error.message : "Không thể tải danh sách lời mời." });
     }
-  }, [path]);
+  }, [path, routeKey]);
 
   useEffect(() => {
     if (loading) return;
     let active = true;
-    sessionFetch(path, { cache: "no-store" }).then(async (response) => {
+    const controller = new AbortController();
+    routeAbortRef.current = controller;
+    sessionFetch(path, { cache: "no-store", signal: controller.signal }).then(async (response) => {
       if (response.status === 404) return { key: routeKey, repository: null, error: "not-found" as const };
       if (!response.ok) throw new Error("Không thể tải cài đặt.");
       const body = await readBody(response);
       return { key: routeKey, repository: body.repository ?? null, error: null };
     }).then(async (next) => {
-      if (active) {
+      if (active && !controller.signal.aborted) {
         setResult(next);
         if (next.repository?.permissions?.canManage) {
-          setMemberState("loading"); setInvitationState("loading");
-          void sessionFetch(`${path}/members`, { cache: "no-store" }).then(readBody).then((body) => {
-            if (!active) return;
-            if (body.members) { setMembers(body.members); setMemberState("ready"); return; }
-            setMemberError(errorMessage(body, "Không thể tải danh sách thành viên.")); setMemberState("error");
-          }).catch(() => { if (active) { setMemberError("Không thể tải danh sách thành viên."); setMemberState("error"); } });
-          void sessionFetch(`${path}/invitations`, { cache: "no-store" }).then(readBody).then((body) => {
-            if (!active) return;
-            if (body.invitations) { setInvitations(body.invitations); setInvitationState("ready"); return; }
-            setInvitationError(errorMessage(body, "Không thể tải danh sách lời mời.")); setInvitationState("error");
-          }).catch(() => { if (active) { setInvitationError("Không thể tải danh sách lời mời."); setInvitationState("error"); } });
+          void loadMembers(controller.signal);
+          void loadInvitations(controller.signal);
         }
       }
     })
-      .catch(() => { if (active) setResult({ key: routeKey, repository: null, error: "unavailable" }); });
-    return () => { active = false; };
-  }, [loading, path, routeKey, attempt]);
+      .catch(() => { if (active && !controller.signal.aborted) setResult({ key: routeKey, repository: null, error: "unavailable" }); });
+    return () => {
+      active = false;
+      controller.abort();
+      if (routeAbortRef.current === controller) routeAbortRef.current = null;
+    };
+  }, [loading, path, routeKey, attempt, loadMembers, loadInvitations]);
 
   const repo = result.key === routeKey ? result.repository : null;
   const canManage = repo?.permissions?.canManage === true;
+  const members = memberList.key === routeKey ? memberList.items : [];
+  const invitations = invitationList.key === routeKey ? invitationList.items : [];
+  const memberState = memberList.key === routeKey ? memberList.state : "loading";
+  const invitationState = invitationList.key === routeKey ? invitationList.state : "loading";
+  const memberError = memberList.key === routeKey ? memberList.error : "";
+  const invitationError = invitationList.key === routeKey ? invitationList.error : "";
 
   async function update(data: Record<string, unknown>, fallback: string) {
     const response = await sessionFetch(path, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
@@ -163,8 +173,7 @@ export default function RepositorySettingsPage() {
         throw new Error(errorMessage(data, "Không thể gửi lời mời."));
       }
       const newInv = (data as { invitation: RepoInvitation }).invitation;
-      setInvitations((prev) => [newInv, ...prev]);
-      setInvitationState("ready");
+      setInvitationList((previous) => previous.key === routeKey ? { ...previous, items: [newInv, ...previous.items], state: "ready", error: "" } : previous);
       setInviteUsername("");
       setMessage(`Đã gửi lời mời tới ${newInv.invitee.username}.`);
     } catch (e) {
@@ -181,7 +190,7 @@ export default function RepositorySettingsPage() {
       const response = await sessionFetch(`${path}/invitations/${id}`, { method: "DELETE" });
       const data = await readBody(response);
       if (!response.ok) throw new Error(errorMessage(data, "Không thể thu hồi lời mời."));
-      setInvitations((prev) => prev.filter((item) => item.id !== id));
+      setInvitationList((previous) => previous.key === routeKey ? { ...previous, items: previous.items.filter((item) => item.id !== id) } : previous);
       setMessage("Đã thu hồi lời mời.");
     } catch (e) {
       setFailure(e instanceof Error ? e.message : "Không thể thu hồi lời mời.");
@@ -202,7 +211,7 @@ export default function RepositorySettingsPage() {
       const data = await readBody(response);
       if (!response.ok) throw new Error(errorMessage(data, "Không thể đổi quyền thành viên."));
       const updatedMember = (data as { member: Member }).member;
-      setMembers((prev) => prev.map((m) => m.userId === memberUserId ? updatedMember : m));
+      setMemberList((previous) => previous.key === routeKey ? { ...previous, items: previous.items.map((m) => m.userId === memberUserId ? updatedMember : m) } : previous);
       setMessage(`Đã cập nhật quyền thành ${newRole === "WRITE" ? "Ghi (WRITE)" : "Đọc (READ)"}.`);
     } catch (e) {
       setFailure(e instanceof Error ? e.message : "Không thể đổi quyền.");
@@ -218,7 +227,7 @@ export default function RepositorySettingsPage() {
       const response = await sessionFetch(`${path}/members/${memberUserId}`, { method: "DELETE" });
       const data = await readBody(response);
       if (!response.ok) throw new Error(errorMessage(data, "Không thể xóa thành viên."));
-      setMembers((prev) => prev.filter((m) => m.userId !== memberUserId));
+      setMemberList((previous) => previous.key === routeKey ? { ...previous, items: previous.items.filter((m) => m.userId !== memberUserId) } : previous);
       setMessage(`Đã xóa thành viên ${memberUsername} khỏi repository.`);
     } catch (e) {
       setFailure(e instanceof Error ? e.message : "Không thể xóa thành viên.");
@@ -276,6 +285,7 @@ export default function RepositorySettingsPage() {
   if (result.error || !repo) return <main className={`container ${styles.page}`}><h1>Chưa thể tải cài đặt</h1><p>Vui lòng thử lại sau.</p><button className="button buttonSecondary" onClick={() => setAttempt((value) => value + 1)}>Thử lại</button></main>;
 
   return <main className={`container ${styles.page}`}>
+    <RepositoryNavigation owner={repo.owner.username} repository={repo.name} current="settings" canManage={canManage} />
     <Link className={styles.back} href={repositoryPath(repo)}>← Về repository</Link>
     <h1>Cài đặt {repo.name}</h1>
     <p className={styles.intro}>Quản lý thông tin và quyền xem của repository.</p>

@@ -18,8 +18,29 @@ git(['update-ref', 'refs/heads/main', commit]);
 let offlineRequests = 0;
 const pullProxyRequests = [];
 let pullProxyResponse = { status: 200, headers: {}, body: { pullRequests: [], page: 1, pageSize: 20, hasMore: false } };
+let repositoryListOverride = null;
 const server = createServer((request, response) => {
   const url = new URL(request.url ?? '/', 'http://fixture');
+  if (url.pathname === '/__test/repositories/reset' && request.method === 'POST') {
+    repositoryListOverride = null;
+    return response.writeHead(204).end();
+  }
+  if (url.pathname === '/__test/repositories/config' && request.method === 'POST') {
+    let body = '';
+    request.on('data', (chunk) => { body += chunk; });
+    request.on('end', () => {
+      try {
+        const value = JSON.parse(body || '{}');
+        const status = Number.isInteger(value.status) && value.status >= 200 && value.status <= 599 ? value.status : 200;
+        const delayMs = Number.isInteger(value.delayMs) && value.delayMs >= 0 && value.delayMs <= 5000 ? value.delayMs : 0;
+        repositoryListOverride = { status, delayMs, body: value.body ?? {} };
+        response.writeHead(204).end();
+      } catch {
+        response.writeHead(400).end();
+      }
+    });
+    return;
+  }
   if (url.pathname === '/__test/pull-proxy/reset' && request.method === 'POST') {
     let body = '';
     request.on('data', (chunk) => { body += chunk; });
@@ -167,6 +188,21 @@ const server = createServer((request, response) => {
     return response.end(JSON.stringify({ branches: [], defaultBranch: 'main', selectedBranch: null, storageState: 'EMPTY', storageGeneration: 0 }));
   }
   if (request.url?.startsWith("/api/v1/repositories?")) {
+    if (repositoryListOverride) {
+      const configuredResponse = repositoryListOverride;
+      const sendResponse = () => {
+        if (response.destroyed) return;
+        response.statusCode = configuredResponse.status;
+        response.setHeader('Content-Type', 'application/json');
+        response.end(JSON.stringify(configuredResponse.body));
+      };
+      if (configuredResponse.delayMs > 0) {
+        setTimeout(sendResponse, configuredResponse.delayMs);
+      } else {
+        sendResponse();
+      }
+      return;
+    }
     const query = new URL(request.url, "http://localhost").searchParams.get("q") ?? "";
     const repository = { id: "public-repo", owner: { username: "alice" }, name: "hello-world", description: "Repository thử nghiệm", visibility: "PUBLIC", updatedAt: "2026-09-01T00:00:00.000Z", permissions: { canRead: true, canWrite: false, canManage: false } };
     return response.end(JSON.stringify({ repositories: query && !"hello-world alice".includes(query) ? [] : [repository], hasMore: false, page: 1 }));

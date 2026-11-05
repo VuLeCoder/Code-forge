@@ -89,6 +89,39 @@ test("owner creates a pull request from a slash branch and reviews the compare s
   await expect(page.getByLabel("Diff của README.md")).toContainText("Hello from Code Forge");
 });
 
+test("repository navigation exposes settings only when the repository API grants manage permission", async ({ page }) => {
+  await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { user: owner } }));
+  await page.route("**/api/v1/repos/alice/project", (route) => route.fulfill({ json: {
+    repository: { owner: { username: "alice" }, name: "project", permissions: { canManage: true } },
+  } }));
+  await page.route("**/api/v1/repos/alice/project/branches", (route) => route.fulfill({ json: { branches: [] } }));
+  await page.route("**/api/v1/repos/alice/project/pulls*", (route) => route.fulfill({ json: {
+    pullRequests: [], page: 1, hasMore: false, permissions: { canCreate: true },
+  } }));
+
+  await page.goto("/alice/project/pulls");
+  const navigation = page.getByRole("navigation", { name: "Điều hướng repository" });
+  await expect(navigation.getByRole("link", { name: "Mã nguồn" })).toHaveAttribute("href", "/alice/project");
+  await expect(navigation.getByRole("link", { name: "Pull requests" })).toHaveAttribute("aria-current", "page");
+  await expect(navigation.getByRole("link", { name: "Cài đặt" })).toHaveAttribute("href", "/alice/project/settings");
+});
+
+test("repository navigation keeps settings hidden for collaborators without manage permission", async ({ page }) => {
+  await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { user: { ...owner, id: "writer-1", username: "bob" } } }));
+  await page.route("**/api/v1/repos/alice/project", (route) => route.fulfill({ json: {
+    repository: { owner: { username: "alice" }, name: "project", permissions: { canManage: false } },
+  } }));
+  await page.route("**/api/v1/repos/alice/project/branches", (route) => route.fulfill({ json: { branches: [] } }));
+  await page.route("**/api/v1/repos/alice/project/pulls*", (route) => route.fulfill({ json: {
+    pullRequests: [], page: 1, hasMore: false, permissions: { canCreate: true },
+  } }));
+
+  await page.goto("/alice/project/pulls");
+  const navigation = page.getByRole("navigation", { name: "Điều hướng repository" });
+  await expect(navigation.getByRole("link", { name: "Pull requests" })).toHaveAttribute("aria-current", "page");
+  await expect(navigation.getByRole("link", { name: "Cài đặt" })).toHaveCount(0);
+});
+
 test("stale compare prevents owner merge and displays a refresh warning", async ({ page }) => {
   await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { user: owner } }));
   await page.route("**/api/v1/repos/alice/project/pulls/1", (route) =>

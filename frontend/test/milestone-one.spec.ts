@@ -126,7 +126,7 @@ test('explore lists public repositories and searches real API results', async ({
   await expect(page.getByRole('link', { name: 'alice / hello-world' })).toBeVisible();
   await page.getByRole('searchbox', { name: 'Tìm repository' }).fill('khong-co');
   await page.getByRole('button', { name: 'Tìm kiếm' }).click();
-  await expect(page.getByText('Không tìm thấy repository phù hợp.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Không tìm thấy repository phù hợp' })).toBeVisible();
 });
 
 test('public repository opens its empty page', async ({ page }) => {

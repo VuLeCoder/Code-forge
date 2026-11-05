@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sessionFetch } from "@/lib/auth";
+import { RepositoryNavigation } from "@/components/repository-navigation";
 import styles from "../pulls.module.css";
 
 type PullRequest = {
@@ -250,6 +251,7 @@ export default function PullRequestDetailPage() {
       : "Không có mục nào trong snapshot này.";
   const pageBusy = loading || busy || sectionBusy.commits || sectionBusy.files;
   return <main className={`container ${styles.page}`} aria-busy={pageBusy}>
+    <RepositoryNavigation owner={owner} repository={repo} current="pulls" />
     <nav className={styles.breadcrumb} aria-label="Điều hướng"><Link href={`/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`}>{owner}/{repo}</Link><span aria-hidden="true">/</span><Link href={`/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`}>Pull requests</Link><span aria-hidden="true">/</span><strong>#{number}</strong></nav>
     <header className={styles.header}>
       <div><span className="eyebrow">Pull request #{pull.number}</span><h1>{pull.title} <span className={styles.muted}>#{pull.number}</span></h1><p><span className={`${styles.state} ${styles[`state${pull.status}`]}`}>{stateText(pull.status)}</span> {pull.author.username} đề nghị merge <code>{pull.sourceBranch}</code> vào <code>{pull.targetBranch}</code></p></div>
