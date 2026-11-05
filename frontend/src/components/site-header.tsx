@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAuth } from "./auth-provider";
 
 type MenuIconName = "profile" | "invitations" | "token" | "admin" | "logout";
@@ -24,6 +24,11 @@ export function SiteHeader() {
   const pathname = usePathname();
   const router = useRouter();
 
+  useLayoutEffect(() => {
+    if (!menuOpen) return;
+    menuRef.current?.querySelector<HTMLElement>("[role='menuitem']")?.focus();
+  }, [menuOpen]);
+
   useEffect(() => {
     if (!menuOpen) return;
     const closeOnOutsidePointer = (event: PointerEvent) => {
@@ -36,7 +41,6 @@ export function SiteHeader() {
     };
     document.addEventListener("pointerdown", closeOnOutsidePointer);
     document.addEventListener("keydown", closeOnEscape);
-    requestAnimationFrame(() => menuRef.current?.querySelector<HTMLElement>("[role='menuitem']")?.focus());
     return () => {
       document.removeEventListener("pointerdown", closeOnOutsidePointer);
       document.removeEventListener("keydown", closeOnEscape);

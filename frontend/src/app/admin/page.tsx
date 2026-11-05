@@ -65,6 +65,7 @@ export default function AdminPage() {
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const confirmation = useRef<HTMLDialogElement>(null);
   const focusReturn = useRef<HTMLButtonElement | null>(null);
+  const focusRestoreFrame = useRef<number | null>(null);
   const adminHeading = useRef<HTMLHeadingElement>(null);
 
   const load = useCallback(async (signal?: AbortSignal) => {
@@ -117,13 +118,21 @@ export default function AdminPage() {
     if (pendingAction && confirmation.current && !confirmation.current.open) confirmation.current.showModal();
   }, [pendingAction]);
 
+  useEffect(() => () => {
+    if (focusRestoreFrame.current !== null) window.cancelAnimationFrame(focusRestoreFrame.current);
+  }, []);
+
   function openAction(opener: HTMLButtonElement, action: PendingAction) {
+    if (focusRestoreFrame.current !== null) {
+      window.cancelAnimationFrame(focusRestoreFrame.current);
+      focusRestoreFrame.current = null;
+    }
     focusReturn.current = opener;
     setPendingAction(action);
   }
 
   function restoreDialogFocus(opener = focusReturn.current) {
-    focusReturn.current = null;
+    if (focusReturn.current === opener) focusReturn.current = null;
     if (opener?.isConnected && !opener.disabled) {
       opener.focus();
       if (document.activeElement === opener) return;
@@ -139,7 +148,14 @@ export default function AdminPage() {
   function handleConfirmationClose() {
     if (confirmation.current?.open) return;
     const opener = focusReturn.current;
-    window.requestAnimationFrame(() => {
+    if (focusRestoreFrame.current !== null) window.cancelAnimationFrame(focusRestoreFrame.current);
+    focusRestoreFrame.current = window.requestAnimationFrame(() => {
+      focusRestoreFrame.current = null;
+      const activeElement = document.activeElement;
+      if (activeElement && activeElement !== document.body && !confirmation.current?.contains(activeElement)) {
+        if (focusReturn.current === opener) focusReturn.current = null;
+        return;
+      }
       if (!confirmation.current?.open) restoreDialogFocus(opener);
     });
   }
