@@ -271,6 +271,10 @@ test('M3.3 displays empty, binary, large, truncated, missing and retry states', 
   for (const [path, text] of [['empty', 'File trống.'], ['binary', 'File nhị phân'], ['large', 'File vượt giới hạn'], ['truncated', 'bản xem trước đã cắt'], ['missing', 'Đường dẫn không tồn tại']]) {
     await page.goto(`/alice/hello-world?view=blob&path=${path}`);
     await expect(viewer.getByText(text, { exact: false })).toBeVisible();
+    if (path === 'truncated') {
+      await expect(viewer.getByRole('button', { name: 'Sao chép bản xem trước' })).toBeVisible();
+      await expect(viewer.getByRole('button', { name: 'Tải file' })).toBeDisabled();
+    }
   }
   let release: () => void = () => {};
   const pending = new Promise<void>((resolve) => { release = resolve; });
@@ -285,6 +289,8 @@ test('M3.3 displays empty, binary, large, truncated, missing and retry states', 
   await page.unroute('**/api/v1/repos/alice/hello-world/blob?**');
   await viewer.getByRole('button', { name: 'Tải lại file' }).click();
   await expect(viewer.getByRole('rowheader', { name: '1', exact: true })).toBeVisible();
+  await expect(viewer.getByRole('button', { name: 'Sao chép mã nguồn' })).toBeVisible();
+  await expect(viewer.getByRole('button', { name: 'Tải file' })).toBeEnabled();
 });
 
 test('M3.1 selects branches, persists URL, handles missing ref and fits mobile', async ({ page }) => {

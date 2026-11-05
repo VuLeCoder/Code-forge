@@ -47,7 +47,7 @@ function FolderIcon() {
   );
 }
 
-function FileIcon() {
+function FileIcon({ tone }: { tone: string }) {
   return (
     <svg
       width="16"
@@ -55,11 +55,20 @@ function FileIcon() {
       viewBox="0 0 16 16"
       fill="currentColor"
       aria-hidden="true"
-      className={styles.fileIcon}
+      className={`${styles.fileIcon} ${tone}`}
     >
       <path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586c.464 0 .909.184 1.237.513l2.914 2.914c.329.328.513.773.513 1.237v9.586A1.75 1.75 0 0 1 13.25 16h-9.5A1.75 1.75 0 0 1 2 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h9.5a.25.25 0 0 0 .25-.25V6h-2.75A1.75 1.75 0 0 1 9 4.25V1.5Zm7.5.793V4.25c0 .138.112.25.25.25h2.457Z" />
     </svg>
   );
+}
+
+function fileTone(name: string) {
+  if (/\.(?:ts|tsx|js|jsx|mjs|cjs)$/i.test(name)) return styles.fileIconCode;
+  if (/\.json$/i.test(name)) return styles.fileIconJson;
+  if (/\.(?:md|mdx|txt)$/i.test(name)) return styles.fileIconDocs;
+  if (/\.(?:css|scss|sass)$/i.test(name)) return styles.fileIconStyle;
+  if (/\.(?:ya?ml|toml|env|conf|ini)$/i.test(name)) return styles.fileIconConfig;
+  return styles.fileIcon;
 }
 
 export function TreeBrowser({
@@ -212,7 +221,7 @@ export function TreeBrowser({
                       {entry.type === "directory" ? (
                         <FolderIcon />
                       ) : (
-                        <FileIcon />
+                        <FileIcon tone={fileTone(entry.name)} />
                       )}
                     </span>
                     {entry.navigable &&

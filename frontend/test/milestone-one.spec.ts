@@ -160,6 +160,15 @@ test('create repository reports name conflicts and opens the new repository', as
   await expect(page.getByText('Riêng tư', { exact: true })).toBeVisible();
 });
 
+test('create repository keeps a maximum-length owner name inside a 320px viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  const longUsername = 'a'.repeat(39);
+  await page.route('**/api/v1/auth/me', (route) => route.fulfill({ json: { user: { ...user, username: longUsername } } }));
+  await page.goto('/new');
+  await expect(page.getByRole('textbox', { name: 'Tên repository' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
 test('README option is sent on create and a storage reset is explained', async ({ page }) => {
   await page.route('**/api/v1/auth/me', (route) => route.fulfill({ json: { user } }));
   await page.route('**/api/v1/repositories', (route) => {
