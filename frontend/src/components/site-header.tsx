@@ -75,7 +75,13 @@ export function SiteHeader() {
 
   return <header className="siteHeader"><div className="headerInner">
     <Link className="brand" href="/" aria-label="Code Forge - Trang chủ"><BrandLogo /><span>Code Forge</span></Link>
-    <nav className="mainNav" aria-label="Điều hướng chính"><Link href="/#repositories" aria-current={pathname === "/" ? "page" : undefined}>Khám phá</Link><Link href="/new" aria-current={pathname === "/new" ? "page" : undefined}>Tạo repository</Link></nav>
+    <nav className="mainNav" aria-label="Điều hướng chính"><Link href="/explore" aria-current={pathname === "/explore" ? "page" : undefined}>Khám phá</Link><Link href="/new" aria-current={pathname === "/new" ? "page" : undefined}>Tạo repository</Link></nav>
+    <form className="globalSearch" action="/explore" method="get" role="search">
+      <label className="srOnly" htmlFor="global-repository-search">Tìm kiếm toàn hệ thống</label>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg>
+      <input id="global-repository-search" name="q" type="search" maxLength={100} placeholder="Tìm repository hoặc chủ sở hữu" />
+      <button type="submit" aria-label="Tìm repository toàn hệ thống"><span aria-hidden="true">↵</span></button>
+    </form>
     <div className="headerActions" aria-busy={loading}>
       <ThemeToggle />
       {loading ? <span className="sessionSkeleton" aria-label="Đang kiểm tra phiên" /> : user ? <>

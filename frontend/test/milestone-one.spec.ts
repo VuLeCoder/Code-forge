@@ -121,6 +121,7 @@ test('public profile is accessible anonymously and fits a mobile viewport', asyn
 
 test('explore lists public repositories and searches real API results', async ({ page }) => {
   await anonymous(page);
+  await page.setViewportSize({ width: 375, height: 812 });
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Repository đang được xây dựng' })).toBeVisible();
   await expect(page.getByText('Đây là môi trường demo.', { exact: false })).toHaveCount(0);
@@ -128,6 +129,7 @@ test('explore lists public repositories and searches real API results', async ({
   await page.getByRole('searchbox', { name: 'Tìm repository' }).fill('khong-co');
   await page.getByRole('button', { name: 'Tìm kiếm' }).click();
   await expect(page.getByRole('heading', { name: 'Không tìm thấy repository phù hợp' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
 test('signed-in home shows a personal dashboard instead of the public landing page', async ({ page }) => {
@@ -156,6 +158,12 @@ test('signed-in home shows a personal dashboard instead of the public landing pa
   await expect(page.getByRole('link', { name: 'bob/shared-project' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Đưa mã nguồn từ ý tưởng đến sản phẩm.' })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Repository đang được xây dựng' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Khám phá' })).toHaveAttribute('href', '/explore');
+  await page.getByRole('searchbox', { name: 'Tìm kiếm toàn hệ thống' }).fill('hello-world');
+  await page.getByRole('searchbox', { name: 'Tìm kiếm toàn hệ thống' }).press('Enter');
+  await expect(page).toHaveURL('/explore?q=hello-world');
+  await expect(page).toHaveTitle('Khám phá repository | Code Forge');
+  await expect(page.getByRole('link', { name: 'alice / hello-world' })).toBeVisible();
 });
 
 test('public repository opens its empty page', async ({ page }) => {
