@@ -1,64 +1,16 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import styles from "./page.module.css";
 import { HomeShowcase } from "./home-showcase";
 import { AnonymousOnly } from "@/components/anonymous-only";
 import { SignedInDashboard } from "@/components/signed-in-dashboard";
-import { repositoryPath, type RepositorySummary } from "@/lib/repositories";
-import { withBackendClientIp } from "@/lib/backend-client-ip";
-
-type RepositoryListResponse = { repositories: RepositorySummary[]; hasMore: boolean };
-type RepositoryListResult =
-  | { status: "success"; data: RepositoryListResponse }
-  | { status: "error" };
-
-function isRepositorySummary(value: unknown): value is RepositorySummary {
-  if (!value || typeof value !== "object") return false;
-  const repository = value as Partial<RepositorySummary>;
-  return typeof repository.id === "string"
-    && typeof repository.name === "string"
-    && typeof repository.owner?.username === "string"
-    && (repository.description === null || typeof repository.description === "string")
-    && (repository.visibility === "PUBLIC" || repository.visibility === "PRIVATE")
-    && typeof repository.updatedAt === "string"
-    && typeof repository.permissions?.canRead === "boolean"
-    && typeof repository.permissions?.canManage === "boolean";
-}
-
-function isRepositoryListResponse(value: unknown): value is RepositoryListResponse {
-  if (!value || typeof value !== "object") return false;
-  const result = value as Partial<RepositoryListResponse>;
-  return Array.isArray(result.repositories)
-    && result.repositories.every(isRepositorySummary)
-    && typeof result.hasMore === "boolean";
-}
+import { repositoryPath } from "@/lib/repositories";
+import { loadPublicRepositories, repositorySearchPage, repositorySearchQuery } from "@/lib/public-repositories";
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ q?: string; page?: string }> }) {
   const params = await searchParams;
-  const q = typeof params.q === "string" ? params.q.trim().slice(0, 100) : "";
-  const page = typeof params.page === "string" && /^[1-9]\d{0,2}$/.test(params.page) ? Number(params.page) : 1;
-  let result: RepositoryListResult = { status: "error" };
-
-  try {
-    const query = new URLSearchParams({ page: String(page) });
-    if (q) query.set("q", q);
-    const configuredTimeout = Number(process.env.HOME_REPOSITORY_TIMEOUT_MS);
-    const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout > 0
-      ? configuredTimeout
-      : 10_000;
-    const response = await fetch(`${(process.env.BACKEND_URL ?? "http://localhost:4000").replace(/\/$/, "")}/api/v1/repositories?${query}`, {
-      headers: withBackendClientIp(await headers()),
-      cache: "no-store",
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-
-    if (response.ok) {
-      const body: unknown = await response.json();
-      if (isRepositoryListResponse(body)) result = { status: "success", data: body };
-    }
-  } catch {
-    // Keep the page usable while clearly reporting the unavailable repository list.
-  }
+  const q = repositorySearchQuery(params.q);
+  const page = repositorySearchPage(params.page);
+  const result = await loadPublicRepositories(q, page);
 
   const repositories = result.status === "success" ? result.data.repositories : [];
   const hasMore = result.status === "success" ? result.data.hasMore : false;
@@ -76,7 +28,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ q
             <p>Lưu trữ repository, review thay đổi và phối hợp cùng đội ngũ trong một quy trình rõ ràng, an toàn và tập trung.</p>
             <div className={styles.actions}>
               <Link className="button buttonPrimary" href="/register">Tạo tài khoản</Link>
-              <a className="button buttonSecondary" href="#repositories">Khám phá repository</a>
+              <Link className="button buttonSecondary" href="/explore">Khám phá repository</Link>
             </div>
             <div className={styles.heroBenefits} aria-label="Tính năng nổi bật">
               <span><i aria-hidden="true">✓</i> Git qua HTTPS</span>
@@ -122,7 +74,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ q
               <h2 id="repositories-title">Repository đang được xây dựng</h2>
               <p>Theo dõi những dự án công khai mới được cập nhật trên Code Forge.</p>
             </div>
-            <form className={styles.search} action="/" method="get">
+            <form className={styles.search} action="/explore" method="get">
               <label className="srOnly" htmlFor="repo-search">Tìm repository</label>
               <span className={styles.searchIcon} aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6" /><path d="m16 16 4 4" /></svg></span>
               <input id="repo-search" name="q" defaultValue={q} placeholder="Tên repository hoặc chủ sở hữu" type="search" maxLength={100} />

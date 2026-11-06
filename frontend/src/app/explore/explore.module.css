@@ -1,0 +1,40 @@
+.page { min-height: calc(100vh - 72px); padding: 58px 0 88px; }
+.heading { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 460px); align-items: end; gap: 34px; padding-bottom: 34px; border-bottom: 1px solid var(--border); }
+.heading h1 { font-size: clamp(2rem, 4vw, 3rem); letter-spacing: -.045em; }
+.heading p { max-width: 590px; margin-top: 10px; color: var(--muted); line-height: 1.65; }
+.search { min-height: 48px; display: flex; align-items: center; gap: 10px; padding: 5px 6px 5px 14px; color: var(--muted); background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-sm); }
+.search:focus-within { border-color: var(--brand-600); box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand-600), transparent 88%); }
+.search svg { width: 18px; height: 18px; flex: 0 0 18px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.8; }
+.search input { width: 100%; min-width: 0; color: var(--text); background: transparent; border: 0; outline: 0; font-size: .88rem; }
+.resultHeader { min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 20px; color: var(--muted); font-size: .88rem; }
+.resultHeader strong { color: var(--text); }
+.resultHeader a { color: var(--brand-700); font-weight: 700; }
+.results { border-top: 1px solid var(--border); }
+.repository { display: flex; gap: 16px; padding: 24px 4px; border-bottom: 1px solid var(--border); }
+.repoIcon { display: grid; width: 42px; height: 42px; flex: 0 0 42px; place-items: center; color: var(--brand-700); background: var(--brand-50); border: 1px solid var(--brand-100); border-radius: 11px; }
+.repoIcon svg { width: 21px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+.repoBody { min-width: 0; flex: 1; }
+.repoTitle { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.repoTitle h2 { min-width: 0; overflow-wrap: anywhere; font-size: 1.02rem; }
+.repoTitle a { color: var(--brand-700); }
+.repoTitle a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.repoTitle a span { color: var(--muted); font-weight: 500; }
+.repoBody > p { max-width: 780px; margin-top: 8px; color: var(--muted); font-size: .87rem; line-height: 1.55; overflow-wrap: anywhere; }
+.repoBody > small { display: block; margin-top: 12px; color: var(--muted-light); font-size: .75rem; }
+.state { display: grid; justify-items: center; gap: 10px; padding: 72px 24px; text-align: center; border-bottom: 1px solid var(--border); }
+.state h2 { font-size: 1.15rem; }
+.state p { margin-bottom: 8px; color: var(--muted); }
+.pagination { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 18px; margin-top: 28px; color: var(--muted); font-size: .86rem; }
+.pagination a { color: var(--brand-700); font-weight: 700; }
+.pagination a:last-child { justify-self: end; }
+@media (max-width: 760px) {
+  .page { padding-top: 38px; }
+  .heading { grid-template-columns: 1fr; align-items: stretch; gap: 24px; }
+}
+@media (max-width: 480px) {
+  .search { flex-wrap: wrap; padding: 9px; }
+  .search input { width: calc(100% - 30px); }
+  .search button { width: 100%; }
+  .repository { padding-inline: 0; }
+  .repoTitle { align-items: flex-start; }
+}
