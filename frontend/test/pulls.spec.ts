@@ -272,6 +272,10 @@ test("owner confirms merge with the displayed snapshot and sees a stale conflict
   await expect(confirmationHeading).toBeVisible();
   await expect(confirmationHeading).toBeFocused();
   await expect(confirmationHeading).toHaveCSS("outline-style", "solid");
+  const confirmation = page.locator("#merge-confirmation");
+  await expect(confirmation).toHaveCSS("color", "rgb(59, 47, 0)");
+  await expect(confirmation).toHaveCSS("background-color", "rgb(255, 248, 197)");
+  await expect(confirmation.getByText(/^Source /)).toHaveCSS("color", "rgb(111, 87, 0)");
   await page.getByRole("button", { name: "Xác nhận merge" }).click();
 
   await expect(page.locator("p[role=alert]")).toContainText("Compare đã cũ.");

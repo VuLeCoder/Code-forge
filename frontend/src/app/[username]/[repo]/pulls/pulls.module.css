@@ -44,9 +44,9 @@
 .branchError button { min-height: 36px; border: 0; padding: 4px 0; color: inherit; background: transparent; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
 .success { margin-block: 16px; padding: 12px 14px; border: 1px solid #aceebb; border-left: 3px solid #1f883d; border-radius: var(--radius-sm); color: #1a7f37; background: #dafbe1; line-height: 1.6; }
 .warning { margin-block: 16px; padding: 12px 14px; border: 1px solid #d4a72c; border-left: 3px solid #9a6700; border-radius: var(--radius-sm); color: #704800; background: #fff8c5; line-height: 1.6; }
-.confirm { border-color: #d4a72c; background: #fff8c5; }
+.confirm { border-color: #d4a72c; color: #3b2f00; background: #fff8c5; }
 .confirm p { margin-block: 9px 15px; line-height: 1.6; }
-.confirm .snapshot { color: var(--muted); font-size: .88rem; }
+.confirm .snapshot { color: #6f5700; font-size: .88rem; }
 .description { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
 .count { display: inline-grid; place-items: center; min-width: 27px; height: 27px; margin-left: 5px; padding-inline: 7px; border: 1px solid var(--border); border-radius: 99px; color: var(--muted); background: var(--canvas); font-size: .75rem; font-weight: 650; vertical-align: 1px; }
 .commitList { list-style: none; display: grid; gap: 0; border-top: 1px solid var(--border); }
