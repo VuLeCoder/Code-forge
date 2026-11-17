@@ -63,16 +63,47 @@ test('owner list reports failure and retries with a refreshed session', async ({
 });
 
 test('owner sees deleted repositories and restores one from the profile', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
   await page.route('**/api/v1/auth/me', (route) => route.fulfill({ json: { user } }));
   let restored = false;
   await page.route('**/api/v1/users/alice', (route) => route.fulfill({ json: { repositories: restored ? [{ id: 'deleted', name: 'old-project', visibility: 'PRIVATE', owner: { username: 'alice' } }] : [] } }));
   await page.route('**/api/v1/repositories/deleted', (route) => route.fulfill({ json: { repositories: restored ? [] : [{ id: 'deleted', name: 'old-project', visibility: 'PRIVATE', owner: { username: 'alice' }, purgeAfter: '2026-10-01T00:00:00.000Z' }] } }));
   await page.route('**/api/v1/repos/alice/old-project/restore', (route) => { restored = true; return route.fulfill({ status: 201, json: { repository: { name: 'old-project' } } }); });
-  await page.goto('/alice');
+  await page.goto('/alice?deleted=1');
+  await expect(page.getByRole('status').filter({ hasText: 'Repository đã được xóa thành công.' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Repository đã xóa' })).toBeVisible();
   await page.getByRole('button', { name: 'Khôi phục' }).click();
-  await expect(page.getByRole('link', { name: 'old-project' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'old-project' }).first()).toBeVisible();
+  const notice = page.getByRole('status').filter({ hasText: 'Repository đã được khôi phục thành công.' });
+  await expect(notice).toBeVisible();
+  await expect(notice.getByRole('link', { name: 'old-project' })).toHaveAttribute('href', '/alice/old-project');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('button', { name: 'Đóng thông báo khôi phục repository' }).click();
+  await expect(notice).toHaveCount(0);
   await expect(page.getByText('Không có repository đang chờ xóa.')).toBeVisible();
+  await expect(page).toHaveURL('/alice');
+  await expect(page.getByText('Repository đã được xóa thành công.')).toHaveCount(0);
+});
+
+test('deletion notice fits mobile and stays dismissed after reload', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.route('**/api/v1/auth/me', (route) => route.fulfill({ json: { user } }));
+  await page.route('**/api/v1/users/alice', (route) => route.fulfill({ json: { repositories: [] } }));
+  await page.route('**/api/v1/repositories/deleted', (route) => route.fulfill({ json: { repositories: [] } }));
+  await page.goto('/alice?deleted=1');
+  await expect(page.getByRole('status').filter({ hasText: 'Repository đã được xóa thành công.' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('button', { name: 'Đóng thông báo xóa repository' }).click();
+  await expect(page).toHaveURL('/alice');
+  await page.reload();
+  await expect(page.getByText('Repository đã được xóa thành công.')).toHaveCount(0);
+});
+
+test('anonymous visitors do not see an owner deletion notice', async ({ page }) => {
+  await anonymous(page);
+  await page.goto('/alice?deleted=1');
+  await expect(page.getByRole('heading', { name: 'alice', exact: true })).toBeVisible();
+  await expect(page.getByText('Repository đã được xóa thành công.')).toHaveCount(0);
 });
 
 test('repository read refreshes mid-session and long names fit mobile', async ({ page }) => {

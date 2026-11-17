@@ -29,8 +29,7 @@ export default async function ProfilePage({ params, searchParams }: { params: Pr
     </aside>
     <section className={styles.repositories} aria-labelledby="repositories-title">
       <div className={styles.heading}><h2 id="repositories-title">Repository</h2></div>
-      {deleted === "1" && <p role="status">Repository đã được xóa. Bạn có thể khôi phục trong thời hạn lưu giữ.</p>}
-      <RepositoryList username={user.username} initial={repositories ?? []} />
+      <RepositoryList username={user.username} initial={repositories ?? []} showDeletedNotice={deleted === "1"} />
     </section>
   </main>;
 }

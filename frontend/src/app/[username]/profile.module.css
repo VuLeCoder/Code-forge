@@ -79,6 +79,26 @@
   letter-spacing: -.015em;
 }
 
+.successNotice {
+  display: flex;
+  align-items: start;
+  gap: 16px;
+  margin: 20px;
+  padding: 16px;
+  border: 1px solid var(--brand-100);
+  border-radius: var(--radius-sm);
+  background: var(--brand-50);
+  color: var(--text);
+  font-size: .9rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.successNotice > div { flex: 1; min-width: 0; }
+.successNotice p { margin-top: 4px; }
+.successNotice a { color: var(--brand-700); text-decoration: underline; }
+.successNotice button { flex-shrink: 0; }
+
 .empty {
   display: grid;
   justify-items: center;
