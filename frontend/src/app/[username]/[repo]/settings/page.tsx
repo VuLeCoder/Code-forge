@@ -323,7 +323,6 @@ export default function RepositorySettingsPage() {
 
   return <main className={`container ${styles.page}`}>
     <RepositoryNavigation owner={repo.owner.username} repository={repo.name} current="settings" canManage={canManage} />
-    <Link className={styles.back} href={repositoryPath(repo)}>← Về repository</Link>
     <h1>Cài đặt {repo.name}</h1>
     <p className={styles.intro}>Quản lý dự án, cộng tác viên và cách đưa thay đổi vào nhánh mặc định.</p>
     <div className={styles.layout}>

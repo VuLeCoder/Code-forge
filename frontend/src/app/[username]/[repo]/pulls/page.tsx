@@ -140,7 +140,6 @@ export default function PullRequestListPage() {
 
   return <main className={`container ${styles.page}`} aria-busy={loading || saving}>
     <RepositoryNavigation owner={owner} repository={repo} current="pulls" />
-    <nav className={styles.breadcrumb} aria-label="Điều hướng"><Link href={`/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`}>{owner}/{repo}</Link><span aria-hidden="true">/</span><strong>Pull requests</strong></nav>
     <header className={styles.header}>
       <div><span className="eyebrow">Cộng tác</span><h1>Pull requests</h1><p>Xem và trao đổi các thay đổi giữa những branch trong repository này.</p></div>
       {result?.permissions.canCreate && <button ref={headerCreateRef} className="button buttonPrimary" onClick={() => {

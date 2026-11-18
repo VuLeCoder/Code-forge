@@ -27,8 +27,7 @@ export default async function ProfilePage({ params, searchParams }: { params: Pr
       <h1>{user.username}</h1>
       <p className={styles.joined}>Tham gia {new Intl.DateTimeFormat("vi-VN", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(user.createdAt))}</p>
     </aside>
-    <section className={styles.repositories} aria-labelledby="repositories-title">
-      <div className={styles.heading}><h2 id="repositories-title">Repository</h2></div>
+    <section className={styles.repositories} aria-label="Repository">
       <RepositoryList username={user.username} initial={repositories ?? []} showDeletedNotice={deleted === "1"} />
     </section>
   </main>;

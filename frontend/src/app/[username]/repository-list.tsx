@@ -11,6 +11,7 @@ import styles from "./profile.module.css";
 export function RepositoryList({ username, initial, showDeletedNotice = false }: { username: string; initial: RepositorySummary[]; showDeletedNotice?: boolean }) {
   const router = useRouter();
   const { user, loading } = useAuth();
+  const [tab, setTab] = useState<"active" | "deleted">("active");
   const [attempt, setAttempt] = useState(0);
   const [owned, setOwned] = useState<{ key: string; repositories: RepositorySummary[]; error: boolean } | null>(null);
   const [deleted, setDeleted] = useState<{ key: string; repositories: RepositorySummary[]; error: boolean } | null>(null);
@@ -63,7 +64,7 @@ export function RepositoryList({ username, initial, showDeletedNotice = false }:
   }
 
   const deletionNotice = isOwner && showDeletedNotice && <div className={styles.successNotice}>
-      <div role="status"><strong>Repository đã được xóa thành công.</strong><p>Bạn có thể khôi phục trong mục <a href="#deleted-title">Repository đã xóa</a> bên dưới trước khi hết thời hạn lưu giữ.</p></div>
+      <div role="status"><strong>Repository đã được xóa thành công.</strong><p>Bạn có thể khôi phục trong mục <button className={styles.noticeLink} type="button" onClick={() => setTab("deleted")}>Repo đã xóa</button> trước khi hết thời hạn lưu giữ.</p></div>
       <button className="button buttonSecondary" type="button" aria-label="Đóng thông báo xóa repository" onClick={dismissDeletedNotice}>Đóng</button>
     </div>;
 
@@ -72,10 +73,7 @@ export function RepositoryList({ username, initial, showDeletedNotice = false }:
       <button className="button buttonSecondary" type="button" aria-label="Đóng thông báo khôi phục repository" onClick={() => setRestoredRepository(null)}>Đóng</button>
     </div>;
 
-  if (loading || (isOwner && owned?.key !== key)) return <>{deletionNotice}{restoreNotice}<div className={styles.empty}><p role="status">Đang tải repository…</p></div></>;
-  if (isOwner && owned?.error) return <>{deletionNotice}{restoreNotice}<div className={styles.empty}><p role="alert">Chưa thể tải danh sách repository. Vui lòng thử lại.</p><button className="button buttonSecondary" onClick={() => setAttempt((value) => value + 1)}>Thử lại</button></div></>;
-
-  const activeContent = !repositories.length ? <div className={styles.empty}>
+  const activeContent = loading || (isOwner && owned?.key !== key) ? <div className={styles.empty}><p role="status">Đang tải repository…</p></div> : isOwner && owned?.error ? <div className={styles.empty}><p role="alert">Chưa thể tải danh sách repository. Vui lòng thử lại.</p><button className="button buttonSecondary" onClick={() => setAttempt((value) => value + 1)}>Thử lại</button></div> : !repositories.length ? <div className={styles.empty}>
     <span className={styles.repoIcon} aria-hidden="true">&lt;/&gt;</span>
     <h3>Chưa có repository</h3>
     <p>{isOwner ? "Bạn chưa tạo repository nào." : "Repository công khai của thành viên sẽ xuất hiện ở đây."}</p>
@@ -87,10 +85,25 @@ export function RepositoryList({ username, initial, showDeletedNotice = false }:
   </li>)}</ul>;
 
   return <>
+    <div className={styles.tabs} role="tablist" aria-label="Danh sách repository">
+      {(["active", ...(isOwner ? ["deleted"] : [])] as ("active" | "deleted")[]).map((item) => <button
+        key={item} id={`profile-${item}-tab`} type="button" role="tab"
+        aria-selected={tab === item} aria-controls={`profile-${item}-panel`} tabIndex={tab === item ? 0 : -1}
+        onClick={() => setTab(item)}
+        onKeyDown={(event) => {
+          if (isOwner && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+            event.preventDefault();
+            const next = event.key === "Home" ? "active" : event.key === "End" ? "deleted" : item === "active" ? "deleted" : "active";
+            setTab(next);
+            document.getElementById(`profile-${next}-tab`)?.focus();
+          }
+        }}
+      >{item === "active" ? "Repo" : "Repo đã xóa"}</button>)}
+    </div>
     {deletionNotice}
     {restoreNotice}
-    {activeContent}
-    {isOwner && <section className={styles.deletedSection} aria-labelledby="deleted-title">
+    <div id="profile-active-panel" role="tabpanel" aria-labelledby="profile-active-tab" hidden={tab !== "active"}>{activeContent}</div>
+    {isOwner && <section id="profile-deleted-panel" role="tabpanel" hidden={tab !== "deleted"} className={styles.deletedSection} aria-labelledby="profile-deleted-tab">
       <h3 id="deleted-title">Repository đã xóa</h3>
       <p>Repository được giữ đến hết thời hạn bên dưới rồi xóa vĩnh viễn.</p>
       {restoreMessage && <p role="alert">{restoreMessage}</p>}
