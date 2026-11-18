@@ -1,5 +1,8 @@
 "use client";
 
+import { Select } from "@/components/select";
+
+
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
@@ -348,7 +351,7 @@ export default function RepositorySettingsPage() {
       <p>Nhánh dùng khi mở mã nguồn, clone dự án và chọn nhánh đích ban đầu cho pull request.</p>
       {branches.key === routeKey && branches.error ? <div className={styles.inlineError}>Không thể tải danh sách nhánh.<button onClick={() => setAttempt((value) => value + 1)}>Thử lại</button></div> : branches.key !== routeKey ? <p role="status">Đang tải nhánh…</p> : branches.names.length === 0 ? <p>Nhánh đầu tiên được tạo hoặc push lên sẽ trở thành nhánh mặc định.</p> : <form className={styles.inviteForm} onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void saveSetting({ defaultBranch: String(form.get("defaultBranch")) }); }}>
         <label htmlFor="default-branch">Nhánh mặc định</label>
-        <select id="default-branch" name="defaultBranch" key={repo.defaultBranch} defaultValue={repo.defaultBranch} disabled={pending}>{branches.names.map((name) => <option key={name} value={name}>{name}</option>)}</select>
+        <Select id="default-branch" name="defaultBranch" key={repo.defaultBranch} defaultValue={repo.defaultBranch} disabled={pending}>{branches.names.map((name) => <option key={name} value={name}>{name}</option>)}</Select>
         <button className="button buttonSecondary" disabled={pending}>Đổi nhánh mặc định</button>
       </form>}
     </section>
@@ -380,7 +383,7 @@ export default function RepositorySettingsPage() {
           maxLength={39}
           aria-label="Tên người dùng muốn mời"
         />
-        <select
+        <Select
           value={inviteRole}
           onChange={(e) => setInviteRole(e.target.value as "READ" | "WRITE")}
           className={styles.roleSelect}
@@ -388,7 +391,7 @@ export default function RepositorySettingsPage() {
         >
           <option value="READ">Đọc (READ)</option>
           <option value="WRITE">Ghi (WRITE)</option>
-        </select>
+        </Select>
         <button className="button buttonPrimary buttonSmall" type="submit" disabled={pending || !inviteUsername.trim()}>
           {pending ? "Đang gửi…" : "Gửi lời mời"}
         </button>
@@ -407,7 +410,7 @@ export default function RepositorySettingsPage() {
                 <Link href={`/${encodeURIComponent(m.user.username)}`}><strong>{m.user.username}</strong></Link>
               </div>
               <div className={styles.memberActions}>
-                <select
+                <Select
                   value={m.role}
                   onChange={(e) => handleUpdateMemberRole(m.userId, e.target.value as "READ" | "WRITE")}
                   className={styles.roleSelect}
@@ -416,7 +419,7 @@ export default function RepositorySettingsPage() {
                 >
                   <option value="READ">Đọc (READ)</option>
                   <option value="WRITE">Ghi (WRITE)</option>
-                </select>
+                </Select>
                 <button
                   type="button"
                   className={styles.removeBtn}

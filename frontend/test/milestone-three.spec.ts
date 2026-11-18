@@ -1,3 +1,4 @@
+import { selectChoice } from "./select-choice";
 import { expect, test } from '@playwright/test';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -409,7 +410,7 @@ test('M3.2 handles missing paths, retry and loading', async ({ page }) => {
     return route.fulfill({ json: { commits: [{ sha, subject: 'Filtered commit', author: { name: 'Alice', email: 'alice@test.local' }, committedAt: '2026-11-18T00:00:00Z' }], page: Number(query.get('page') ?? 1), hasMore: !query.has('page'), snapshot: sha, storageState: 'READY' } });
   });
   await page.goto('/alice/hello-world?view=commits&ref=main&author=Alice&since=2026-11-01&until=2026-11-18');
-  await expect(page.getByLabel('Tác giả', { exact: true })).toHaveValue('Alice');
+  await expect(page.getByLabel('Tác giả', { exact: true })).toHaveText('Alice');
   await page.getByRole('link', { name: 'Trang sau' }).click();
   await expect(page).toHaveURL(/page=2/);
   await expect(page.getByRole('link', { name: 'Filtered commit', exact: true })).toHaveAttribute('href', /author=Alice&since=2026-11-01&until=2026-11-18/);
@@ -417,15 +418,15 @@ test('M3.2 handles missing paths, retry and loading', async ({ page }) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.unroute('**/api/v1/repos/alice/hello-world/commits?**');
   await page.route('**/api/v1/repos/alice/hello-world/commits?**', route => route.fulfill({ json: { commits: [], page: 1, hasMore: false, snapshot: sha, storageState: 'READY' } }));
-  await page.getByLabel('Tác giả', { exact: true }).selectOption('Bob');
+  await selectChoice(page.getByLabel('Tác giả', { exact: true }), 'Bob');
   await expect(page).toHaveURL(/author=Bob/);
   expect(new URL(page.url()).searchParams.has('page')).toBe(false);
   expect(new URL(page.url()).searchParams.has('snapshot')).toBe(false);
   await expect(page.getByText('Không có commit phù hợp với bộ lọc.')).toBeVisible();
-  await page.getByLabel('Tác giả', { exact: true }).selectOption('');
+  await selectChoice(page.getByLabel('Tác giả', { exact: true }), '');
   await page.getByLabel('Lọc theo thời gian', { exact: true }).click();
   await page.getByLabel('Năm', { exact: true }).fill('2026');
-  await page.getByLabel('Tháng', { exact: true }).selectOption('10');
+  await selectChoice(page.getByLabel('Tháng', { exact: true }), '10');
   await page.getByRole('button', { name: '2026-11-10', exact: true }).click();
   await expect(page.getByText('Chọn ngày kết thúc')).toBeVisible();
   await page.getByRole('button', { name: '2026-11-18', exact: true }).click();

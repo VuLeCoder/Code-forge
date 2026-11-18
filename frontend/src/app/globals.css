@@ -38,6 +38,39 @@ body { display: flex; flex-direction: column; min-height: 100vh; min-height: 100
 body > main, .siteHeader, .siteFooter { flex-shrink: 0; }
 a { color: inherit; text-decoration: none; } button, input, select, textarea { font: inherit; }
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--brand-600); outline-offset: 2px; }
+/* Shared dropdown controls; page modules only define placement and width. */
+select, .dropdownTrigger {
+  min-height: 42px;
+  max-width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background-color: var(--surface);
+  color: var(--text);
+  font: 600 .875rem/1.5 Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  cursor: pointer;
+  transition: border-color .15s ease, background-color .15s ease;
+}
+select:not([multiple]) {
+  appearance: none;
+  padding-right: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23667085' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+html[data-theme="dark"] select:not([multiple]) {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239aa9bc' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+.dropdownTrigger { display: inline-flex; align-items: center; gap: 10px; list-style: none; }
+.dropdownTrigger::-webkit-details-marker { display: none; }
+select:hover:not(:disabled), .dropdownTrigger:hover, details[open] > .dropdownTrigger {
+  border-color: var(--brand-600);
+  background-color: var(--surface-hover);
+}
+.dropdownTrigger:focus-visible { outline: 2px solid var(--brand-600); outline-offset: 2px; }
+select:disabled, .dropdownTrigger[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
+select option { color: var(--text); background: var(--surface); }
+.dropdownChevron { width: 16px; height: 16px; margin-left: auto; color: var(--muted); flex-shrink: 0; }
 .container { width: calc(100% - 2 * var(--page-gutter)); margin-inline: auto; }
 .srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .eyebrow { display: inline-flex; align-items: center; gap: 7px; color: var(--brand-600); font-size: .72rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; margin-bottom: 14px; }
@@ -132,3 +165,12 @@ html[data-theme="dark"] .themeIconSun { display: block; }
   .globalSearch { grid-row: 3; }
 }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *,*::before,*::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
+
+.selectControl { position: relative; min-width: 0; max-width: 100%; }
+.selectControl > .dropdownTrigger { width: 100%; text-align: left; justify-content: space-between; }
+.selectValue { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.selectOptions { position: absolute; top: calc(100% + 8px); left: 0; z-index: 30; width: max-content; min-width: 100%; max-width: min(360px, calc(100vw - 40px)); max-height: 280px; overflow: auto; padding: 6px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-lg); }
+.selectOptions button { display: flex; justify-content: space-between; align-items: center; gap: 16px; width: 100%; min-height: 40px; padding: 9px 10px; border: 0; border-radius: 8px; color: var(--text); background: transparent; font-size: .875rem; font-weight: 600; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.selectOptions button:hover, .selectOptions button:focus-visible, .selectOptions button[aria-selected="true"] { color: var(--brand-700); background: var(--brand-50); }
+.selectOptions button:disabled { opacity: .55; cursor: not-allowed; }
+.selectControl:has([aria-expanded="true"]) > .dropdownTrigger { border-color: var(--brand-600); background: var(--surface-hover); }

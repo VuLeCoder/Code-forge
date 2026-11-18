@@ -22,7 +22,8 @@
 .filters { display: flex; align-items: flex-end; flex-wrap: wrap; gap: .8rem; padding: 1rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); }
 .filters label { display: grid; gap: .4rem; min-width: 12rem; color: #475467; font-size: .8rem; font-weight: 700; }
 .filters .searchField { flex: 1 1 20rem; }
-.filters input, .filters select { width: 100%; min-height: 42px; padding: .55rem .7rem; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.filters :global(.selectControl) { width: 100%; }
+.filters input { width: 100%; min-height: 42px; padding: .55rem .7rem; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .filters .button { min-height: 42px; }
 .tableWrap { width: 100%; overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); }
 .tableWrap table { width: 100%; min-width: 760px; border-collapse: collapse; text-align: left; font-size: .88rem; }

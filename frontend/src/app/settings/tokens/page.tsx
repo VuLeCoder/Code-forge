@@ -1,5 +1,8 @@
 "use client";
 
+import { Select } from "@/components/select";
+
+
 import { useEffect, useRef, useState } from "react";
 import { RequireAuth } from "@/components/require-auth";
 import { useAuth } from "@/components/auth-provider";
@@ -83,7 +86,7 @@ function TokenManager() {
     <form onSubmit={create} className={styles.form}>
       <h2>Tạo token</h2>
       <label htmlFor="token-name">Tên token</label><input id="token-name" required maxLength={100} value={name} onChange={(event) => setName(event.target.value)} />
-      <label htmlFor="token-days">Thời hạn</label><select id="token-days" value={days} onChange={(event) => setDays(event.target.value)}><option value="7">7 ngày</option><option value="30">30 ngày</option><option value="90">90 ngày</option><option value="365">365 ngày</option></select>
+      <label htmlFor="token-days">Thời hạn</label><Select id="token-days" value={days} onChange={(event) => setDays(event.target.value)}><option value="7">7 ngày</option><option value="30">30 ngày</option><option value="90">90 ngày</option><option value="365">365 ngày</option></Select>
       <p>Quyền đọc: <code>repo:read</code> (clone/fetch).</p>
       <label><input type="checkbox" checked={write} onChange={(event) => setWrite(event.target.checked)} /> Thêm quyền <code>repo:write</code></label>
       <p><code>repo:write</code> cho phép push khi tài khoản có quyền WRITE hoặc OWNER; giao diện sẽ tự kèm <code>repo:read</code> để clone/fetch.</p>

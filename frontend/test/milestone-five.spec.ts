@@ -1,3 +1,4 @@
+import { selectChoice } from "./select-choice";
 import { expect, test } from "@playwright/test";
 
 const owner = {
@@ -221,7 +222,7 @@ test.describe("Milestone 5 - Invitation and Member Management UI", () => {
 
     // 3. Change member role for Bob specifically
     const bobRow = page.getByRole("listitem").filter({ hasText: "bob" });
-    await bobRow.getByRole("combobox").selectOption("WRITE");
+    await selectChoice(bobRow.getByRole("combobox"), "WRITE");
     await expect(page.getByText("Đã cập nhật quyền thành Ghi (WRITE).")).toBeVisible();
 
     // 4. Remove member

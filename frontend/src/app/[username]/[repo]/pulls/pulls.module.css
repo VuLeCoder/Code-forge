@@ -33,7 +33,8 @@
 .panel h2, .confirm h2 { margin-bottom: 15px; font-size: 1.05rem; letter-spacing: -.015em; }
 .form { display: grid; gap: 8px; }
 .form label { margin-top: 4px; font-size: .9rem; font-weight: 700; }
-.form input, .form select, .form textarea { width: 100%; min-height: 42px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); background: var(--surface); }
+.form :global(.selectControl) { width: 100%; }
+.form input, .form textarea { width: 100%; min-height: 42px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); background: var(--surface); }
 .form textarea { resize: vertical; line-height: 1.55; }
 .branchFields { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: end; gap: 12px; margin-block: 6px; }
 .branchFields > div { display: grid; gap: 9px; min-width: 0; }

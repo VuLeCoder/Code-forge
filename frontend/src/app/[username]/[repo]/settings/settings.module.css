@@ -13,7 +13,7 @@
 .form label, .dialog label { font-weight: 650; }
 .form input, .form textarea, .dialog input { width: 100%; min-height: 42px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
 .form textarea { resize: vertical; line-height: 1.55; }
-.form button { justify-self: start; margin-top: 8px; }
+.form > button { justify-self: start; margin-top: 8px; }
 .hint { color: var(--muted); font-size: .82rem; line-height: 1.5; }
 .error, .success { margin-top: 16px; padding: 12px 14px; border-radius: var(--radius-sm); line-height: 1.5; }
 .error { background: #ffebe9; color: var(--danger); border: 1px solid #ff8182; border-left: 3px solid var(--danger); }
@@ -36,7 +36,7 @@
 .memberInfo a { color: var(--brand-700); }
 .memberInfo a:hover { text-decoration: underline; }
 .memberActions { display: flex; align-items: center; gap: 8px; }
-.roleSelect { min-height: 38px; padding: 6px 30px 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
+.roleSelect { min-width: 130px; }
 .removeBtn, .revokeBtn { min-height: 38px; padding: 6px 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--muted); font-size: .82rem; font-weight: 650; cursor: pointer; }
 .removeBtn { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); color: var(--danger); }
 .removeBtn:hover { background: #ffebe9; }
@@ -48,7 +48,6 @@
 .inlineError button { min-height: 36px; border: 0; color: inherit; background: transparent; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
 .inviteForm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 2px; }
 .inviteForm input { flex: 1 1 220px; min-width: 160px; min-height: 40px; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
-.inviteForm select { min-height: 40px; padding: 8px 30px 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
 @media (max-width: 600px) {
 
   .card, .dialog { padding: 16px; }
@@ -56,7 +55,7 @@
   .memberInfo { width: 100%; }
   .memberActions { width: 100%; justify-content: flex-start; }
   .inviteForm input { min-width: 0; width: 100%; flex-basis: 100%; }
-  .inviteForm select { flex: 1; }
+  .inviteForm :global(.selectControl) { flex: 1; }
   .actions { justify-content: stretch; }
   .actions > button { flex: 1 1 auto; }
 }

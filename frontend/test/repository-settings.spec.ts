@@ -1,3 +1,4 @@
+import { selectChoice } from "./select-choice";
 import { expect, test } from '@playwright/test';
 
 for (const theme of ['light', 'dark']) {
@@ -29,7 +30,7 @@ for (const theme of ['light', 'dark']) {
     const navigation = page.getByRole('navigation', { name: 'Các mục cài đặt' });
     await expect(navigation.getByRole('button', { name: 'Cài đặt chung' })).toHaveAttribute('aria-current', 'page');
     await expect(page.getByRole('heading', { name: 'Thành viên và cộng tác' })).toBeHidden();
-    await page.getByRole('combobox', { name: 'Nhánh mặc định', exact: true }).selectOption('develop');
+    await selectChoice(page.getByRole('combobox', { name: 'Nhánh mặc định', exact: true }), 'develop');
     await page.getByRole('button', { name: 'Đổi nhánh mặc định', exact: true }).click();
     await expect(page.getByRole('status')).toHaveText('Đã cập nhật cài đặt.');
     await navigation.getByRole('button', { name: 'Luật bảo vệ nhánh' }).click();

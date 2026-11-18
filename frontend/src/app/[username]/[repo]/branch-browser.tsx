@@ -119,9 +119,9 @@ export function BranchBrowser({
     <>
       {history && <h2 className={styles.historyHeading}>Lịch sử commit</h2>}
       <div className={styles.repoToolbar}>
-        <details ref={branchesMenu} className={styles.branchPicker}><summary aria-label="Branch" aria-disabled={!data.branches.length} data-branch={data.selectedBranch?.name ?? ""}><RepositoryIcon name="branch" /><span>{data.selectedBranch?.name ?? "Chưa có nhánh"}</span><RepositoryIcon name="chevron" /></summary>
+        <details ref={branchesMenu} className={styles.branchPicker}><summary className="dropdownTrigger" aria-label="Branch" aria-disabled={!data.branches.length} data-branch={data.selectedBranch?.name ?? ""}><RepositoryIcon name="branch" /><span>{data.selectedBranch?.name ?? "Chưa có nhánh"}</span><RepositoryIcon name="chevron" /></summary>
           <div><label>Lọc nhánh<input value={filter} onChange={event => setFilter(event.target.value)} /></label>
-          {data.branches.filter(branch => branch.name.toLowerCase().includes(filter.toLowerCase())).map(branch => <button key={branch.name} type="button" onClick={() => { select(branch.name); if (branchesMenu.current) branchesMenu.current.open = false; }}>{branch.name}{branch.isDefault ? " (mặc định)" : ""}</button>)}</div>
+          {data.branches.filter(branch => branch.name.toLowerCase().includes(filter.toLowerCase())).map(branch => <button key={branch.name} aria-current={branch.name === data.selectedBranch?.name ? "true" : undefined} type="button" onClick={() => { select(branch.name); if (branchesMenu.current) branchesMenu.current.open = false; }}>{branch.name}{branch.isDefault ? " (mặc định)" : ""}</button>)}</div>
         </details>
         {history && <CommitFilters endpoint={endpoint} />}
         {!history && <><button type="button" className={styles.branchCount} onClick={() => { if (branchesMenu.current) branchesMenu.current.open = !branchesMenu.current.open; }}><RepositoryIcon name="branch" /><span><strong>{data.branches.length}</strong> nhánh</span></button>

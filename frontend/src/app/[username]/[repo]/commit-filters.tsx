@@ -1,9 +1,13 @@
 "use client";
 
+import { Select } from "@/components/select";
+
+
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { sessionFetch } from "@/lib/auth";
 import { useAuth } from "@/components/auth-provider";
+import { RepositoryIcon } from "./repository-icon";
 import styles from "./repository.module.css";
 
 function dateKey(date: Date) {
@@ -33,8 +37,8 @@ export function CommitFilters({ endpoint }: { endpoint: string }) {
   }, [endpoint, identity, attempt]);
   useEffect(() => {
     function close(event: MouseEvent) { if (calendar.current && !calendar.current.contains(event.target as Node)) calendar.current.open = false; }
-    document.addEventListener("click", close);
-    return () => document.removeEventListener("click", close);
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
   }, []);
   function apply(values: { author?: string; since?: string; until?: string }) {
     const next = new URLSearchParams(query.toString());
@@ -51,16 +55,16 @@ export function CommitFilters({ endpoint }: { endpoint: string }) {
   const rangeEnd = start ? (hover > start ? hover : start) : until;
   const authors = result.key === identity ? result.authors : undefined;
   return <div className={styles.historyFilters}>
-    <label className={styles.authorSelect}><span className={styles.visuallyHidden}>Tác giả</span><select aria-label="Tác giả" value={query.get("author") ?? ""} onChange={event => apply({ author: event.target.value })}>
+    <label className={styles.authorSelect}><span className={styles.visuallyHidden}>Tác giả</span><Select aria-label="Tác giả" value={query.get("author") ?? ""} onChange={event => apply({ author: event.target.value })}>
       <option value="">Tất cả người dùng</option>
       {authors?.map(author => <option key={author.username} value={author.username}>{author.username}</option>)}
-    </select></label>
+    </Select></label>
     {result.key === identity && !authors && <button type="button" onClick={() => setAttempt(value => value + 1)}>Tải lại thành viên</button>}
     <details ref={calendar} className={styles.datePicker} onToggle={event => { if (!event.currentTarget.open) { setStart(""); setHover(""); } }} onKeyDown={event => { if (event.key === "Escape" && calendar.current) { calendar.current.open = false; calendar.current.querySelector("summary")?.focus(); } }}>
-      <summary aria-label="Lọc theo thời gian">▦ {since || until ? `${since || "…"} — ${until || "…"}` : "Tất cả thời gian"}<span aria-hidden="true">⌄</span></summary>
+      <summary className="dropdownTrigger" aria-label="Lọc theo thời gian">▦ {since || until ? `${since || "…"} — ${until || "…"}` : "Tất cả thời gian"}<RepositoryIcon name="chevron" className="dropdownChevron" /></summary>
       <div className={styles.calendar} aria-label="Chọn khoảng ngày">
         <div className={styles.calendarHeader}>
-          <select aria-label="Tháng" value={month.getMonth()} onChange={event => setMonth(new Date(month.getFullYear(), Number(event.target.value), 1))}>{Array.from({ length: 12 }, (_, index) => <option key={index} value={index}>Tháng {index + 1}</option>)}</select>
+          <Select aria-label="Tháng" value={month.getMonth()} onChange={event => setMonth(new Date(month.getFullYear(), Number(event.target.value), 1))}>{Array.from({ length: 12 }, (_, index) => <option key={index} value={index}>Tháng {index + 1}</option>)}</Select>
           <input aria-label="Năm" type="number" min="1970" max="9999" value={month.getFullYear()} onChange={event => { const year = Number(event.target.value); if (year >= 1970 && year <= 9999) setMonth(new Date(year, month.getMonth(), 1)); }} />
           <button type="button" aria-label="Tháng trước" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}>‹</button>
           <button type="button" aria-label="Tháng sau" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}>›</button>

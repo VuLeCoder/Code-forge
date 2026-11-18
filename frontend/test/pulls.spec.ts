@@ -1,3 +1,4 @@
+import { selectChoice } from "./select-choice";
 import { expect, test } from "@playwright/test";
 
 const owner = {
@@ -74,7 +75,7 @@ test("owner creates a pull request from a slash branch and reviews the compare s
   await page.goto("/alice/project/pulls");
   await page.getByRole("button", { name: "Tạo pull request", exact: true }).first().click();
   await page.getByLabel("Tiêu đề").fill("Add greeting");
-  await page.getByLabel("Branch nguồn").selectOption("feature/greeting");
+  await selectChoice(page.getByLabel("Branch nguồn"), "feature/greeting");
   await page.getByLabel("Mô tả").fill("Adds a README greeting.");
   await page.getByRole("button", { name: "Tạo pull request", exact: true }).last().click();
 
@@ -303,8 +304,8 @@ test("pull request form announces validation, restores focus, and fits a 375px v
   await toggle.press("Enter");
   await expect(page.getByLabel("Tiêu đề")).toBeFocused();
   await page.getByLabel("Tiêu đề").fill("Invalid same-branch request");
-  await page.getByLabel("Branch nguồn").selectOption("main");
-  await page.getByLabel("Branch đích").selectOption("main");
+  await selectChoice(page.getByLabel("Branch nguồn"), "main");
+  await selectChoice(page.getByLabel("Branch đích"), "main");
   await page.getByRole("button", { name: "Tạo pull request", exact: true }).last().click();
   const validation = page.getByRole("alert").filter({ hasText: "Hãy chọn hai branch khác nhau." });
   await expect(validation).toBeFocused();
