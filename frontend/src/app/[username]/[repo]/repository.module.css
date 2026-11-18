@@ -150,11 +150,11 @@
 .repositoryColumns { display: grid; grid-template-columns: minmax(0, 1fr) 256px; gap: 32px; align-items: start; margin-top: 24px; }
 .repositoryContent { min-width: 0; }
 .about { min-width: 0; overflow-wrap: anywhere; }
-.aboutHeader { display: flex; align-items: center; justify-content: space-between; min-height: 40px; gap: 12px; }
+.aboutHeader { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; min-height: 40px; gap: 12px; }
 .about h2 { font-size: 1rem; font-weight: 720; letter-spacing: -.02em; }
 .about p { margin: 16px 0 20px; color: var(--text); font-size: .9rem; line-height: 1.75; white-space: pre-wrap; }
 .about p.aboutEmpty { color: var(--muted); }
-.aboutSettings { display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--radius-sm); color: var(--muted); }
+.aboutSettings { display: grid; place-items: center; width: 32px; height: 32px; border: 0; background: transparent; cursor: pointer; border-radius: var(--radius-sm); color: var(--muted); }
 .aboutSettings:hover { color: var(--brand-700); background: var(--brand-50); }
 .aboutLinks { display: grid; gap: 14px; padding-top: 20px; border-top: 1px solid var(--border); }
 .aboutLinks a { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: .84rem; }
@@ -187,16 +187,16 @@
 .fileResults a { display: block; padding: 10px; border-radius: 6px; overflow-wrap: anywhere; font-size: .85rem; }
 .fileResults p { padding: 10px; color: var(--muted); font-size: .85rem; }
 .fileResults a[aria-current=true] { color: var(--brand-700); background: var(--brand-50); }
-.overview { position: relative; display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-md) var(--radius-md) 0 0; background: color-mix(in srgb, var(--brand-50) 40%, var(--surface)); font-size: .8rem; }
+.overview { position: relative; display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-md) var(--radius-md) 0 0; background: color-mix(in srgb, var(--brand-50) 40%, var(--surface)); font-size: .9rem; }
 .pushIdentity { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .pushIdentity > a { color: var(--text); font-weight: 700; }
 .pushIdentity small { color: var(--muted); font-size: .75rem; }
 .pushAvatar { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--brand-100); border-radius: 50%; background: var(--brand-50); color: var(--brand-700); font-weight: 700; }
 .unknownPusher { max-width: 150px; color: var(--muted); font-size: .75rem; }
-.commitSubject { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); }
+.commitSubject { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-secondary); }
 .commitSubject:hover { color: var(--brand-700); text-decoration: underline; }
-.commitMetadata { display: flex; align-items: center; gap: 6px; flex-shrink: 0; color: var(--muted); font-size: .75rem; }
-.commitMetadata code { color: var(--brand-700); font-size: .74rem; }
+.commitMetadata { display: flex; align-items: center; gap: 6px; flex-shrink: 0; color: var(--text-secondary); font-size: .875rem; }
+.commitMetadata code { color: var(--brand-700); font-size: .875rem; }
 .commitMetadata time { white-space: nowrap; }
 .overviewCopy { display: grid; place-items: center; width: 26px; height: 28px; padding: 4px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; }
 .overviewCopy svg { width: 14px; }
@@ -235,3 +235,13 @@
   .commitCount { margin-left: auto; border-left: 0; padding-left: 0; }
   .repositoryContent .treeList li { padding-inline: 12px; }
 }
+
+.aboutDialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); }
+.aboutDialog::backdrop { background: rgb(0 0 0 / 55%); }
+.aboutDialogHeader { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px; border-bottom: 1px solid var(--border); }
+.aboutDialogHeader h2 { margin: 0; font-size: 1.1rem; }
+.aboutForm { display: grid; gap: 12px; padding: 24px; }
+.aboutForm label { font-weight: 700; }
+.aboutForm textarea { width: 100%; resize: vertical; min-height: 100px; padding: 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text); background: var(--canvas); font: inherit; }
+.aboutForm small { color: var(--text-secondary); }
+.aboutForm footer { display: flex; justify-content: flex-end; gap: 12px; margin-top: 12px; }

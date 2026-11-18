@@ -8,6 +8,7 @@ import { RepositoryNavigation } from "@/components/repository-navigation";
 import { useAuth } from "@/components/auth-provider";
 import { sessionFetch } from "@/lib/auth";
 import type { RepositorySummary } from "@/lib/repositories";
+import { RepositoryAboutEditor, ReadmeShortcut } from "./repository-about";
 import { RepositoryIcon } from "./repository-icon";
 import styles from "./repository.module.css";
 
@@ -52,9 +53,10 @@ export default function RepositoryPage() {
     <section className={styles.empty} aria-labelledby="empty-title"><span className={styles.icon} aria-hidden="true">&lt;/&gt;</span><h2 id="empty-title">Repository chưa có mã nguồn</h2><p>Repository này hiện chưa có tệp nào.</p><div className={styles.details}><span>Nhánh mặc định</span><strong>{repo.defaultBranch}</strong></div></section>
     </SourceBrowser></Suspense>
     </div><aside className={styles.about}>
-      <div className={styles.aboutHeader}><h2>Giới thiệu</h2>{repo.permissions?.canManage && <Link className={styles.aboutSettings} aria-label="Chỉnh sửa mô tả" title="Chỉnh sửa mô tả" href={`/${encodeURIComponent(repo.owner.username)}/${encodeURIComponent(repo.name)}/settings`}><RepositoryIcon name="settings" /></Link>}</div>
+      <div className={styles.aboutHeader}><h2>Giới thiệu</h2>{repo.permissions?.canManage && <RepositoryAboutEditor key={key} description={repo.description} endpoint={`/api/v1/repos/${encodeURIComponent(params.username)}/${encodeURIComponent(params.repo)}`} onSaved={(description) => setResult(previous => previous.key === key && previous.repository ? { ...previous, repository: { ...previous.repository, description } } : previous)} />}</div>
       <p className={!repo.description ? styles.aboutEmpty : undefined}>{repo.description || "Chưa có mô tả cho repository này."}</p>
       <div className={styles.aboutLinks}>
+        <Suspense><ReadmeShortcut endpoint={`/api/v1/repos/${encodeURIComponent(params.username)}/${encodeURIComponent(params.repo)}`} /></Suspense>
         <Link href={`/${encodeURIComponent(repo.owner.username)}/${encodeURIComponent(repo.name)}?view=commits`}><RepositoryIcon name="history" />Lịch sử hoạt động</Link>
         <Link href={`/${encodeURIComponent(repo.owner.username)}/${encodeURIComponent(repo.name)}/guide`}><RepositoryIcon name="code" />Hướng dẫn làm việc với Git</Link>
       </div>
