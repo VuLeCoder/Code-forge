@@ -184,6 +184,12 @@ const server = createServer((request, response) => {
     ];
     return response.end(JSON.stringify({ entries, path, ref: params.get("ref"), storageState: "READY", commitSha: "a".repeat(40) }));
   }
+  if (request.url?.startsWith('/api/v1/repos/alice/hello-world/overview')) {
+    return response.end(JSON.stringify({ commit: { sha: 'a'.repeat(40), subject: 'Latest change', committedAt: '2026-11-17T00:00:00Z' }, commitCount: 21, update: { username: 'alice', kind: 'PUSH' } }));
+  }
+  if (request.url?.startsWith('/api/v1/repos/alice/hello-world/files')) {
+    return response.end(JSON.stringify({ files: ['README.md', 'src/index.ts'], hasMore: false, commitSha: 'a'.repeat(40) }));
+  }
   if (request.url === "/api/v1/repos/alice/hello-world/branches") {
     return response.end(JSON.stringify({ branches: [], defaultBranch: 'main', selectedBranch: null, storageState: 'EMPTY', storageGeneration: 0 }));
   }

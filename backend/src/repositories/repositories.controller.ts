@@ -60,6 +60,20 @@ export class RepositoriesController {
     return this.repositories.read(owner, repo, request.user?.id, { ref: request.query.ref as string | undefined });
   }
 
+  @Get('repos/:owner/:repo/overview')
+  @Header('Cache-Control', 'private, no-store')
+  @UseGuards(OptionalAccessTokenGuard)
+  overview(@Param('owner') owner: string, @Param('repo') repo: string, @Req() request: Request & { user?: AuthPrincipal }) {
+    return this.repositories.read(owner, repo, request.user?.id, { overview: true, ref: request.query.ref as string | undefined });
+  }
+
+  @Get('repos/:owner/:repo/files')
+  @Header('Cache-Control', 'private, no-store')
+  @UseGuards(OptionalAccessTokenGuard)
+  files(@Param('owner') owner: string, @Param('repo') repo: string, @Req() request: Request & { user?: AuthPrincipal }) {
+    return this.repositories.read(owner, repo, request.user?.id, { files: true, ref: request.query.ref as string | undefined, q: request.query.q as string | undefined });
+  }
+
   @Get('repos/:owner/:repo/tree')
   @Header('Cache-Control', 'private, no-store')
   @UseGuards(OptionalAccessTokenGuard)

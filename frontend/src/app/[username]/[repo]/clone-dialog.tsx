@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import type { RepositorySummary } from "@/lib/repositories";
+import { RepositoryIcon } from "./repository-icon";
 import styles from "./repository.module.css";
 
 export function CloneDialog({ repository }: { repository: RepositorySummary }) {
@@ -22,7 +23,7 @@ export function CloneDialog({ repository }: { repository: RepositorySummary }) {
     catch { input.current?.focus(); input.current?.select(); setMessage("Không thể sao chép tự động. Hãy sao chép URL đã chọn."); }
   }
   return <div className={styles.codeMenu}>
-    <button ref={trigger} className="button buttonPrimary buttonSmall" onClick={open} aria-haspopup="dialog">Code <span aria-hidden="true">⌄</span></button>
+    <button ref={trigger} className="button buttonPrimary buttonSmall" onClick={open} aria-haspopup="dialog"><RepositoryIcon name="code" /> Code <RepositoryIcon name="chevron" /></button>
     <dialog ref={dialog} className={styles.cloneDialog} aria-labelledby="clone-title" onClose={() => trigger.current?.focus()}>
       <h2 id="clone-title">Clone repository</h2>
       <>

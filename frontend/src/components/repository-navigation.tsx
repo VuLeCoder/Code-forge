@@ -7,7 +7,7 @@ import { sessionFetch } from "@/lib/auth";
 type RepositoryNavigationProps = {
   owner: string;
   repository: string;
-  current: "code" | "pulls" | "settings";
+  current: "code" | "pulls" | "guide" | "settings";
   canManage?: boolean;
 };
 
@@ -47,6 +47,7 @@ export function RepositoryNavigation({ owner, repository, current, canManage }: 
     <nav className="repositoryNav" aria-label="Điều hướng repository">
       <Link aria-current={current === "code" ? "page" : undefined} href={base}>Mã nguồn</Link>
       <Link aria-current={current === "pulls" ? "page" : undefined} href={`${base}/pulls`}>Pull requests</Link>
+      <Link aria-current={current === "guide" ? "page" : undefined} href={`${base}/guide`}>Hướng dẫn</Link>
       {showSettings && <Link aria-current={current === "settings" ? "page" : undefined} href={`${base}/settings`}>Cài đặt</Link>}
     </nav>
   );

@@ -25,6 +25,7 @@ test("repository reset is clear while branch, history, and clone actions reflect
 
   await expect(page.getByRole("status").filter({ hasText: "Kho lưu trữ Git đã được khởi tạo lại" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Repository chưa có mã nguồn" })).toBeVisible();
+  await page.getByRole("link", { name: "Hướng dẫn", exact: true }).click();
   const quickSetup = page.getByRole("region", { name: "Bắt đầu với repository này" });
   await expect(quickSetup).toBeVisible();
   await expect(quickSetup).toContainText("git init -b main");
@@ -34,10 +35,10 @@ test("repository reset is clear while branch, history, and clone actions reflect
   await quickSetup.getByRole("button", { name: "Sao chép lệnh" }).click();
   await expect(quickSetup.getByRole("status")).toHaveText("Đã sao chép hướng dẫn Git.");
   await expect(page.getByRole("heading", { name: "README.md" })).toHaveCount(0);
-  await expect(page.getByRole("combobox", { name: "Branch" })).toBeDisabled();
-  await expect(page.getByRole("option", { name: "Chưa có branch" })).toBeAttached();
+  await page.getByRole("navigation", { name: "Điều hướng repository" }).getByRole("link", { name: "Mã nguồn", exact: true }).click();
+  await expect(page.getByLabel("Branch", { exact: true })).toHaveAttribute("aria-disabled", "true");
 
-  await page.getByRole("link", { name: "Lịch sử commit" }).click();
+  await page.goto("/alice/lost-project?view=commits");
   const history = page.getByRole("region", { name: "Lịch sử commit", exact: true });
   await expect(history.getByText("Git storage đã được khởi tạo lại; lịch sử trước đó không còn.", { exact: true })).toBeVisible();
   await expect(history.getByText("Chưa có commit trên branch này.", { exact: true })).toBeVisible();

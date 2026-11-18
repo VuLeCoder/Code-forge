@@ -145,3 +145,93 @@
 .cloneDialog label { display: block; margin-bottom: .5rem; }
 .cloneDialog input { width: 100%; min-width: 0; padding: .7rem; margin-bottom: .75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .cloneDialog pre { padding: .75rem; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--canvas); }
+
+/* Repository workspace: tools, source table and a quiet contextual sidebar. */
+.repositoryColumns { display: grid; grid-template-columns: minmax(0, 1fr) 256px; gap: 32px; align-items: start; margin-top: 24px; }
+.repositoryContent { min-width: 0; }
+.about { min-width: 0; overflow-wrap: anywhere; }
+.aboutHeader { display: flex; align-items: center; justify-content: space-between; min-height: 40px; gap: 12px; }
+.about h2 { font-size: 1rem; font-weight: 720; letter-spacing: -.02em; }
+.about p { margin: 16px 0 20px; color: var(--text); font-size: .9rem; line-height: 1.75; white-space: pre-wrap; }
+.about p.aboutEmpty { color: var(--muted); }
+.aboutSettings { display: grid; place-items: center; width: 32px; height: 32px; border-radius: var(--radius-sm); color: var(--muted); }
+.aboutSettings:hover { color: var(--brand-700); background: var(--brand-50); }
+.aboutLinks { display: grid; gap: 14px; padding-top: 20px; border-top: 1px solid var(--border); }
+.aboutLinks a { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: .84rem; }
+.aboutLinks a:hover { color: var(--brand-700); }
+.aboutLinks svg { flex-shrink: 0; }
+.repoToolbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+.repoToolbar .codeMenu { margin: 0; }
+.repoToolbar .codeMenu button { min-height: 40px; gap: 8px; }
+.branchPicker { position: relative; min-width: 0; max-width: 100%; }
+.branchPicker summary { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); cursor: pointer; list-style: none; font-size: .85rem; font-weight: 600; }
+.branchPicker summary::-webkit-details-marker { display: none; }
+.branchPicker summary span { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.branchPicker summary svg { flex-shrink: 0; color: var(--muted); }
+.branchPicker summary svg:last-child { width: 14px; margin-left: 4px; }
+.branchPicker summary:hover, .branchPicker[open] summary { border-color: var(--brand-600); background: var(--brand-50); }
+.branchPicker > div { position: absolute; z-index: 20; top: calc(100% + 8px); padding: 12px; width: min(280px, calc(100vw - 40px)); max-height: 350px; overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-lg); }
+.branchPicker label { color: var(--muted); font-size: .8rem; }
+.branchPicker button { display: block; width: 100%; text-align: left; padding: 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text); cursor: pointer; overflow-wrap: anywhere; }
+.branchPicker button:hover { background: var(--brand-50); color: var(--brand-700); }
+.branchPicker input { width: 100%; margin: 8px 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--canvas); color: var(--text); }
+.branchCount { display: inline-flex; align-items: center; gap: 7px; padding: 8px 0; border: 0; background: transparent; color: var(--muted); white-space: nowrap; font-size: .84rem; cursor: pointer; }
+.branchCount strong { color: var(--text); }
+.branchCount:hover { color: var(--brand-700); }
+.fileFinder { position: relative; flex: 1; min-width: 150px; max-width: 360px; margin-left: auto; }
+.fileFinder input { width: 100%; height: 40px; padding: 8px 38px 8px 36px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--canvas); color: var(--text); font: inherit; font-size: .85rem; }
+.fileFinder input::placeholder { color: var(--muted); }
+.finderIcon { position: absolute; left: 11px; top: 11px; color: var(--muted); pointer-events: none; }
+.finderShortcut { position: absolute; right: 10px; top: 9px; display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid var(--border); border-radius: 5px; color: var(--muted); font: 500 .75rem/1 ui-monospace, monospace; pointer-events: none; }
+.fileResults { position: absolute; z-index: 20; top: calc(100% + 8px); right: 0; width: min(480px, calc(100vw - 40px)); max-height: 360px; overflow: auto; padding: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow-lg); }
+.fileResults a { display: block; padding: 10px; border-radius: 6px; overflow-wrap: anywhere; font-size: .85rem; }
+.fileResults p { padding: 10px; color: var(--muted); font-size: .85rem; }
+.fileResults a[aria-current=true] { color: var(--brand-700); background: var(--brand-50); }
+.overview { position: relative; display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-md) var(--radius-md) 0 0; background: color-mix(in srgb, var(--brand-50) 40%, var(--surface)); font-size: .8rem; }
+.pushIdentity { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.pushIdentity > a { color: var(--text); font-weight: 700; }
+.pushIdentity small { color: var(--muted); font-size: .75rem; }
+.pushAvatar { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--brand-100); border-radius: 50%; background: var(--brand-50); color: var(--brand-700); font-weight: 700; }
+.unknownPusher { max-width: 150px; color: var(--muted); font-size: .75rem; }
+.commitSubject { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); }
+.commitSubject:hover { color: var(--brand-700); text-decoration: underline; }
+.commitMetadata { display: flex; align-items: center; gap: 6px; flex-shrink: 0; color: var(--muted); font-size: .75rem; }
+.commitMetadata code { color: var(--brand-700); font-size: .74rem; }
+.commitMetadata time { white-space: nowrap; }
+.overviewCopy { display: grid; place-items: center; width: 26px; height: 28px; padding: 4px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; }
+.overviewCopy svg { width: 14px; }
+.overviewCopy:hover { color: var(--brand-700); background: var(--brand-100); }
+.commitCount { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding-left: 12px; border-left: 1px solid var(--border); color: var(--text); white-space: nowrap; }
+.commitCount:hover { color: var(--brand-700); }
+.copyFeedback:empty { display: none; }
+.copyFeedback:not(:empty) { position: absolute; right: 12px; top: calc(100% + 4px); z-index: 10; max-width: calc(100% - 24px); padding: 8px 12px; border: 1px solid var(--brand-100); border-radius: 6px; background: var(--surface); color: var(--brand-700); box-shadow: var(--shadow-sm); overflow-wrap: anywhere; }
+.repositoryContent .treeList li { min-height: 46px; padding-inline: 16px; }
+.repositoryContent .sourceNav { border-top: 0; }
+@media (max-width: 1100px) {
+  .repositoryColumns { grid-template-columns: minmax(0, 1fr) 220px; gap: 24px; }
+  .overview { flex-wrap: wrap; gap: 10px; }
+  .commitSubject { flex-basis: 45%; }
+  .commitMetadata { margin-left: 36px; }
+  .commitCount { margin-left: auto; }
+}
+@media (max-width: 900px) {
+  .repositoryColumns { grid-template-columns: minmax(0, 1fr); }
+  .about { padding-top: 20px; border-top: 1px solid var(--border); }
+  .overview { flex-wrap: nowrap; }
+  .commitSubject { flex-basis: auto; }
+  .commitMetadata { margin-left: 0; }
+  .commitCount { margin-left: 0; }
+}
+@media (max-width: 600px) {
+  .repoToolbar { gap: 10px; }
+  .branchPicker { flex: 1; }
+  .branchPicker summary span { max-width: 160px; }
+  .fileFinder { order: 3; flex-basis: 100%; max-width: none; }
+  .branchCount { margin-left: auto; }
+  .overview { flex-wrap: wrap; padding: 12px; gap: 10px; }
+  .pushIdentity { max-width: 100%; flex-wrap: wrap; }
+  .commitSubject { flex-basis: 100%; order: 2; }
+  .commitMetadata { order: 3; }
+  .commitCount { margin-left: auto; border-left: 0; padding-left: 0; }
+  .repositoryContent .treeList li { padding-inline: 12px; }
+}

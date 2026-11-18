@@ -47,11 +47,12 @@ test('M3.7 private repository offers a clean URL and username/PAT instructions',
   await page.route('**/api/v1/repos/alice/private', (route) => route.fulfill({ json: { repository: {
     id: 'private', owner: { username: 'alice' }, name: 'private', visibility: 'PRIVATE', permissions: { canRead: true, canWrite: true, canManage: true }, defaultBranch: 'main', cloneUrl: 'http://localhost:3111/git/alice/private.git',
   } } }));
-  await page.goto('/alice/private');
+  await page.goto('/alice/private/guide');
   const quickSetup = page.getByRole('region', { name: 'Bắt đầu với repository này' });
   await expect(quickSetup).toBeVisible();
   await expect(quickSetup).toContainText('git clone http://localhost:3111/git/alice/private.git');
   await expect(quickSetup).toContainText('không đưa PAT vào URL');
+  await page.getByRole('navigation', { name: 'Điều hướng repository' }).getByRole('link', { name: 'Mã nguồn', exact: true }).click();
   await page.getByRole('button', { name: 'Code', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('Khi Git hỏi mật khẩu, nhập PAT');
@@ -70,7 +71,7 @@ test('M3.5 paginates through proxy, opens direct commit URLs and parents, preser
     return route.fulfill({ json: { branches, selectedBranch: branches.find((branch) => branch.name === ref) } });
   });
   await page.goto('/alice/hello-world?ref=feature%2Fdemo');
-  await page.getByRole('navigation', { name: 'Nội dung repository' }).getByRole('link', { name: 'Lịch sử commit' }).click();
+  await page.getByRole('link', { name: '21 commit', exact: true }).click();
   const history = page.getByRole('region', { name: 'Lịch sử commit', exact: true });
   await expect(history.getByRole('listitem')).toHaveCount(20);
   await history.getByRole('link', { name: 'Trang sau' }).click();
@@ -94,8 +95,9 @@ test('M3.5 paginates through proxy, opens direct commit URLs and parents, preser
   await page.goBack();
   await expect(detail.getByRole('heading', { name: 'Commit 21', exact: true })).toBeVisible();
   await detail.getByRole('link', { name: '← Về lịch sử commit' }).click();
-  await expect(page.getByLabel('Branch', { exact: true })).toHaveValue('feature/demo');
-  await page.getByLabel('Branch', { exact: true }).selectOption('main');
+  await expect(page.getByLabel('Branch', { exact: true })).toHaveAttribute('data-branch', 'feature/demo');
+  await page.getByLabel('Branch', { exact: true }).click();
+  await page.getByRole('button', { name: 'main', exact: true }).or(page.getByRole('button', { name: 'main (mặc định)', exact: true })).click();
   await expect(page).toHaveURL(/\?ref=main&view=commits$/);
   await expect(history.getByRole('listitem')).toHaveCount(20);
   const response = await page.request.get('/api/v1/repos/alice/hello-world/commits?page=1&page=2');
@@ -174,7 +176,8 @@ test('M3.4 renders branch README, GFM, safe links/images and mobile layout', asy
   await expect(page).toHaveURL(/#readme-usage$/);
   await expect(readme.locator('#readme-usage')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.getByLabel('Branch', { exact: true }).selectOption('feature/demo');
+  await page.getByLabel('Branch', { exact: true }).click();
+  await page.getByRole('button', { name: 'feature/demo', exact: true }).or(page.getByRole('button', { name: 'feature/demo (mặc định)', exact: true })).click();
   await expect(readme.getByRole('heading', { name: 'README feature/demo' })).toBeVisible();
   await expect(readme.getByRole('heading', { name: 'README main' })).toHaveCount(0);
   await page.reload();
@@ -254,7 +257,8 @@ test('M3.3 opens files through proxy with safe code, line numbers, URL and mobil
   await expect(page.getByRole('link', { name: 'hello & ü.ts', exact: true })).toBeVisible();
   await page.goBack();
   await expect(viewer).toBeVisible();
-  await page.getByLabel('Branch', { exact: true }).selectOption('main');
+  await page.getByLabel('Branch', { exact: true }).click();
+  await page.getByRole('button', { name: 'main', exact: true }).or(page.getByRole('button', { name: 'main (mặc định)', exact: true })).click();
   await expect(page).toHaveURL(/\?ref=main$/);
   await page.getByRole('link', { name: 'README.md', exact: true }).click();
   await expect(viewer.getByText('main', { exact: true })).toBeVisible();
@@ -306,23 +310,24 @@ test('M3.1 selects branches, persists URL, handles missing ref and fits mobile',
     return route.fulfill(selectedBranch ? { json: { branches, selectedBranch, defaultBranch: 'main', storageState: 'READY' } } : { status: 404, json: { error: { code: 'REF_NOT_FOUND' } } });
   });
   await page.goto('/alice/hello-world');
-  await expect(page.getByLabel('Branch', { exact: true })).toHaveValue('main');
-  await page.getByLabel('Branch', { exact: true }).selectOption('feature/demo');
+  await expect(page.getByLabel('Branch', { exact: true })).toHaveAttribute('data-branch', 'main');
+  await page.getByLabel('Branch', { exact: true }).click();
+  await page.getByRole('button', { name: 'feature/demo', exact: true }).or(page.getByRole('button', { name: 'feature/demo (mặc định)', exact: true })).click();
   await expect(page).toHaveURL(/ref=feature%2Fdemo/);
   await expect(page.getByRole('region', { name: 'Cây thư mục' }).getByText('README.md', { exact: true })).toBeVisible();
   await page.reload();
-  await expect(page.getByLabel('Branch', { exact: true })).toHaveValue('feature/demo');
+  await expect(page.getByLabel('Branch', { exact: true })).toHaveAttribute('data-branch', 'feature/demo');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.goto('/alice/hello-world?ref=missing');
   await expect(page.getByRole('main').getByRole('alert')).toContainText('Branch không tồn tại');
   await page.getByRole('button', { name: 'Về nhánh mặc định' }).click();
-  await expect(page.getByLabel('Branch', { exact: true })).toHaveValue('main');
+  await expect(page.getByLabel('Branch', { exact: true })).toHaveAttribute('data-branch', 'main');
 });
 
 test('M3.1 branch proxy renders empty state', async ({ page }) => {
   await page.route('**/api/v1/auth/*', (route) => route.fulfill({ status: 401, json: {} }));
   await page.goto('/alice/hello-world');
-  await expect(page.getByLabel('Branch', { exact: true })).toBeDisabled();
+  await expect(page.getByLabel('Branch', { exact: true })).toHaveAttribute('aria-disabled', 'true');
   await expect(page.getByRole('heading', { name: 'Repository chưa có mã nguồn' })).toBeVisible();
 });
 
@@ -337,7 +342,7 @@ test('M3.2 navigates tree URLs, breadcrumbs, parent and history through the Next
   await page.goto('/alice/hello-world?ref=feature%2Fdemo&path=src+%23+%C3%BC');
   const tree = page.getByRole('region', { name: 'Cây thư mục' });
   await expect(tree.getByText('hello & ü.ts', { exact: true })).toBeVisible();
-  await expect(page.getByLabel('Branch', { exact: true })).toHaveValue('feature/demo');
+  await expect(page.getByLabel('Branch', { exact: true })).toHaveAttribute('data-branch', 'feature/demo');
   await tree.getByRole('link', { name: 'nested/' }).click();
   await expect(tree.getByText('Thư mục chưa có nội dung.')).toBeVisible();
   await page.reload();
@@ -349,7 +354,8 @@ test('M3.2 navigates tree URLs, breadcrumbs, parent and history through the Next
   await tree.getByRole('navigation').getByRole('link', { name: 'src # ü' }).click();
   await expect(tree.getByText('hello & ü.ts', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.getByLabel('Branch', { exact: true }).selectOption('main');
+  await page.getByLabel('Branch', { exact: true }).click();
+  await page.getByRole('button', { name: 'main', exact: true }).or(page.getByRole('button', { name: 'main (mặc định)', exact: true })).click();
   await expect(page).toHaveURL(/\?ref=main$/);
   await expect(tree.getByRole('link', { name: 'src # ü/' })).toBeVisible();
   await expect(tree.getByRole('link', { name: 'link', exact: true })).toHaveCount(0);

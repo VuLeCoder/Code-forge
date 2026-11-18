@@ -116,3 +116,51 @@ describe('RepositoriesService public clone URLs', () => {
     expect(findMany).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('RepositoriesService repository overview', () => {
+  function fixture(visibility = 'PUBLIC') {
+    const sha = 'a'.repeat(40);
+    const repo = { id: 'repo', ownerId: 'owner', visibility, status: 'ACTIVE', deletedAt: null,
+      storageKey: 'storage.git', storageGeneration: 3, defaultBranch: 'develop', members: [] };
+    const tx = { $queryRaw: jest.fn(), repository: { findUniqueOrThrow: jest.fn().mockResolvedValue(repo) },
+      branchUpdate: { findFirst: jest.fn().mockResolvedValue({ actorId: 'pusher', kind: 'PUSH' }) },
+      user: { findUnique: jest.fn().mockResolvedValue({ username: 'bob' }) } };
+    const db = { repository: { findFirst: jest.fn().mockResolvedValue(repo) },
+      $transaction: jest.fn((callback: (client: typeof tx) => unknown) => callback(tx)) };
+    const branch = { name: 'develop', commitSha: sha, isDefault: true };
+    const storage = { exists: jest.fn().mockResolvedValue(true), validateRef: jest.fn(),
+      branches: jest.fn().mockResolvedValue({ branches: [branch], selectedBranch: branch }),
+      commit: jest.fn().mockResolvedValue({ sha, subject: 'Change', committedAt: '2026-11-18T00:00:00Z', author: { name: 'Someone else', email: 'secret@example.test' } }),
+      commitCount: jest.fn().mockResolvedValue(12), findFiles: jest.fn().mockResolvedValue({ files: ['src/index.ts'], hasMore: false, commitSha: sha }) };
+    const release = jest.fn();
+    const service = new RepositoriesService(db as never, {} as never, new RepositoryPolicy(), storage as never,
+      {} as never, { acquire: jest.fn().mockResolvedValue({ release }) } as never, {} as never);
+    return { service, storage, tx, release, sha };
+  }
+  it('reports the verified pusher for the exact branch, SHA and storage generation without author email', async () => {
+    const f = fixture();
+    const data = await f.service.read('owner', 'repo', undefined, { overview: true });
+    expect(data).toMatchObject({ commitCount: 12, update: { username: 'bob', kind: 'PUSH' } });
+    expect(JSON.stringify(data)).not.toContain('secret@example.test');
+    expect(f.tx.branchUpdate.findFirst).toHaveBeenCalledWith({ where: { repositoryId: 'repo', storageGeneration: 3, branch: 'develop', sha: f.sha }, orderBy: { createdAt: 'desc' } });
+    expect(f.storage.commitCount).toHaveBeenCalledWith('storage.git', f.sha);
+    expect(f.release).toHaveBeenCalledTimes(1);
+  });
+  it('does not invent a pusher for old commits', async () => {
+    const f = fixture(); f.tx.branchUpdate.findFirst.mockResolvedValueOnce(null);
+    expect(await f.service.read('owner', 'repo', undefined, { overview: true })).toMatchObject({ update: null });
+  });
+  it('rejects private reads and invalid search input before reading file paths', async () => {
+    const f = fixture('PRIVATE');
+    await expect(f.service.read('owner', 'repo', undefined, { files: true })).rejects.toThrow();
+    expect(f.storage.findFiles).not.toHaveBeenCalled();
+    const publicRepo = fixture();
+    await expect(publicRepo.service.read('owner', 'repo', undefined, { files: true, q: 'x'.repeat(256) })).rejects.toThrow();
+    expect(publicRepo.storage.findFiles).not.toHaveBeenCalled();
+  });
+  it('searches files at the selected branch head', async () => {
+    const f = fixture();
+    expect(await f.service.read('owner', 'repo', undefined, { files: true, ref: 'develop', q: 'src/' })).toMatchObject({ files: ['src/index.ts'] });
+    expect(f.storage.findFiles).toHaveBeenCalledWith('storage.git', f.sha, 'src/');
+  });
+});

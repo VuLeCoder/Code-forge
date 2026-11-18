@@ -519,6 +519,26 @@ export class GitStorageService {
     }
   }
 
+  async commitCount(key: string, sha: string) {
+    this.validateCommitSha(sha);
+    const count = Number((await this.git(['--git-dir', this.path(key), 'rev-list', '--count', sha, '--'])).stdout.trim());
+    if (!Number.isSafeInteger(count) || count < 0) throw this.commitUnavailable();
+    return count;
+  }
+
+  async findFiles(key: string, sha: string, query: string) {
+    this.validateCommitSha(sha);
+    if (typeof query !== 'string' || query.length > 255) throw new BadRequestException({ error: { code: 'INVALID_FILE_QUERY', message: 'Từ khóa quá dài.' } });
+    const output = (await this.git(['--git-dir', this.path(key), 'ls-tree', '-r', '-z', sha], undefined, 4 * 1024 * 1024)).stdout;
+    const files = output.split('\0').filter(Boolean).flatMap(record => {
+      const match = /^100(?:644|755) blob [a-f0-9]+\t([\s\S]+)$/.exec(record);
+      if (!match || !match[1]!.toLowerCase().includes(query.toLowerCase())) return [];
+      try { this.validateSourcePath(match[1]!); } catch { return []; }
+      return [match[1]!];
+    });
+    return { files: files.slice(0, 50), hasMore: files.length > 50, commitSha: sha };
+  }
+
   async branches(key: string, defaultBranch: string, ref?: string, signal?: AbortSignal) {
     if (ref !== undefined) this.validateRef(ref);
     let stdout: string;

@@ -107,6 +107,7 @@ model Repository {
   invitations       Invitation[]
   pullRequests      PullRequest[]
   mergeOperations   PullRequestMergeOperation[]
+  branchUpdates     BranchUpdate[]
   gitPushOperations GitPushOperation[]
 
   @@unique([ownerId, normalizedName])
@@ -265,4 +266,20 @@ model Session {
   @@index([familyId])
   @@index([expiresAt])
   @@map("sessions")
+}
+
+model BranchUpdate {
+  id String @id @default(uuid()) @db.Uuid
+  repositoryId String @map("repository_id") @db.Uuid
+  storageGeneration Int @map("storage_generation")
+  branch String @db.VarChar(255)
+  sha String @db.VarChar(64)
+  actorId String @map("actor_id") @db.Uuid
+  kind String @db.VarChar(16)
+  operationId String @map("operation_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  @@unique([operationId, branch])
+  @@index([repositoryId, storageGeneration, branch, sha])
+  @@map("branch_updates")
 }

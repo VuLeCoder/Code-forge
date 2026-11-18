@@ -20,6 +20,16 @@ describe('GitStorageService with real Git', () => {
   });
   afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
+  it('counts commits and finds files by case-insensitive full path', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'develop', true, 'Demo');
+    const sha = (await storage.branchSha(key, 'develop'))!;
+    expect(await storage.commitCount(key, sha)).toBe(1);
+    expect(await storage.findFiles(key, sha, 'readme')).toEqual({ files: ['README.md'], hasMore: false, commitSha: sha });
+    expect((await storage.findFiles(key, sha, 'missing')).files).toEqual([]);
+    await expect(storage.findFiles(key, sha, 'a'.repeat(256))).rejects.toThrow();
+  });
+
   it('selects a non-main first branch for HEAD and clone, idempotently, without changing established defaults', async () => {
     const key = `${randomUUID()}.git`;
     await storage.create(key, 'develop', true, 'Demo');

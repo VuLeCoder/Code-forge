@@ -88,6 +88,11 @@ export class RepositoriesService {
       });
       await this.storage.create(repo.storageKey, repo.defaultBranch, dto.initializeReadme ?? false, repo.name);
       createdKey = repo.storageKey;
+      if (dto.initializeReadme) {
+        const sha = await this.storage.branchSha(repo.storageKey, repo.defaultBranch);
+        if (sha) await tx.branchUpdate.createMany({ data: [{ repositoryId: repo.id, storageGeneration: repo.storageGeneration,
+          operationId: repo.id, actorId: userId, branch: repo.defaultBranch, sha, kind: 'INITIALIZE' }], skipDuplicates: true });
+      }
       const inspected = await this.storage.inspect(repo.storageKey, repo.defaultBranch);
       await tx.auditLog.create({ data: { actorId: userId, action: 'REPOSITORY_CREATED', targetId: repo.id,
         details: { repositoryId: repo.id, visibility: repo.visibility, initializedWithReadme: dto.initializeReadme ?? false } } });
@@ -99,9 +104,10 @@ export class RepositoriesService {
     }
   }
 
-  async read(owner: string, name: string, userId?: string, branchQuery?: { ref?: string; path?: string; tree?: boolean; blob?: boolean; image?: boolean; commits?: boolean; sha?: string; page?: string; snapshot?: string }) {
+  async read(owner: string, name: string, userId?: string, branchQuery?: { overview?: boolean; files?: boolean; q?: string; ref?: string; path?: string; tree?: boolean; blob?: boolean; image?: boolean; commits?: boolean; sha?: string; page?: string; snapshot?: string }) {
     const repo = await this.load(this.db, owner, name, userId);
     this.policy.assertRead(repo, userId);
+    if (branchQuery?.files && branchQuery.q !== undefined && (typeof branchQuery.q !== 'string' || branchQuery.q.length > 255)) throw new BadRequestException({ error: { code: 'INVALID_FILE_QUERY', message: 'Từ khóa không hợp lệ.' } });
     if (branchQuery?.sha !== undefined) this.storage.validateCommitSha(branchQuery.sha);
     if (branchQuery?.snapshot !== undefined) this.storage.validateCommitSha(branchQuery.snapshot);
     if (branchQuery?.commits) this.storage.validateCommitPage(branchQuery.page);
@@ -126,6 +132,20 @@ export class RepositoriesService {
           catch (error) { return { readError: error }; }
         }
         const result = await this.storage.branches(current.storageKey, current.defaultBranch);
+        if (branchQuery.overview || branchQuery.files) {
+          try {
+            const selected = result.branches.find((branch) => branch.name === (branchQuery.ref ?? current.defaultBranch));
+            if (!selected && (branchQuery.ref !== undefined || result.branches.length)) throw new NotFoundException({ error: { code: 'REF_NOT_FOUND', message: 'Branch không tồn tại.' } });
+            if (branchQuery.files) return selected ? await this.storage.findFiles(current.storageKey, selected.commitSha, branchQuery.q ?? '') : { files: [], hasMore: false, commitSha: null };
+            if (!selected) return { selectedBranch: null, commit: null, commitCount: 0, update: null };
+            const commit = await this.storage.commit(current.storageKey, selected.commitSha);
+            const commitCount = await this.storage.commitCount(current.storageKey, selected.commitSha);
+            const update = await tx.branchUpdate.findFirst({ where: { repositoryId: current.id, storageGeneration: current.storageGeneration, branch: selected.name, sha: selected.commitSha }, orderBy: { createdAt: 'desc' } });
+            const actor = update ? await tx.user.findUnique({ where: { id: update.actorId }, select: { username: true } }) : null;
+            return { selectedBranch: selected, commit: { sha: commit.sha, subject: commit.subject, committedAt: commit.committedAt }, commitCount,
+              update: update && actor ? { kind: update.kind, username: actor.username } : null };
+          } catch (error) { return { readError: error }; }
+        }
         if (branchQuery.commits) {
           try {
             const selected = result.branches.find((branch) => branch.name === (branchQuery.ref ?? current.defaultBranch));

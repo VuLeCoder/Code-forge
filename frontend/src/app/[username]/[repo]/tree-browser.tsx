@@ -148,7 +148,7 @@ export function TreeBrowser({
       className={styles.source}
       aria-label={isBlob ? "Nội dung file" : "Cây thư mục"}
     >
-      <div className={styles.sourceNav}>
+      {path && <div className={styles.sourceNav}>
         <nav className={styles.breadcrumb} aria-label="Đường dẫn mã nguồn">
           <Link
             href={href("")}
@@ -183,7 +183,7 @@ export function TreeBrowser({
             ← Thư mục cha
           </Link>
         )}
-      </div>
+      </div>}
       {result.key !== key ? (
         <p role="status">
           {isBlob ? "Đang tải file…" : "Đang tải cây thư mục…"}

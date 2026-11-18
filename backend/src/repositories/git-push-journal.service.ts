@@ -1,3 +1,4 @@
+import { recordBranchUpdates } from './branch-update';
 import { ConflictException, Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { Prisma } from '@prisma/client';
@@ -130,6 +131,7 @@ export class GitPushJournalService {
         status: { in: [...UNRESOLVED] }, storageGeneration: operation.storageGeneration, errorCode: CHILD_SUCCEEDED },
         data: { status: 'COMPLETED', changedRefCount, errorCode: null, beforeRefs: Prisma.DbNull } });
       if (!updated.count) return false;
+      await recordBranchUpdates(tx, operation, beforeRefs, afterRefs);
       if (defaultBranch !== undefined) await tx.repository.update({ where: { id: operation.repositoryId }, data: { defaultBranch } });
       await tx.auditLog.create({ data: { actorId: operation.actorId, action: 'GIT_PUSH_COMPLETED', targetId: operation.repositoryId,
         details: { operationId: operation.operationId, repositoryId: operation.repositoryId,

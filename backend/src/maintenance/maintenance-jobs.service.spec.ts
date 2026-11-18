@@ -31,7 +31,7 @@ function makeFixture(operation?: Partial<MergeOperation>) {
   const tx = {
     pullRequest: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
     pullRequestMergeOperation: { update: jest.fn().mockResolvedValue({}) },
-    auditLog: { create: jest.fn().mockResolvedValue({}) },
+    branchUpdate: { createMany: jest.fn().mockResolvedValue({ count: 1 }) }, auditLog: { create: jest.fn().mockResolvedValue({}) },
   };
   const db = {
     $executeRaw: jest.fn().mockResolvedValue(0),

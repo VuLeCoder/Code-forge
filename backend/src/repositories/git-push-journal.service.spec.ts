@@ -16,7 +16,7 @@ describe('GitPushJournalService', () => {
       beforeRefs: { 'refs/heads/main': 'a'.repeat(40) }, createdAt: new Date(0), repository, ...overrides };
     const tx = {
       gitPushOperation: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-      auditLog: { create: jest.fn().mockResolvedValue({}) },
+      branchUpdate: { createMany: jest.fn().mockResolvedValue({ count: 1 }) }, auditLog: { create: jest.fn().mockResolvedValue({}) },
       repository: { update: jest.fn().mockResolvedValue({}) },
     };
     const db = {
@@ -45,6 +45,7 @@ describe('GitPushJournalService', () => {
     f.storage.initializeDefaultBranch.mockResolvedValue('develop');
     await expect(f.service.finish(operationId, after)).resolves.toBe(true);
     expect(f.storage.initializeDefaultBranch).toHaveBeenCalledWith('repo.git', {}, after);
+    expect(f.tx.branchUpdate.createMany).toHaveBeenCalledWith({ data: [{ operationId, repositoryId, storageGeneration: 4, actorId, branch: 'develop', sha: 'b'.repeat(40), kind: 'PUSH' }], skipDuplicates: true });
     expect(f.tx.repository.update).toHaveBeenCalledWith({ where: { id: repositoryId }, data: { defaultBranch: 'develop' } });
     f.storage.initializeDefaultBranch.mockRejectedValueOnce(new Error('HEAD unavailable'));
     await expect(f.service.finish(operationId, after)).rejects.toThrow('HEAD unavailable');

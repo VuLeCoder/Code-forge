@@ -1,3 +1,4 @@
+import { recordBranchUpdates } from '../repositories/branch-update';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
@@ -140,6 +141,7 @@ export class AdminGitJournalService {
         changedRefCount: outcome === 'COMPLETED' ? changedRefCount : null, beforeRefs: Prisma.DbNull,
       } });
       if (!updated.count) return null;
+      if (outcome === 'COMPLETED') await recordBranchUpdates(tx, operation, before!, after);
       if (defaultBranch !== undefined) await tx.repository.update({ where: { id: operation.repositoryId }, data: { defaultBranch } });
       if (outcome === 'COMPLETED') await tx.auditLog.create({ data: { actorId: operation.actorId, action: 'GIT_PUSH_COMPLETED',
         targetId: operation.repositoryId, details: { operationId, repositoryId: operation.repositoryId,
@@ -189,6 +191,8 @@ export class AdminGitJournalService {
         : { status: 'FAILED', errorCode: 'REF_NOT_UPDATED' } });
       if (!updated.count) return null;
       if (outcome === 'COMPLETED') {
+        await tx.branchUpdate.createMany({ data: [{ repositoryId: operation.repositoryId, storageGeneration: operation.storageGeneration,
+          operationId, actorId: operation.actorId, branch: operation.pullRequest.targetBranch, sha: operation.candidateSha!, kind: 'MERGE' }], skipDuplicates: true });
         await tx.pullRequest.updateMany({ where: { id: operation.pullRequestId, status: { not: 'MERGED' } },
           data: { status: 'MERGED', version: { increment: 1 }, mergedById: operation.actorId,
             mergedAt: new Date(), mergeCommitSha: operation.candidateSha } });

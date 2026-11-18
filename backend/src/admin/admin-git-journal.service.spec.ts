@@ -43,7 +43,7 @@ describe('AdminGitJournalService', () => {
         findUniqueOrThrow: jest.fn().mockResolvedValue(terminal) },
       pullRequestMergeOperation: { findUnique: mergeFind, count: jest.fn().mockResolvedValue(0), updateMany: mergeUpdate,
         findUniqueOrThrow: jest.fn().mockResolvedValue(terminal) },
-      pullRequest: { updateMany: pullUpdate }, auditLog: { create: auditCreate },
+      pullRequest: { updateMany: pullUpdate }, branchUpdate: { createMany: jest.fn().mockResolvedValue({ count: 1 }) }, auditLog: { create: auditCreate },
     };
     const transaction = jest.fn((callback: (tx: typeof db) => unknown) => Promise.resolve(callback(db)));
     Object.assign(db, { $transaction: transaction });

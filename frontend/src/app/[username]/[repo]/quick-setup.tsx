@@ -36,7 +36,7 @@ export function QuickSetup({ repository }: { repository: QuickSetupRepository })
     }
   }
 
-  return <details className={styles.quickSetup} open={isEmpty} role="region" aria-labelledby="quick-setup-title">
+  return <details className={styles.quickSetup} open role="region" aria-labelledby="quick-setup-title">
     <summary className={styles.quickSetupSummary}>
       <span><strong>{isEmpty ? "Quick setup" : "Hướng dẫn clone và thiết lập"}</strong><small>{isEmpty ? "Tạo commit đầu tiên và push từ máy local" : "Mở khi cần các lệnh Git cơ bản"}</small></span>
       <span aria-hidden="true" className={styles.summaryChevron} />

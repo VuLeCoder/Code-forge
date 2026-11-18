@@ -317,6 +317,8 @@ export class PullRequestsService {
           const updated = await tx.pullRequest.updateMany({ where: { id: pullRequest.id, version: dto.version, status: 'OPEN' },
             data: { status: 'MERGED', version: { increment: 1 }, mergedById: userId, mergedAt: new Date(), mergeCommitSha: candidateSha } });
           if (!updated.count) throw new ConflictException({ error: { code: 'MERGE_METADATA_RECONCILING', message: 'Git đã merge; metadata đang được đối soát.' } });
+          await tx.branchUpdate.createMany({ data: [{ repositoryId: repo.id, storageGeneration: repo.storageGeneration,
+            operationId: dto.operationId, actorId: userId, branch: pullRequest.targetBranch, sha: candidateSha, kind: 'MERGE' }], skipDuplicates: true });
           await tx.auditLog.create({ data: { actorId: userId, action: 'PULL_REQUEST_MERGED', targetId: pullRequest.id,
             details: { repositoryId: repo.id, number: pullRequest.number, operationId: dto.operationId, mergeCommitSha: candidateSha } } });
           await tx.pullRequestMergeOperation.update({ where: { operationId: dto.operationId },
