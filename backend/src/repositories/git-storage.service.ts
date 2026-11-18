@@ -708,6 +708,19 @@ export class GitStorageService {
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
   }
 
+  // Called under the repository lock, before the push journal becomes terminal.
+  // Retrying after a SQL failure is safe: symbolic-ref does not move a branch.
+  async initializeDefaultBranch(key: string, before: Record<string, string>, after: Record<string, string>) {
+    if (Object.keys(before).length !== 0) return undefined;
+    const refs = Object.keys(after);
+    if (refs.length !== 1) throw new Error('Initial push must create exactly one branch');
+    if (!refs[0]!.startsWith('refs/heads/')) throw new Error('Invalid initial branch');
+    const branch = refs[0]!.slice('refs/heads/'.length);
+    this.validateRef(branch);
+    await this.git(['--git-dir', this.path(key), 'symbolic-ref', 'HEAD', `refs/heads/${branch}`]);
+    return branch;
+  }
+
   async create(key: string, branch: string, readme: boolean, name: string) {
     const root = this.root();
     const target = this.path(key);

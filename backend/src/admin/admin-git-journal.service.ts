@@ -129,6 +129,8 @@ export class AdminGitJournalService {
     if (changedRefCount > 0 && operation.errorCode !== 'GIT_CHILD_SUCCEEDED') {
       this.unresolved('GIT_OUTCOME_UNKNOWN', 'Refs đã thay đổi nhưng journal không chứng minh được tiến trình Git đã thành công.');
     }
+    const defaultBranch = changedRefCount > 0
+      ? await this.storage.initializeDefaultBranch(operation.repository.storageKey, before!, after) : undefined;
     const outcome = changedRefCount === 0 ? 'FAILED' : 'COMPLETED';
     const resolutionCode = changedRefCount === 0 ? 'REFS_UNCHANGED' : 'CHILD_SUCCEEDED_REFS_CHANGED';
     const result = await this.db.$transaction(async (tx) => {
@@ -138,6 +140,7 @@ export class AdminGitJournalService {
         changedRefCount: outcome === 'COMPLETED' ? changedRefCount : null, beforeRefs: Prisma.DbNull,
       } });
       if (!updated.count) return null;
+      if (defaultBranch !== undefined) await tx.repository.update({ where: { id: operation.repositoryId }, data: { defaultBranch } });
       if (outcome === 'COMPLETED') await tx.auditLog.create({ data: { actorId: operation.actorId, action: 'GIT_PUSH_COMPLETED',
         targetId: operation.repositoryId, details: { operationId, repositoryId: operation.repositoryId,
           storageGeneration: operation.storageGeneration, changedRefCount } } });

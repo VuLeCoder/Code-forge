@@ -68,7 +68,7 @@ export class GitPushJournalService {
         data: { status: 'FAILED', errorCode: 'NO_REF_CHANGE', beforeRefs: Prisma.DbNull } });
       return true;
     }
-    return this.complete(operation, changedRefCount);
+    return this.complete(operation, changedRefCount, beforeRefs, afterRefs);
   }
 
   async fail(operationId: string, errorCode: string) {
@@ -120,15 +120,17 @@ export class GitPushJournalService {
         data: { status: 'FAILED', errorCode: 'NO_REF_CHANGE', beforeRefs: Prisma.DbNull } });
       return;
     }
-    await this.complete(operation, changedRefCount);
+    await this.complete(operation, changedRefCount, beforeRefs, afterRefs);
   }
 
-  private async complete(operation: { operationId: string; repositoryId: string; actorId: string; storageGeneration: number }, changedRefCount: number) {
+  private async complete(operation: { operationId: string; repositoryId: string; actorId: string; storageGeneration: number; repository: { storageKey: string } }, changedRefCount: number, beforeRefs: Record<string, string>, afterRefs: Record<string, string>) {
+    const defaultBranch = await this.storage.initializeDefaultBranch(operation.repository.storageKey, beforeRefs, afterRefs);
     return this.db.$transaction(async (tx) => {
       const updated = await tx.gitPushOperation.updateMany({ where: { operationId: operation.operationId,
         status: { in: [...UNRESOLVED] }, storageGeneration: operation.storageGeneration, errorCode: CHILD_SUCCEEDED },
         data: { status: 'COMPLETED', changedRefCount, errorCode: null, beforeRefs: Prisma.DbNull } });
       if (!updated.count) return false;
+      if (defaultBranch !== undefined) await tx.repository.update({ where: { id: operation.repositoryId }, data: { defaultBranch } });
       await tx.auditLog.create({ data: { actorId: operation.actorId, action: 'GIT_PUSH_COMPLETED', targetId: operation.repositoryId,
         details: { operationId: operation.operationId, repositoryId: operation.repositoryId,
           storageGeneration: operation.storageGeneration, changedRefCount } } });

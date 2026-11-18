@@ -46,7 +46,7 @@ export function QuickSetup({ repository }: { repository: QuickSetupRepository })
       <div>
         <span className="eyebrow">Quick setup</span>
         <h2 id="quick-setup-title">Bắt đầu với repository này</h2>
-        <p>{isEmpty ? "Tạo commit đầu tiên từ máy local rồi push lên Code Forge." : "Clone repository về máy để bắt đầu làm việc như trên GitHub."}</p>
+        <p>{isEmpty ? "Tạo commit đầu tiên từ máy local rồi push lên Code Forge. Nhánh được push đầu tiên sẽ là nhánh mặc định; lần push đầu chỉ gửi một nhánh." : "Clone repository về máy để bắt đầu làm việc như trên GitHub."}</p>
       </div>
       <button className="button buttonSecondary" type="button" onClick={copyCommands} disabled={!resolvedUrl}>Sao chép lệnh</button>
     </div>
@@ -57,7 +57,7 @@ export function QuickSetup({ repository }: { repository: QuickSetupRepository })
         <ol className={styles.quickSetupSteps}>
           {isEmpty ? <>
             <li>Trong thư mục dự án, khởi tạo Git và thêm remote:</li>
-            <li>Thêm file, tạo commit đầu tiên, rồi push lên branch <code>{branch}</code>.</li>
+            <li>Thêm file, tạo commit đầu tiên, rồi push lên branch <code>{branch}</code> hoặc tên nhánh bạn chọn.</li>
           </> : <>
             <li>Clone repository về máy:</li>
             <li>Chuyển vào thư mục và tải commit mới nhất bằng <code>git fetch origin</code>.</li>

@@ -54,6 +54,11 @@ process.stdin.on('data', (chunk) => {
 process.stdin.on('end', () => {
   const lines = input.trim().split('\n').filter(Boolean);
   if (!lines.length || lines.length > 1000) reject('danh sách cập nhật ref không hợp lệ.');
+  const existingRefs = git(['for-each-ref', '--format=%(refname)', 'refs/heads/']);
+  if (existingRefs === null) reject('không thể kiểm tra branch.');
+  if (!existingRefs.trim() && lines.length !== 1) {
+    reject('lần push đầu tiên cần tạo đúng một branch để chọn nhánh mặc định.');
+  }
   const proposed = [];
   const updates = new Map();
   for (const line of lines) {

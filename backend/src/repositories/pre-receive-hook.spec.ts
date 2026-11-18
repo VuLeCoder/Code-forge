@@ -66,6 +66,21 @@ describe('pre-receive branch protection', () => {
     expect(run(zero, first, 'refs/heads/feature/topic', false).status).toBe(0);
   });
 
+  it('accepts a non-main first branch and rejects an ambiguous multi-branch initial push', () => {
+    const first = git(['-C', work, 'rev-parse', 'HEAD^']);
+    const zero = '0'.repeat(first.length);
+    git(['--git-dir', bare, 'update-ref', '-d', 'refs/heads/main']);
+    expect(run(zero, first, 'refs/heads/develop', true).status).toBe(0);
+    const result = spawnSync(process.execPath, [hook], {
+      input: `${zero} ${first} refs/heads/develop\n${zero} ${first} refs/heads/topic\n`,
+      encoding: 'utf8', env: { ...process.env, GIT_DIR: bare, CODE_FORGE_DEFAULT_BRANCH: 'main',
+        CODE_FORGE_ALLOW_DEFAULT_BRANCH_INITIALIZATION: 'true', CODE_FORGE_MAX_FILE_BYTES: '1048576',
+        CODE_FORGE_MAX_REPOSITORY_BYTES: '4194304' },
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('lần push đầu tiên cần tạo đúng một branch');
+  });
+
   it('accepts a 255-byte branch suffix and rejects a 256-byte suffix before ref update', () => {
     const first = git(['-C', work, 'rev-parse', 'HEAD^']);
     const zero = '0'.repeat(first.length);

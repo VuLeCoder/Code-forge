@@ -20,6 +20,21 @@ describe('GitStorageService with real Git', () => {
   });
   afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
+  it('selects a non-main first branch for HEAD and clone, idempotently, without changing established defaults', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'develop', true, 'Demo');
+    const refs = await storage.snapshotRefs(key);
+    execFileSync('git', ['--git-dir', join(root, key), 'symbolic-ref', 'HEAD', 'refs/heads/main']);
+    expect(await storage.initializeDefaultBranch(key, {}, refs)).toBe('develop');
+    expect(await storage.initializeDefaultBranch(key, {}, refs)).toBe('develop');
+    const clone = join(root, 'clone');
+    execFileSync('git', ['clone', join(root, key), clone]);
+    expect(execFileSync('git', ['-C', clone, 'branch', '--show-current'], { encoding: 'utf8' }).trim()).toBe('develop');
+    expect(await storage.initializeDefaultBranch(key, refs, { ...refs, 'refs/heads/topic': Object.values(refs)[0]! })).toBeUndefined();
+    expect(execFileSync('git', ['--git-dir', join(root, key), 'symbolic-ref', 'HEAD'], { encoding: 'utf8' }).trim()).toBe('refs/heads/develop');
+    await expect(storage.initializeDefaultBranch(key, {}, { ...refs, 'refs/heads/topic': Object.values(refs)[0]! })).rejects.toThrow('exactly one branch');
+  });
+
   it('removes only old app-owned staging and README directories, safely and in bounded idempotent batches', async () => {
     const gitRoot = join(root, 'git-root');
     const readmeRoot = join(root, 'readme-root');
