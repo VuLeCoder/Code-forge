@@ -146,7 +146,7 @@ export function SignedInDashboard() {
 
           <section className={`${styles.panel} ${styles.quickPanel}`} aria-labelledby="quick-actions-title">
             <div className={styles.panelHeader}><div><h2 id="quick-actions-title">Thao tác nhanh</h2></div></div>
-            <nav aria-label="Thao tác nhanh"><Link href="/new"><span aria-hidden="true">＋</span><div><strong>Tạo repository</strong><small>Khởi tạo một dự án mới</small></div><i aria-hidden="true">→</i></Link><Link href="/settings/tokens"><span aria-hidden="true">⌁</span><div><strong>Personal access token</strong><small>Quản lý quyền truy cập Git</small></div><i aria-hidden="true">→</i></Link><Link href="/invitations"><span aria-hidden="true">✉</span><div><strong>Lời mời cộng tác</strong><small>Xem các lời mời đang chờ</small></div><i aria-hidden="true">→</i></Link></nav>
+            <nav aria-label="Thao tác nhanh"><Link href="/new"><span aria-hidden="true">＋</span><div><strong>Tạo repository</strong><small>Khởi tạo một dự án mới</small></div><i aria-hidden="true">→</i></Link><Link href="/settings#tokens"><span aria-hidden="true">⌁</span><div><strong>Personal access token</strong><small>Quản lý quyền truy cập Git</small></div><i aria-hidden="true">→</i></Link><Link href="/invitations"><span aria-hidden="true">✉</span><div><strong>Lời mời cộng tác</strong><small>Xem các lời mời đang chờ</small></div><i aria-hidden="true">→</i></Link></nav>
           </section>
         </aside>
       </div>

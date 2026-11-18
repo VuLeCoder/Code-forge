@@ -60,7 +60,7 @@ test('M3.7 private repository offers a clean URL and username/PAT instructions',
   await expect(dialog).toContainText('repo:write');
   await expect(dialog).toContainText('git push origin ten-branch');
   await expect(dialog.getByLabel('URL clone')).toHaveValue('http://localhost:3111/git/alice/private.git');
-  await expect(dialog.getByRole('link', { name: 'Tạo hoặc quản lý PAT' })).toHaveAttribute('href', '/settings/tokens');
+  await expect(dialog.getByRole('link', { name: 'Tạo hoặc quản lý PAT' })).toHaveAttribute('href', '/settings#tokens');
 });
 
 test('M3.5 paginates through proxy, opens direct commit URLs and parents, preserves branch and fits mobile', async ({ page }) => {

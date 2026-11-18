@@ -27,8 +27,9 @@ test('M3.7 PAT UI creates once, copies, hides on reload, confirms revoke and fit
   });
   await page.goto('/settings/tokens');
   await expect(page.getByText('Chưa có token nào.')).toBeVisible();
-  await page.getByLabel('Tên token').fill('Laptop');
   await page.getByRole('button', { name: 'Tạo token', exact: true }).click();
+  await page.getByLabel('Tên token').fill('Laptop');
+  await page.getByRole('dialog').getByRole('button', { name: 'Tạo token', exact: true }).click();
   await expect(page.getByLabel('Secret PAT')).toHaveValue('test-one-time-secret');
   await expect(page.getByLabel('Secret PAT')).toBeFocused();
   await expect(page.getByRole('button', { name: 'Tạo token', exact: true })).toBeDisabled();
@@ -47,7 +48,7 @@ test('M3.7 PAT UI creates once, copies, hides on reload, confirms revoke and fit
   expect(revoked).toBe(0);
   await page.getByRole('button', { name: 'Thu hồi Laptop', exact: true }).click();
   await page.getByRole('button', { name: 'Xác nhận thu hồi', exact: true }).click();
-  await expect(page.getByRole('dialog')).not.toBeVisible();
+  await expect(page.getByRole('dialog', { name: /Thu hồi token/ })).not.toBeVisible();
   await expect(page.getByRole('status')).toHaveText('Đã thu hồi token.');
   expect(revoked).toBe(1);
 });
@@ -55,7 +56,7 @@ test('M3.7 PAT UI creates once, copies, hides on reload, confirms revoke and fit
 test('M3.7 PAT guard, loading, error retry, creation failure and expiry state', async ({ page }) => {
   await page.route('**/api/v1/auth/*', (route) => route.fulfill({ status: 401, json: {} }));
   await page.goto('/settings/tokens');
-  await expect(page).toHaveURL(/login\?returnTo=%2Fsettings%2Ftokens/);
+  await expect(page).toHaveURL(/login\?returnTo=%2Fsettings/);
   await page.unroute('**/api/v1/auth/*');
   await page.route('**/api/v1/auth/me', (route) => route.fulfill({ json: { user } }));
   let release: () => void = () => {};
@@ -70,9 +71,12 @@ test('M3.7 PAT guard, loading, error retry, creation failure and expiry state', 
     : route.fulfill({ json: { tokens: [{ ...token, expiresAt: '2000-01-01T00:00:00Z' }] } }));
   await page.getByRole('button', { name: 'Tải lại danh sách' }).click();
   await expect(page.getByText('Đã hết hạn', { exact: false })).toBeVisible();
-  await page.getByLabel('Tên token').fill('New');
   await page.getByRole('button', { name: 'Tạo token', exact: true }).click();
-  await expect(page.getByRole('main').getByRole('alert')).toHaveText('Đã đạt giới hạn token');
+  await page.getByLabel('Tên token').fill('New');
+  await page.getByRole('dialog').getByRole('button', { name: 'Tạo token', exact: true }).click();
+  await expect(page.getByRole('dialog').getByRole('alert')).toHaveText('Đã đạt giới hạn token');
+  await page.getByRole('dialog').getByRole('button', { name: 'Hủy', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Tạo token', exact: true })).toBeFocused();
   await expect(page.getByLabel('Secret PAT')).toHaveCount(0);
 });
 

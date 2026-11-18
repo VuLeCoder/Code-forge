@@ -27,7 +27,7 @@ export function CloneDialog({ repository }: { repository: RepositorySummary }) {
     <dialog ref={dialog} className={styles.cloneDialog} aria-labelledby="clone-title" onClose={() => trigger.current?.focus()}>
       <h2 id="clone-title">Clone repository</h2>
       <>
-        {isPublic ? <p>Sao chép repository về máy qua HTTP(S). Repository công khai không cần đăng nhập.</p> : <p>Repository riêng tư cần username tài khoản của bạn và PAT có quyền <code>repo:read</code>. Khi Git hỏi mật khẩu, nhập PAT; phiên đăng nhập web không thay thế PAT. <Link href="/settings/tokens">Tạo hoặc quản lý PAT</Link>.</p>}
+        {isPublic ? <p>Sao chép repository về máy qua HTTP(S). Repository công khai không cần đăng nhập.</p> : <p>Repository riêng tư cần username tài khoản của bạn và PAT có quyền <code>repo:read</code>. Khi Git hỏi mật khẩu, nhập PAT; phiên đăng nhập web không thay thế PAT. <Link href="/settings#tokens">Tạo hoặc quản lý PAT</Link>.</p>}
         <label htmlFor="clone-url">URL clone</label>
         <input ref={input} id="clone-url" readOnly value={url} onFocus={(event) => event.target.select()} />
         <button className="button buttonSecondary" onClick={copy}>Sao chép URL</button>

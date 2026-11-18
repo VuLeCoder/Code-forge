@@ -68,6 +68,7 @@ model User {
   normalizedUsername   String                @unique @map("normalized_username") @db.VarChar(39)
   email                String                @db.VarChar(320)
   normalizedEmail      String                @unique @map("normalized_email") @db.VarChar(320)
+  avatarUrl            String?               @map("avatar_url") @db.Text
   passwordHash         String                @map("password_hash") @db.VarChar(255)
   systemRole           SystemRole            @default(USER) @map("system_role")
   status               UserStatus            @default(ACTIVE)

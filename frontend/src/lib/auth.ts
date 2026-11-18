@@ -2,6 +2,7 @@ export type AuthUser = {
   id: string;
   username: string;
   email: string;
+  avatarUrl?: string | null;
   systemRole: "USER" | "ADMIN";
   status: "ACTIVE" | "LOCKED";
   createdAt: string;

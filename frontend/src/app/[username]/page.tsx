@@ -1,3 +1,4 @@
+import { Avatar } from "@/components/avatar";
 import { notFound } from "next/navigation";
 import { headers } from "next/headers";
 import styles from "./profile.module.css";
@@ -19,10 +20,10 @@ export default async function ProfilePage({ params, searchParams }: { params: Pr
   }
   if (response.status === 404) notFound();
   if (!response.ok) throw new Error("Không thể tải hồ sơ lúc này.");
-  const { user, repositories } = await response.json() as { user: { username: string; createdAt: string }; repositories: RepositorySummary[] };
+  const { user, repositories } = await response.json() as { user: { username: string; createdAt: string; avatarUrl?: string | null }; repositories: RepositorySummary[] };
   return <main className={`container ${styles.layout}`}>
     <aside className={styles.identity}>
-      <div className={styles.avatar} aria-hidden="true">{user.username.slice(0, 1).toUpperCase()}</div>
+      <Avatar className={styles.avatar} username={user.username} avatarUrl={user.avatarUrl} />
       <span className="eyebrow">Hồ sơ</span>
       <h1>{user.username}</h1>
       <p className={styles.joined}>Tham gia {new Intl.DateTimeFormat("vi-VN", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(user.createdAt))}</p>

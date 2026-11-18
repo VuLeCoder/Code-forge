@@ -70,7 +70,7 @@ export function QuickSetup({ repository }: { repository: QuickSetupRepository })
         <code className={styles.cloneUrl}>{resolvedUrl || "URL clone chưa được cung cấp"}</code>
         {isPrivate ? <p>Repository riêng tư cần username tài khoản và PAT. Khi Git hỏi mật khẩu, nhập PAT có quyền <code>repo:read</code>{repository.permissions.canWrite ? ", repo:write" : ""}; không đưa PAT vào URL.</p> : <p>Repository công khai có thể clone mà không cần đăng nhập.</p>}
         {repository.permissions.canWrite ? <p>Bạn có quyền ghi. Push branch bằng <code>git push origin ten-branch</code>.</p> : <p>Bạn đang có quyền chỉ đọc; cần WRITE hoặc OWNER để push.</p>}
-        {isPrivate && <Link href="/settings/tokens">Tạo hoặc quản lý PAT</Link>}
+        {isPrivate && <Link href="/settings#tokens">Tạo hoặc quản lý PAT</Link>}
       </aside>
     </div>
       <p className={styles.quickSetupStatus} role="status" aria-live="polite">{message}</p>
