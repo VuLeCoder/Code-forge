@@ -1,4 +1,4 @@
-.page { min-height: 70vh; padding-block: 24px 64px; }
+.page { min-height: 70vh; padding-block: var(--page-space); }
 .page :focus-visible { outline: 2px solid var(--brand-600); outline-offset: 2px; }
 .page [tabindex="-1"] { scroll-margin-block: 88px; }
 .breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: .875rem; overflow-wrap: anywhere; }

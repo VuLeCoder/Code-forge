@@ -1,4 +1,4 @@
-.shell { padding-block: 2.5rem 4rem; display: grid; gap: 1.5rem; }
+.shell { padding-block: var(--page-space); display: grid; gap: 1.5rem; }
 .heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
 .heading h1 { font-size: clamp(1.7rem, 4vw, 2.25rem); letter-spacing: -.035em; }
 .heading p { max-width: 52rem; color: var(--muted); line-height: 1.6; margin-top: .65rem; }
@@ -52,7 +52,7 @@
 .dialogActions { justify-content: flex-end; flex-wrap: wrap; }
 
 @media (max-width: 720px) {
-  .shell { padding-block: 1.5rem 3rem; }
+
   .heading { flex-direction: column; }
   .statsGrid { grid-template-columns: 1fr; }
   .releaseControl { align-items: stretch; flex-direction: column; }

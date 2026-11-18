@@ -1,6 +1,6 @@
 .page {
   min-height: 70vh;
-  padding-block: 24px 72px;
+  padding-block: var(--page-space);
 }
 .page > p { color: var(--muted); margin: 14px 0 24px; line-height: 1.7; }
 .repositoryTitle { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; color: var(--muted); font-size: 1rem; }
@@ -73,6 +73,7 @@
 .commitPanel a { color: var(--brand-700); }
 .commitPanel button { margin: 12px 12px 12px 0; }
 .commitHistory { min-width: 0; padding-block: 8px; }
+.historyHeading { margin-bottom: 16px; }
 .commitHistory > h2 { margin: 0 0 28px; padding-bottom: 20px; border-bottom: 1px solid var(--border); font-size: 1.8rem; letter-spacing: -.03em; }
 .commitDay { position: relative; margin: 0 0 24px 10px; padding: 0 0 0 28px; border-left: 2px solid var(--border); }
 .commitDay h3 { display: flex; align-items: center; gap: 14px; margin: 0 0 16px -39px; background: var(--canvas); color: var(--text-secondary); font-size: .95rem; font-weight: 500; }

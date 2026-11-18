@@ -1,4 +1,4 @@
-.page { width: min(1280px, calc(100% - 48px)); padding-block: 24px 64px; min-height: 70vh; }
+.page { padding-block: var(--page-space); min-height: 70vh; }
 .page h1 { margin-top: 14px; font-size: clamp(1.55rem, 4vw, 2.05rem); letter-spacing: -.03em; overflow-wrap: anywhere; }
 .page > p, .intro { color: var(--muted); line-height: 1.6; margin: 8px 0 20px; }
 .back { display: inline-flex; align-items: center; min-height: 36px; color: var(--brand-700); font-weight: 650; }
@@ -50,7 +50,7 @@
 .inviteForm input { flex: 1 1 220px; min-width: 160px; min-height: 40px; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
 .inviteForm select { min-height: 40px; padding: 8px 30px 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
 @media (max-width: 600px) {
-  .page { width: calc(100% - 28px); padding-block: 18px 48px; }
+
   .card, .dialog { padding: 16px; }
   .memberItem { align-items: flex-start; }
   .memberInfo { width: 100%; }

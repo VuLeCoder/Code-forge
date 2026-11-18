@@ -3,7 +3,7 @@
   grid-template-columns: minmax(200px, 250px) minmax(0, 1fr);
   gap: 32px;
   min-height: 70vh;
-  padding-block: 40px 72px;
+  padding-block: var(--page-space);
 }
 
 .identity {
@@ -235,7 +235,7 @@
   .layout {
     grid-template-columns: minmax(0, 1fr);
     gap: 20px;
-    padding-block: 28px 48px;
+
   }
 
   .identity {

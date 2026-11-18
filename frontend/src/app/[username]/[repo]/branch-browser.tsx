@@ -117,7 +117,7 @@ export function BranchBrowser({
 
   return (
     <>
-      {history && <h2>Lịch sử commit</h2>}
+      {history && <h2 className={styles.historyHeading}>Lịch sử commit</h2>}
       <div className={styles.repoToolbar}>
         <details ref={branchesMenu} className={styles.branchPicker}><summary aria-label="Branch" aria-disabled={!data.branches.length} data-branch={data.selectedBranch?.name ?? ""}><RepositoryIcon name="branch" /><span>{data.selectedBranch?.name ?? "Chưa có nhánh"}</span><RepositoryIcon name="chevron" /></summary>
           <div><label>Lọc nhánh<input value={filter} onChange={event => setFilter(event.target.value)} /></label>

@@ -1,6 +1,6 @@
 .manager {
   width: min(52rem, 100%);
-  margin: 2rem auto 4rem;
+  margin: var(--page-space) auto;
   display: grid;
   gap: 1.5rem;
   min-width: 0;
@@ -105,7 +105,7 @@
 .dialog::backdrop { background: rgb(16 24 40 / 48%); }
 
 @media (max-width: 480px) {
-  .manager { margin-block: 1.25rem 3rem; }
+
   .actions { align-items: stretch; flex-direction: column; }
   .actions button { width: 100%; }
 }
