@@ -6,12 +6,12 @@ import { useAuth } from "@/components/auth-provider";
 import { sessionFetch } from "@/lib/auth";
 import styles from "./repository.module.css";
 import { TreeBrowser } from "./tree-browser";
-import Link from "next/link";
 import type { RepositorySummary } from "@/lib/repositories";
 import { CloneDialog } from "./clone-dialog";
 import { RepositoryOverview } from "./repository-overview";
 import { RepositoryIcon } from "./repository-icon";
 import { FileFinder } from "./file-finder";
+import { CommitFilters } from "./commit-filters";
 import { CommitBrowser } from "./commit-browser";
 
 type Branch = { name: string; commitSha: string; isDefault: boolean };
@@ -113,20 +113,22 @@ export function BranchBrowser({
       </section>
     );
   const data = result.data;
+  const history = query.get("view") === "commits";
 
   return (
     <>
+      {history && <h2>Lịch sử commit</h2>}
       <div className={styles.repoToolbar}>
         <details ref={branchesMenu} className={styles.branchPicker}><summary aria-label="Branch" aria-disabled={!data.branches.length} data-branch={data.selectedBranch?.name ?? ""}><RepositoryIcon name="branch" /><span>{data.selectedBranch?.name ?? "Chưa có nhánh"}</span><RepositoryIcon name="chevron" /></summary>
           <div><label>Lọc nhánh<input value={filter} onChange={event => setFilter(event.target.value)} /></label>
           {data.branches.filter(branch => branch.name.toLowerCase().includes(filter.toLowerCase())).map(branch => <button key={branch.name} type="button" onClick={() => { select(branch.name); if (branchesMenu.current) branchesMenu.current.open = false; }}>{branch.name}{branch.isDefault ? " (mặc định)" : ""}</button>)}</div>
         </details>
-        <button type="button" className={styles.branchCount} onClick={() => { if (branchesMenu.current) branchesMenu.current.open = !branchesMenu.current.open; }}><RepositoryIcon name="branch" /><span><strong>{data.branches.length}</strong> nhánh</span></button>
+        {history && <CommitFilters endpoint={endpoint} />}
+        {!history && <><button type="button" className={styles.branchCount} onClick={() => { if (branchesMenu.current) branchesMenu.current.open = !branchesMenu.current.open; }}><RepositoryIcon name="branch" /><span><strong>{data.branches.length}</strong> nhánh</span></button>
         <FileFinder endpoint={endpoint} refName={data.selectedBranch?.name ?? null} />
-        <CloneDialog repository={repository} />
+        <CloneDialog repository={repository} /></>}
       </div>
-      {data.selectedBranch && <RepositoryOverview endpoint={endpoint} refName={data.selectedBranch.name} />}
-      {query.get("view") === "commits" && <Link href={pathname + (ref ? `?ref=${encodeURIComponent(ref)}` : "")}>← Về mã nguồn</Link>}
+      {!history && data.selectedBranch && <RepositoryOverview endpoint={endpoint} refName={data.selectedBranch.name} />}
       {query.get("view") === "commits" ? (
         <CommitBrowser endpoint={endpoint} />
       ) : data.selectedBranch || query.get("path") ? (

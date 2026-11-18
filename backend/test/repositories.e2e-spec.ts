@@ -166,6 +166,43 @@ describe('Repository HTTP + PostgreSQL', () => {
     }
   });
 
+  it('persists repository settings and merge grants, selects an existing default, and revokes grants on downgrade/removal', async () => {
+    const created = await call('POST', 'repositories', ownerCookie, { name: 'SettingsContract', visibility: 'PUBLIC', initializeReadme: true });
+    expect(created.status).toBe(201);
+    const repo = (await created.json()).repository as { id: string; defaultBranch: string; protectDefaultBranch: boolean };
+    const path = 'repos/owner/settingscontract';
+    const stored = await db.repository.findUniqueOrThrow({ where: { id: repo.id } });
+    const bare = join(storageRoot, stored.storageKey);
+    try {
+      expect(repo.protectDefaultBranch).toBe(true);
+      const sha = execFileSync('git', ['--git-dir', bare, 'rev-parse', 'refs/heads/main'], { encoding: 'utf8' }).trim();
+      execFileSync('git', ['--git-dir', bare, 'update-ref', 'refs/heads/develop', sha]);
+      expect((await call('PATCH', path, otherCookie, { protectDefaultBranch: false })).status).toBe(403);
+      expect((await call('PATCH', path, ownerCookie, { defaultBranch: 'missing' })).status).toBe(400);
+      expect((await call('PATCH', path, ownerCookie, { defaultBranch: 'develop', protectDefaultBranch: false })).status).toBe(200);
+      expect((await call('GET', path, ownerCookie)).status).toBe(200);
+      expect(execFileSync('git', ['--git-dir', bare, 'symbolic-ref', 'HEAD'], { encoding: 'utf8' }).trim()).toBe('refs/heads/develop');
+      const current = await db.repository.findUniqueOrThrow({ where: { id: repo.id } });
+      expect(current).toMatchObject({ defaultBranch: 'develop', protectDefaultBranch: false });
+      const writer = await db.user.findUniqueOrThrow({ where: { normalizedUsername: 'other' } });
+      await db.repositoryMember.create({ data: { repositoryId: repo.id, userId: writer.id, role: 'WRITE' } });
+      const memberPath = `${path}/members/${writer.id}`;
+      expect((await call('PATCH', memberPath, otherCookie, { canMerge: true })).status).toBe(403);
+      const grant = await call('PATCH', memberPath, ownerCookie, { canMerge: true });
+      expect(grant.status).toBe(200);
+      expect((await grant.json()).member).toMatchObject({ role: 'WRITE', canMerge: true });
+      const downgrade = await call('PATCH', memberPath, ownerCookie, { role: 'READ' });
+      expect((await downgrade.json()).member).toMatchObject({ role: 'READ', canMerge: false });
+      expect((await call('PATCH', memberPath, ownerCookie, { canMerge: true })).status).toBe(400);
+      expect((await call('PATCH', memberPath, ownerCookie, { role: 'WRITE', canMerge: true })).status).toBe(200);
+      expect((await call('DELETE', memberPath, ownerCookie)).status).toBe(204);
+      await db.repositoryMember.create({ data: { repositoryId: repo.id, userId: writer.id, role: 'WRITE' } });
+      expect((await db.repositoryMember.findUniqueOrThrow({ where: { repositoryId_userId: { repositoryId: repo.id, userId: writer.id } } })).canMerge).toBe(false);
+    } finally {
+      await db.repository.delete({ where: { id: repo.id } });
+    }
+  });
+
   it('requires authentication and trusted origin; validates names, nulls and protected fields', async () => {
     expect((await call('POST', 'repositories', '', { name: 'Demo' })).status).toBe(401);
     expect((await call('POST', 'repositories', ownerCookie, { name: 'Demo' }, 'https://evil.example')).status).toBe(403);

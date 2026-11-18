@@ -96,6 +96,7 @@ model Repository {
   visibility        RepositoryVisibility        @default(PRIVATE)
   status            RepositoryStatus            @default(ACTIVE)
   defaultBranch     String                      @default("main") @map("default_branch") @db.VarChar(255)
+  protectDefaultBranch Boolean                   @default(true) @map("protect_default_branch")
   storageKey        String                      @unique @map("storage_key") @db.VarChar(255)
   storageGeneration Int                         @default(0) @map("storage_generation")
   createdAt         DateTime                    @default(now()) @map("created_at") @db.Timestamptz(3)
@@ -121,6 +122,7 @@ model RepositoryMember {
   repositoryId String               @map("repository_id") @db.Uuid
   userId       String               @map("user_id") @db.Uuid
   role         RepositoryMemberRole
+  canMerge     Boolean              @default(false) @map("can_merge")
   createdAt    DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
   repository   Repository           @relation(fields: [repositoryId], references: [id], onDelete: Cascade)

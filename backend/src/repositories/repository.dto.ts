@@ -30,6 +30,16 @@ export class CreateRepositoryDto {
 
 export class UpdateRepositoryDto {
   @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsString()
+  @MinLength(1)
+  @MaxLength(255)
+  defaultBranch?: string;
+
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsBoolean()
+  protectDefaultBranch?: boolean;
+
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @Transform(trim)
   @IsString()
   @MinLength(1)
@@ -60,6 +70,11 @@ export class InviteMemberDto {
 }
 
 export class UpdateMemberRoleDto {
+  @ValidateIf((_object, value: unknown) => value !== undefined)
+  @IsBoolean()
+  canMerge?: boolean;
+
+  @ValidateIf((_object, value: unknown) => value !== undefined)
   @IsEnum(RepositoryMemberRole)
-  role!: RepositoryMemberRole;
+  role?: RepositoryMemberRole;
 }

@@ -47,11 +47,12 @@ test.describe("Milestone 5 - Invitation and Member Management UI", () => {
     });
 
     await page.goto("/alice/project/settings");
+    await page.getByRole("button", { name: "Mời tham gia dự án", exact: true }).click();
     await expect(page.getByText("Members service unavailable")).toBeVisible();
     await expect(page.getByText("Không thể tải danh sách lời mời.")).toBeVisible();
     await expect(page.getByText("Chưa có thành viên cộng tác nào.")).toHaveCount(0);
 
-    const retries = page.getByRole("button", { name: "Thử lại" });
+    const retries = page.getByRole("button", { name: "Thử lại" }).filter({ visible: true });
     await retries.nth(1).click();
     await retries.nth(0).click();
     await expect(page.getByRole("link", { name: "bob" })).toBeVisible();
@@ -95,10 +96,13 @@ test.describe("Milestone 5 - Invitation and Member Management UI", () => {
 
     try {
       await page.goto("/alice/project/settings");
+      await page.getByRole("button", { name: "Mời tham gia dự án", exact: true }).click();
       await oldRequestStarted;
+      await page.getByRole("button", { name: "Cài đặt chung", exact: true }).click();
       await page.locator("#settings-name").fill("project-renamed");
       await page.getByRole("button", { name: "Lưu thay đổi" }).click();
       await expect(page).toHaveURL("/alice/project-renamed/settings");
+      await page.getByRole("button", { name: "Mời tham gia dự án", exact: true }).click();
       await expect(page.getByRole("link", { name: "new-member" })).toBeVisible();
       releaseOldRequest();
       await expect(page.getByRole("link", { name: "new-member" })).toBeVisible();
@@ -199,6 +203,7 @@ test.describe("Milestone 5 - Invitation and Member Management UI", () => {
     });
 
     await page.goto("/alice/project/settings");
+    await page.getByRole("button", { name: "Mời tham gia dự án", exact: true }).click();
 
     // Verify sections
     await expect(page.getByRole("heading", { name: "Thành viên và cộng tác" })).toBeVisible();

@@ -32,13 +32,13 @@ describe('pre-receive branch protection', () => {
 
   afterEach(async () => { if (root) await rm(root, { recursive: true, force: true }); });
 
-  function run(oldSha: string, newSha: string, ref: string, actorIsOwner: boolean) {
+  function run(oldSha: string, newSha: string, ref: string, actorIsOwner: boolean, protect = true) {
     return spawnSync(process.execPath, [hook], {
       cwd: root,
       input: `${oldSha} ${newSha} ${ref}\n`,
       encoding: 'utf8',
       env: { ...process.env, GIT_DIR: bare, CODE_FORGE_DEFAULT_BRANCH: 'main',
-        CODE_FORGE_ALLOW_DEFAULT_BRANCH_INITIALIZATION: String(actorIsOwner),
+        CODE_FORGE_ALLOW_DEFAULT_BRANCH_INITIALIZATION: String(actorIsOwner), CODE_FORGE_PROTECT_DEFAULT_BRANCH: String(protect),
         CODE_FORGE_MAX_FILE_BYTES: String(1024 * 1024), CODE_FORGE_MAX_REPOSITORY_BYTES: String(4 * 1024 * 1024) },
       timeout: 10_000,
     });
@@ -54,6 +54,14 @@ describe('pre-receive branch protection', () => {
       expect(result.stderr).toContain('branch mặc định chỉ được cập nhật qua pull request');
       expect(git(['--git-dir', bare, 'rev-parse', 'refs/heads/main'])).toBe(first);
     }
+  });
+
+  it('allows fast-forward default pushes when protection is disabled, but still blocks deletion and force pushes', () => {
+    const first = git(['--git-dir', bare, 'rev-parse', 'refs/heads/main']);
+    const second = git(['-C', work, 'rev-parse', 'HEAD']);
+    expect(run(first, second, 'refs/heads/main', false, false).status).toBe(0);
+    expect(run(first, '0'.repeat(40), 'refs/heads/main', true, false).stderr).toContain('không được xóa');
+    expect(run(second, first, 'refs/heads/main', true, false).stderr).toContain('fast-forward');
   });
 
   it('allows only the owner to initialize an empty default branch and allows feature branches', () => {

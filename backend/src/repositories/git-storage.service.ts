@@ -22,7 +22,7 @@ export class GitStorageService {
   constructor(private readonly config: ConfigService) {}
 
   openPack(key: string, defaultBranch: string, service: 'git-upload-pack' | 'git-receive-pack', advertise: boolean,
-    protocol?: string, actorIsOwner = false) {
+    protocol?: string, actorIsOwner = false, protectDefaultBranch = true) {
     this.path(key); // Only server-owned UUID keys may enter the CGI environment.
     const write = service === 'git-receive-pack';
     return spawn('git', [
@@ -43,6 +43,7 @@ export class GitStorageService {
         CONTENT_TYPE: advertise ? '' : `application/x-${service}-request`,
         ...(write ? {
           CODE_FORGE_DEFAULT_BRANCH: defaultBranch,
+          CODE_FORGE_PROTECT_DEFAULT_BRANCH: String(protectDefaultBranch),
           CODE_FORGE_ALLOW_DEFAULT_BRANCH_INITIALIZATION: String(actorIsOwner),
           CODE_FORGE_MAX_FILE_BYTES: String(this.config.getOrThrow<number>('MAX_FILE_BYTES')),
           CODE_FORGE_MAX_REPOSITORY_BYTES: String(this.config.getOrThrow<number>('MAX_REPOSITORY_BYTES')),
@@ -64,6 +65,15 @@ export class GitStorageService {
       throw new BadRequestException({ error: { code: 'INVALID_PAGE', message: 'Trang phải từ 1 đến 1000.' } });
     }
     return page === undefined ? 1 : Number(page);
+  }
+
+  validateCommitFilters(filters: { author?: string; since?: string; until?: string }) {
+    const invalid = () => new BadRequestException({ error: { code: 'INVALID_COMMIT_FILTER', message: 'Tác giả hoặc khoảng ngày không hợp lệ.' } });
+    if (filters.author !== undefined && (typeof filters.author !== 'string' || filters.author.length > 200 || Array.from(filters.author).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127))) throw invalid();
+    for (const date of [filters.since, filters.until]) {
+      if (date !== undefined && (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date)) throw invalid();
+    }
+    if (filters.since && filters.until && filters.since > filters.until) throw invalid();
   }
 
   private commitUnavailable() {
@@ -113,7 +123,8 @@ export class GitStorageService {
     }
   }
 
-  async commits(key: string, headSha: string, page = 1, snapshot = headSha) {
+  async commits(key: string, headSha: string, page = 1, snapshot = headSha, filters: { author?: string; since?: string; until?: string } = {}) {
+    this.validateCommitFilters(filters);
     this.validateCommitSha(headSha);
     this.validateCommitSha(snapshot);
     this.validateCommitPage(String(page));
@@ -121,7 +132,11 @@ export class GitStorageService {
     try {
       await this.git([...args, 'merge-base', '--is-ancestor', snapshot, headSha]);
       const output = (await this.git([...args, 'log', '--topo-order', '--no-notes', '-z',
-        `--format=format:${this.commitFormat}`, '--max-count=21', `--skip=${(page - 1) * 20}`, snapshot, '--'])).stdout;
+        `--format=format:${this.commitFormat}`,
+        ...(filters.author?.trim() ? ['--fixed-strings', '--regexp-ignore-case', `--author=${filters.author.trim()}`] : []),
+        ...(filters.since ? [`--since-as-filter=${filters.since}T00:00:00+07:00`] : []),
+        ...(filters.until ? [`--until=${filters.until}T23:59:59+07:00`] : []),
+        '--max-count=21', `--skip=${(page - 1) * 20}`, snapshot, '--'])).stdout;
       const commits = this.parseCommits(output);
       return { commits: commits.slice(0, 20), page, pageSize: 20, hasMore: commits.length > 20, snapshot };
     } catch (error) {
@@ -817,9 +832,15 @@ export class GitStorageService {
     return removed;
   }
 
+  // SQL is authoritative for settings. Retrying HEAD synchronization never moves a branch ref.
+  async syncDefaultHead(key: string, branch: string) {
+    await this.git(['--git-dir', this.path(key), 'symbolic-ref', 'HEAD', `refs/heads/${branch}`]);
+  }
+
   async inspect(key: string, branch: string): Promise<{ state: 'READY' | 'EMPTY'; readme: string | null }> {
     const path = this.path(key);
     try {
+      await this.syncDefaultHead(key, branch);
       const { stdout: head } = await this.git(['--git-dir', path, 'symbolic-ref', 'HEAD']);
       if (head.trim() !== `refs/heads/${branch}`) throw new Error('Invalid default HEAD');
       try { await this.git(['--git-dir', path, 'rev-parse', '--verify', 'HEAD^{commit}']); }

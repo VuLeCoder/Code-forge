@@ -51,6 +51,13 @@ export class RepositoriesController {
     return this.repositories.update(owner, repo, request.user.id, dto);
   }
 
+  @Get('repos/:owner/:repo/commit-authors')
+  @Header('Cache-Control', 'private, no-store')
+  @UseGuards(OptionalAccessTokenGuard)
+  commitAuthors(@Param('owner') owner: string, @Param('repo') repo: string, @Req() request: Request & { user?: AuthPrincipal }) {
+    return this.repositories.commitAuthors(owner, repo, request.user?.id);
+  }
+
   @Get('repos/:owner/:repo/branches')
   @Header('Cache-Control', 'private, no-store')
   @UseGuards(OptionalAccessTokenGuard)
@@ -111,6 +118,7 @@ export class RepositoriesController {
     @Req() request: Request & { user?: AuthPrincipal }) {
     return this.repositories.read(owner, repo, request.user?.id, {
       commits: true, ref: request.query.ref as string | undefined,
+      author: request.query.author as string | undefined, since: request.query.since as string | undefined, until: request.query.until as string | undefined,
       page: request.query.page as string | undefined, snapshot: request.query.snapshot as string | undefined,
     });
   }

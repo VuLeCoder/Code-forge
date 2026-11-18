@@ -32,7 +32,7 @@ describe('RepositoriesService Git authorization recheck', () => {
       db as never,
       {} as never,
       new RepositoryPolicy(),
-      { exists: jest.fn().mockResolvedValue(true) } as never,
+      { exists: jest.fn().mockResolvedValue(true), syncDefaultHead: jest.fn().mockResolvedValue(undefined) } as never,
       tokens as never,
       {} as never,
       {} as never,
@@ -162,5 +162,31 @@ describe('RepositoriesService repository overview', () => {
     const f = fixture();
     expect(await f.service.read('owner', 'repo', undefined, { files: true, ref: 'develop', q: 'src/' })).toMatchObject({ files: ['src/index.ts'] });
     expect(f.storage.findFiles).toHaveBeenCalledWith('storage.git', f.sha, 'src/');
+  });
+});
+
+describe('Repository commit author filters', () => {
+  function fixture(visibility = 'PRIVATE') {
+    const repo = { id: 'repo', ownerId: 'owner', owner: { username: 'Owner' }, visibility, status: 'ACTIVE', deletedAt: null, members: [{ userId: 'reader', role: 'READ' }] };
+    const db = {
+      repository: { findFirst: jest.fn().mockResolvedValue(repo) },
+      repositoryMember: { findMany: jest.fn().mockResolvedValue([{ user: { username: 'Reader' } }]), findUnique: jest.fn().mockResolvedValue(null) },
+      user: { findUnique: jest.fn().mockResolvedValue({ id: 'outsider', email: 'private@example.test' }) },
+    };
+    const service = new RepositoriesService(db as never, {} as never, new RepositoryPolicy(), { validateCommitPage: jest.fn(), validateCommitFilters: jest.fn() } as never, {} as never, {} as never, {} as never);
+    return { service, db };
+  }
+  it('offers the owner and accepted members to a reader without exposing emails or roles', async () => {
+    const { service } = fixture();
+    await expect(service.commitAuthors('owner', 'repo', 'reader')).resolves.toEqual({ authors: [{ username: 'Owner' }, { username: 'Reader' }] });
+  });
+  it('does not expose private repository members to anonymous viewers', async () => {
+    const { service, db } = fixture();
+    await expect(service.commitAuthors('owner', 'repo')).rejects.toThrow();
+    expect(db.repositoryMember.findMany).not.toHaveBeenCalled();
+  });
+  it('rejects selecting a user outside the repository before reading Git storage', async () => {
+    const { service } = fixture();
+    await expect(service.read('owner', 'repo', 'reader', { commits: true, author: 'outsider' })).rejects.toMatchObject({ response: { error: { code: 'INVALID_COMMIT_FILTER' } } });
   });
 });

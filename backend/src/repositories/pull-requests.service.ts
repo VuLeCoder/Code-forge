@@ -28,10 +28,10 @@ export class PullRequestsService {
     return repo;
   }
 
-  private permission(repo: { ownerId: string; members: { userId: string; role: string }[] }, userId?: string, authorId?: string) {
+  private permission(repo: { ownerId: string; members: { userId: string; role: string; canMerge?: boolean }[] }, userId?: string, authorId?: string) {
     const canWrite = !!userId && (repo.ownerId === userId || repo.members.some((member) => member.userId === userId && member.role === 'WRITE'));
     return { canCreate: canWrite, canEdit: canWrite && !!authorId && (authorId === userId || repo.ownerId === userId),
-      canMerge: !!userId && repo.ownerId === userId };
+      canMerge: !!userId && (repo.ownerId === userId || repo.members.some((member) => member.userId === userId && member.role === 'WRITE' && member.canMerge === true)) };
   }
 
   private acquireCompareCapacity() {
@@ -230,7 +230,7 @@ export class PullRequestsService {
 
   async merge(owner: string, name: string, userId: string, number: number, dto: MergePullRequestDto) {
     const first = await this.detail(owner, name, userId, number);
-    if (!first.permissions.canMerge) throw new ForbiddenException({ error: { code: 'MERGE_FORBIDDEN', message: 'Chỉ owner repository được merge.' } });
+    if (!first.permissions.canMerge) throw new ForbiddenException({ error: { code: 'MERGE_FORBIDDEN', message: 'Bạn chưa được cấp quyền merge trong repository.' } });
     const repoId = first.pullRequest.repositoryId;
     const replayExistingOperation = async () => {
       const existing = await this.db.pullRequestMergeOperation.findUnique({ where: { operationId: dto.operationId } });
@@ -250,9 +250,9 @@ export class PullRequestsService {
       await this.pushJournal.assertNoUnresolved(repoId);
       const users = await this.db.$queryRaw<{ status: string }[]>`SELECT status FROM users WHERE id = ${userId}::uuid`;
       if (users[0]?.status !== 'ACTIVE') throw new ForbiddenException();
-      const repo = await this.db.repository.findUnique({ where: { id: repoId } });
-      if (!repo || repo.ownerId !== userId || repo.status !== 'ACTIVE' || repo.deletedAt !== null) {
-        throw new ForbiddenException({ error: { code: 'MERGE_FORBIDDEN', message: 'Chỉ owner repository đang hoạt động được merge.' } });
+      const repo = await this.db.repository.findUnique({ where: { id: repoId }, include: { members: { where: { userId } } } });
+      if (!repo || !this.permission({ ...repo, members: repo.members ?? [] }, userId).canMerge || repo.status !== 'ACTIVE' || repo.deletedAt !== null) {
+        throw new ForbiddenException({ error: { code: 'MERGE_FORBIDDEN', message: 'Bạn chưa được cấp quyền merge hoặc repository không còn hoạt động.' } });
       }
       // A same-repository retry may have passed the optimistic lookup above while
       // another request held this lock. Re-read under the lock before checking PR

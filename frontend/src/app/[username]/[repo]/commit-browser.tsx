@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { sessionFetch } from "@/lib/auth";
+import { RepositoryIcon } from "./repository-icon";
 import styles from "./repository.module.css";
 
 type Commit = { sha: string; parentShas: string[]; subject: string; message: string;
@@ -12,6 +13,7 @@ type Commit = { sha: string; parentShas: string[]; subject: string; message: str
   committer: { name: string; email: string }; committedAt: string };
 type History = { commits: Commit[]; page: number; hasMore: boolean; snapshot: string | null; storageState: string };
 const errors: Record<string, string> = {
+  INVALID_COMMIT_FILTER: "Tác giả hoặc khoảng ngày không hợp lệ. Ngày kết thúc phải từ ngày bắt đầu trở đi.",
   INVALID_SHA: "SHA commit không hợp lệ. Cần SHA đầy đủ.",
   INVALID_PAGE: "Trang lịch sử phải từ 1 đến 1000.",
   COMMIT_NOT_FOUND: "Commit không tồn tại trong lịch sử hiện tại. Branch hoặc storage có thể đã thay đổi.",
@@ -24,11 +26,14 @@ function CommitTime({ value }: { value: string }) {
 }
 
 export function CommitBrowser({ endpoint, detail = false }: { endpoint: string; detail?: boolean }) {
+  const [copyMessage, setCopyMessage] = useState("");
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 60000); return () => clearInterval(timer); }, []);
   const query = useSearchParams();
   const pathname = usePathname();
   const { user } = useAuth();
   const params = new URLSearchParams();
-  for (const name of ["ref", "page", "snapshot"]) for (const value of query.getAll(name)) params.append(name, value);
+  for (const name of ["ref", "page", "snapshot", "author", "since", "until"]) for (const value of query.getAll(name)) params.append(name, value);
   const sha = query.get("sha") ?? "";
   const url = detail ? `${endpoint}/commits/${encodeURIComponent(sha || "invalid")}` : `${endpoint}/commits?${params}`;
   const [attempt, setAttempt] = useState(0);
@@ -48,6 +53,7 @@ export function CommitBrowser({ endpoint, detail = false }: { endpoint: string; 
   function href(commitSha?: string, page?: number, snapshot?: string | null) {
     const next = new URLSearchParams();
     if (query.has("ref")) next.set("ref", query.get("ref")!);
+    for (const name of ["author", "since", "until"]) if (query.has(name)) next.set(name, query.get(name)!);
     next.set("view", commitSha ? "commit" : "commits");
     if (commitSha) next.set("sha", commitSha);
     // Keep list position when opening a commit and following its parents.
@@ -58,8 +64,18 @@ export function CommitBrowser({ endpoint, detail = false }: { endpoint: string; 
     return `${pathname}?${next}`;
   }
   const data = result.key === key ? result.data : undefined;
-  return <section className={styles.commitPanel} aria-label={detail ? "Chi tiết commit" : "Lịch sử commit"}>
-    <h2>{detail ? "Chi tiết commit" : "Lịch sử commit"}</h2>
+  const groups = new Map<string, Commit[]>();
+  if (data && "commits" in data) for (const commit of data.commits) {
+    const day = new Date(commit.committedAt).toLocaleDateString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", day: "numeric", month: "long", year: "numeric" });
+    groups.set(day, [...(groups.get(day) ?? []), commit]);
+  }
+  function relative(value: string) {
+    const seconds = (new Date(value).getTime() - now) / 1000;
+    const unit = Math.abs(seconds) >= 86400 ? "day" : Math.abs(seconds) >= 3600 ? "hour" : "minute";
+    return new Intl.RelativeTimeFormat("vi", { numeric: "auto" }).format(Math.round(seconds / (unit === "day" ? 86400 : unit === "hour" ? 3600 : 60)), unit);
+  }
+  return <section className={detail ? styles.commitPanel : styles.commitHistory} aria-label={detail ? "Chi tiết commit" : "Lịch sử commit"}>
+    {detail && <h2>Chi tiết commit</h2>}
     {detail && <Link href={href()}>← Về lịch sử commit</Link>}
     {result.key !== key ? <p role="status">Đang tải commit…</p> : !data ? <div>
       <p role="alert">{result.error}</p>
@@ -78,11 +94,20 @@ export function CommitBrowser({ endpoint, detail = false }: { endpoint: string; 
       <pre className={styles.commitMessage}>{data.commit.message || "(Không có thông điệp)"}</pre>
     </> : <>
       {data.storageState === "RESET" && <p className={styles.notice}>Git storage đã được khởi tạo lại; lịch sử trước đó không còn.</p>}
-      {data.commits.length ? <ol className={styles.commitList}>{data.commits.map((commit) => <li key={commit.sha}>
-        <Link href={href(commit.sha, data.page, data.snapshot)}>{commit.subject || "(Không có thông điệp)"}</Link>
-        <p>{commit.author.name} · <CommitTime value={commit.authoredAt} /></p>
-        <code title={commit.sha}>{commit.sha.slice(0, 12)}</code>
-      </li>)}</ol> : <p>{data.page > 1 ? "Trang này không có commit." : "Chưa có commit trên branch này."}</p>}
+      {data.commits.length ? Array.from(groups, ([day, commits]) => <section className={styles.commitDay} key={day} aria-label={`Commit ngày ${day}`}>
+        <h3><RepositoryIcon name="history" />{day}</h3>
+        <ol className={styles.commitList}>{commits.map(commit => <li key={commit.sha}>
+          <div className={styles.historyContent}>
+            <Link className={styles.historySubject} href={href(commit.sha, data.page, data.snapshot)} title={commit.subject}>{commit.subject || "(Không có thông điệp)"}</Link>
+            <div className={styles.historyAuthor}><span className={styles.historyAvatar} aria-hidden="true">{commit.author.name.slice(0, 1).toUpperCase()}</span><span title={commit.author.email}>{commit.author.name}</span><time dateTime={commit.committedAt} title={new Date(commit.committedAt).toLocaleString("vi-VN")}>{relative(commit.committedAt)}</time></div>
+          </div>
+          <div className={styles.historyActions}>
+            <Link href={href(commit.sha, data.page, data.snapshot)} title={commit.sha}><code>{commit.sha.slice(0, 7)}</code></Link>
+            <button type="button" aria-label={`Sao chép SHA ${commit.sha.slice(0, 7)}`} onClick={async () => { try { await navigator.clipboard.writeText(commit.sha); setCopyMessage("Đã sao chép SHA."); } catch { setCopyMessage("Không thể sao chép SHA: " + commit.sha); } }}><RepositoryIcon name="copy" /></button>
+          </div>
+        </li>)}</ol>
+      </section>) : <p>{data.page > 1 ? "Trang này không có commit." : ["author", "since", "until"].some(name => query.has(name)) ? "Không có commit phù hợp với bộ lọc." : "Chưa có commit trên branch này."}</p>}
+      <span className={styles.copyFeedback} role="status">{copyMessage}</span>
       <nav className={styles.commitPagination} aria-label="Phân trang commit">
         {data.page > 1 && <Link href={href(undefined, data.page - 1, data.snapshot)}>Trang trước</Link>}
         <span>Trang {data.page}</span>
