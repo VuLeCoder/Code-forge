@@ -80,7 +80,7 @@ export function TokenManager() {
   return <div className={styles.manager}>
     <header className={styles.intro}>
       <div className={styles.introTitle}><span className={styles.keyIcon} aria-hidden="true">⌘</span><div><span className={styles.eyebrow}>TRUY CẬP GIT</span><h2>Token truy cập cá nhân</h2><p>Chìa khóa riêng cho từng thiết bị và công cụ của bạn.</p></div></div>
-      <div className={styles.guide}><h3>Kết nối Git bằng PAT</h3><div className={styles.credentials}><div><span>Username</span><strong>Tên tài khoản của bạn</strong></div><div><span>Password</span><strong>Token truy cập cá nhân</strong></div></div><p>Dùng khi clone, fetch hoặc push. Token chỉ có hiệu lực với repo bạn được phép truy cập; giữ riêng tư và không đặt trong URL clone.</p></div>
+      <div className={styles.guide}><h3>Kết nối Git bằng PAT</h3><div className={styles.credentials}><div><span>Tên đăng nhập</span><strong>Tên tài khoản của bạn</strong></div><div><span>Mật khẩu Git</span><strong>Token truy cập cá nhân</strong></div></div><p>Dùng khi clone, fetch hoặc push. Token chỉ có hiệu lực với repo bạn được phép truy cập; giữ riêng tư và không đặt trong URL clone.</p></div>
     </header>
 
     {error && !creating && <p role="alert">{error}</p>}

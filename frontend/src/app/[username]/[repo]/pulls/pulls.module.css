@@ -70,8 +70,8 @@
 .fileDiff .warning { margin: 12px; }
 .diff { display: block; max-width: 100%; max-height: 70vh; margin: 0; overflow: auto; padding-block: 8px; border: 0; border-radius: 0; color: var(--text); background: var(--surface); font: .8rem/1.65 ui-monospace, SFMono-Regular, Consolas, monospace; tab-size: 4; }
 .diffLine { display: block; min-width: max-content; padding-inline: 14px; white-space: pre; }
-.diffLineAdded { background: var(--success-surface); color: #14532d; }
-.diffLineRemoved { background: var(--danger-surface); color: #8a1721; }
+.diffLineAdded { background: var(--success-surface); color: var(--success-text); }
+.diffLineRemoved { background: var(--danger-surface); color: var(--danger-text); }
 .diffLineMeta { background: var(--brand-50); color: var(--brand-700); }
 .empty { display: grid; justify-items: center; gap: 10px; padding: 48px 22px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); text-align: center; box-shadow: var(--shadow-sm); }
 .empty > span { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; color: var(--brand-700); background: var(--brand-50); font-size: 1.25rem; font-weight: 800; }

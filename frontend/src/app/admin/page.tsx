@@ -207,7 +207,7 @@ export default function AdminPage() {
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "overview", label: "Tổng quan" }, { id: "users", label: "Người dùng" },
-    { id: "repositories", label: "Repositories" }, { id: "journals", label: "Đối soát Git" },
+    { id: "repositories", label: "Repository" }, { id: "journals", label: "Đối soát Git" },
     { id: "audit", label: "Nhật ký" },
   ];
 
@@ -227,7 +227,7 @@ export default function AdminPage() {
       {tab === "overview" && <>
         {loading && !stats ? <p role="status">Đang tải thống kê…</p> : stats && <div className={styles.statsGrid}>
           <article className={styles.statCard}><span>Người dùng</span><strong>{stats.users.total}</strong><small>{stats.users.active} hoạt động · {stats.users.locked} bị khóa</small></article>
-          <article className={styles.statCard}><span>Repositories</span><strong>{stats.repositories.total}</strong><small>{stats.repositories.active} hoạt động · {stats.repositories.locked} khóa · {stats.repositories.deleted} đã xóa</small></article>
+          <article className={styles.statCard}><span>Repository</span><strong>{stats.repositories.total}</strong><small>{stats.repositories.active} hoạt động · {stats.repositories.locked} khóa · {stats.repositories.deleted} đã xóa</small></article>
           <article className={styles.statCard}><span>Pull requests</span><strong>{stats.pullRequests.total}</strong><small>{stats.pullRequests.open} đang mở · {stats.pullRequests.pendingMerges} cần đối soát</small></article>
           <article className={styles.statCard}><span>Git journals chưa phân giải</span><strong>{stats.gitJournals.unresolved}</strong><small>{stats.gitJournals.pushes} push · {stats.gitJournals.merges} merge</small></article>
         </div>}

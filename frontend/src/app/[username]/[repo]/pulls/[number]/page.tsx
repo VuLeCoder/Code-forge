@@ -280,14 +280,14 @@ export default function PullRequestDetailPage() {
     {compare.stale && <p className={styles.warning} role="status">Branch đã thay đổi kể từ lúc tạo PR. Hãy kiểm tra snapshot mới bên dưới trước khi merge.</p>}
     <section className={styles.panel} aria-labelledby="description-title"><h2 id="description-title">Mô tả</h2>{pull.description ? <p className={styles.description}>{pull.description}</p> : <p className={styles.muted}>Chưa có mô tả.</p>}</section>
     <section className={styles.panel} aria-labelledby="commits-title" aria-busy={sectionBusy.commits}>
-      <h2 id="commits-title">Commits <span className={styles.count}>{commitsPage?.pagination.totalItems ?? 0}</span></h2>
+      <h2 id="commits-title">Commit <span className={styles.count}>{commitsPage?.pagination.totalItems ?? 0}</span></h2>
       {sectionErrors.commits && <p className={styles.error} role="alert">{sectionErrors.commits} <button className={styles.refresh} onClick={() => void changeCommitPage(commitsPage?.pagination.page ?? 1)}>Thử lại</button></p>}
       {sectionBusy.commits && <p className={styles.status} role="status">Đang tải commits…</p>}
       {commitsPage?.commits.length ? <ol className={styles.commitList}>{commitsPage.commits.map((commit) => <li key={commit.sha}><code>{commit.sha.slice(0, 12)}</code><span>{commit.subject || "(không có tiêu đề)"}</span><small>{commit.author.name} · {new Date(commit.authoredAt).toLocaleString("vi-VN")}</small></li>)}</ol> : <p className={styles.muted}>{pageStatus}</p>}
       {renderPagination("commits", commitsPage?.pagination, sectionBusy.commits, (page) => void changeCommitPage(page))}
     </section>
     <section className={styles.panel} aria-labelledby="files-title" aria-busy={sectionBusy.files}>
-      <h2 id="files-title">Files changed <span className={styles.count}>{filesPage?.pagination.totalItems ?? 0}</span></h2>
+      <h2 id="files-title">Tệp đã thay đổi <span className={styles.count}>{filesPage?.pagination.totalItems ?? 0}</span></h2>
       {sectionErrors.files && <p className={styles.error} role="alert">{sectionErrors.files} <button className={styles.refresh} onClick={() => void changeFilePage(filesPage?.pagination.page ?? 1)}>Thử lại</button></p>}
       {sectionBusy.files && <p className={styles.status} role="status">Đang tải files và diff…</p>}
       {filesPage?.files.length ? <ul className={styles.fileList}>{filesPage.files.map((file, index) => <li key={`${file.path}-${index}`}><span className={styles.fileStatus} aria-label={`Trạng thái ${file.status}`}>{file.status}</span><code>{file.previousPath ? `${file.previousPath} → ` : ""}{file.path}</code></li>)}</ul> : <p className={styles.muted}>{pageStatus}</p>}
