@@ -8,7 +8,7 @@ Phiên bản dưới đây lấy từ manifest, không phải khẳng định ph
 | --- | --- | --- |
 | Workspace | TypeScript, pnpm 12.3.4, Corepack | Monorepo frontend/backend |
 | Frontend | Next.js 16.3.4 App Router, React 19.2.8 | Web, server rendering và Route Handler proxy |
-| Giao diện | CSS variables, CSS Modules, React Context | Light theme tiếng Việt, responsive, session state |
+| Giao diện | CSS variables, CSS Modules, React Context | Theme sáng/tối tiếng Việt, responsive, session state |
 | README | react-markdown 10, remark-gfm 4 | Render Markdown/GFM có kiểm soát |
 | Backend | NestJS 11, Express adapter | REST, auth, policy và Git HTTP |
 | Input | class-validator, class-transformer | DTO validation |
@@ -19,7 +19,7 @@ Phiên bản dưới đây lấy từ manifest, không phải khẳng định ph
 | Kiểm thử | Jest 29, Playwright/Chromium | Unit, HTTP integration, browser và full-stack |
 | Chất lượng | ESLint, TypeScript typecheck, build | Gate trước tích hợp |
 
-Vercel/Render/Neon là **hướng triển khai M8**, chưa phải bằng chứng đã có deployment hoạt động. Không cần tài khoản cloud để chạy local.
+Render/Neon đã có bằng chứng smoke được ghi theo thời điểm trong acceptance board; chưa xác nhận môi trường hiện tại trong lần rà soát này. Vercel đang ngoài phạm vi đã ghi nhận. Không cần tài khoản cloud để chạy local.
 
 ## Luồng hệ thống
 

@@ -1,5 +1,7 @@
 # Code Forge frontend architecture audit
 
+> **Lịch sử — rà soát 19/11/2026:** nội dung/trạng thái bên dưới phản ánh thời điểm ghi nhận, có thể đã được thay thế. Task còn mở đã gộp vào [danh sách chung](../remaining-tasks.md); không dùng checklist, SHA, môi trường hay quyền thực thi cũ làm chỉ dẫn hiện tại.
+
 Reviewed: 2026-11-06
 Working branch: `codex/ui-refresh-v3`
 Observed base: `7efff1d` (`feat(frontend): clarify repository and settings states`)

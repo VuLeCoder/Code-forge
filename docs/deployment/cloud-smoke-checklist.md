@@ -1,5 +1,7 @@
 # Cloud smoke checklist
 
+> **Rà soát 19/11/2026:** task còn mở đã gộp tại [danh sách chung](../remaining-tasks.md). Bằng chứng và trạng thái bên dưới gắn với ngày/revision đã ghi, không xác nhận CI/cloud hiện tại.
+
 Điền release commit và thời gian chạy. Lưu output không chứa PAT, cookie, access token, Authorization header, mã nguồn private hoặc diff private.
 
 BTL demo slice P2 đã có bằng chứng cho readiness, public/private Git HTTPS, PAT clone/push/fetch và owner–collaborator invitation→PR→merge. Đây chưa phải nghiệm thu cloud end-to-end: browser UI journey, admin/audit, quota payload lớn, restart/source recovery, migration và backup/restore vẫn chưa được nghiệm thu. Readiness endpoint chạy `SELECT 1`, kiểm tra Git và ghi/xóa một file tạm; đây không phải probe chỉ đọc. Vercel nằm ngoài phạm vi; chưa có frontend cloud URL được nghiệm thu.

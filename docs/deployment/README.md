@@ -60,7 +60,7 @@ Khi chạy frontend local với backend Render, đặt `BACKEND_URL` server-side
 
 Các biến TTL mặc định hiện tại nằm trong `backend/.env.example`; chỉ override khi có acceptance test cho cấu hình mới. Không copy giá trị secret mẫu sang cloud.
 
-`compose.yaml` chỉ dành cho local: dùng `NODE_ENV=development`, PostgreSQL trực tiếp và các secret đánh dấu `local-only-*`; không dùng các giá trị đó cho cloud hoặc môi trường public. Các port host chỉ bind loopback. Chế độ local cho phép `COOKIE_SECURE=false`; production vẫn bắt buộc `COOKIE_SECURE=true` qua kiểm tra backend. T-COMPOSE trong `docs/operations/task-execution-log-2026-10-25.md` đã xác minh một project cô lập: 7 migration áp dụng, healthcheck backend healthy và `/api/v1/health/ready` HTTP 200. Chưa có bằng chứng cho việc chạy đồng thời nhiều project Compose hoặc cho cloud release; các volume test của project đó được giữ lại có chủ đích, volume người dùng không bị chạm.
+`compose.yaml` chỉ dành cho local: dùng `NODE_ENV=development`, PostgreSQL trực tiếp và các secret đánh dấu `local-only-*`; không dùng các giá trị đó cho cloud hoặc môi trường public. Các port host chỉ bind loopback. Chế độ local cho phép `COOKIE_SECURE=false`; production vẫn bắt buộc `COOKIE_SECURE=true` qua kiểm tra backend. Ghi nhận T-COMPOSE lịch sử (có thể tra trong Git history) đã xác minh một project cô lập: 7 migration áp dụng, healthcheck backend healthy và `/api/v1/health/ready` HTTP 200. Chưa có bằng chứng cho việc chạy đồng thời nhiều project Compose hoặc cho cloud release; các volume test của project đó được giữ lại có chủ đích, volume người dùng không bị chạm.
 
 ## Trình tự release
 

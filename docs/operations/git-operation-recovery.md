@@ -8,7 +8,11 @@ procedure, not a manual database repair guide. The supported application
 reconcilers can complete or fail operations only when the Git refs and journal
 state prove an unambiguous outcome. The admin-facing **Đối soát Git** view lists
 unresolved operations using a non-sensitive allowlist and can run the same
-proof checks on demand. It never moves a Git ref. A competing cross-type or
+proof checks on demand. It never moves a branch ref. When a proven successful
+push created the first branch, completion also points symbolic `HEAD` at that
+branch and saves its name as the repository default in the journal/audit
+transaction. If SQL completion fails, the unresolved journal preserves the
+empty before-snapshot so this idempotent HEAD setup can be retried. A competing cross-type or
 same-type journal deliberately prevents attribution, so genuinely unknown or
 contradictory evidence remains unresolved and continues to fence writes.
 

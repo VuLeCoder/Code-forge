@@ -29,7 +29,7 @@ Không gửi connection string, password, PAT, cookie hay secret qua chat, issue
 
 ## 2. Cửa sổ ghi và migration
 
-1. Chọn cửa sổ bảo trì thông báo trước. Vì hiện chưa thấy application-wide write gate, không tuyên bố hệ thống đã ở maintenance chỉ dựa trên maintenance jobs hoặc readiness endpoint.
+1. Chọn cửa sổ bảo trì thông báo trước. Code hiện có application-wide write gate; phải xác minh revision triển khai có gate và freeze/drain hoạt động theo bước 2. Không tuyên bố hệ thống đã ở maintenance chỉ dựa trên maintenance jobs hoặc readiness endpoint.
 2. Đăng nhập bằng admin hiện có, gọi `PATCH /api/v1/admin/release/write-freeze` với `{"frozen":true}`, rồi xác nhận `GET` cùng endpoint trả `frozen=true` và `activeWriteCount=0`. Nếu endpoint không tồn tại, audit không được ghi, drain timeout hoặc trạng thái không rõ, dừng release; không dùng restart thay cho drain an toàn.
 3. Tạo/kiểm tra backup metadata và clone Git dự phòng trước mọi restart/redeploy. Render Free có thể làm mất filesystem source; chỉ thực hiện trên demo sau khi người vận hành chấp nhận rủi ro và đã chuẩn bị recovery.
 4. Build migration image từ đúng release commit, ở thư mục gốc repository:
