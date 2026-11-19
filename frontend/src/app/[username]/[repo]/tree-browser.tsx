@@ -14,6 +14,7 @@ type Entry = {
   path: string;
   type: "directory" | "file" | "symlink" | "submodule";
   navigable: boolean;
+  lastCommit?: { sha: string; subject: string; committedAt: string; authorName: string } | null;
 };
 type Tree = { entries: Entry[]; storageState: string };
 const labels = {
@@ -69,6 +70,11 @@ function fileTone(name: string) {
   if (/\.(?:css|scss|sass)$/i.test(name)) return styles.fileIconStyle;
   if (/\.(?:ya?ml|toml|env|conf|ini)$/i.test(name)) return styles.fileIconConfig;
   return styles.fileIcon;
+}
+
+function relativeTime(date: string) {
+  const days = Math.round((new Date(date).getTime() - Date.now()) / 86400000);
+  return new Intl.RelativeTimeFormat("vi", { numeric: "auto" }).format(days, "day");
 }
 
 export function TreeBrowser({
@@ -145,9 +151,11 @@ export function TreeBrowser({
   const parts = path ? path.split("/") : [];
   return (
     <section
-      className={styles.source}
+      className={isBlob ? styles.fileWorkspace : styles.source}
       aria-label={isBlob ? "Nội dung file" : "Cây thư mục"}
     >
+      {isBlob && <FileSidebar key={`${endpoint}/${refName}/${user?.id}`} endpoint={endpoint} refName={refName} selected={path} href={href} />}
+      <div className={styles.fileMain}>
       {path && <div className={styles.sourceNav}>
         <nav className={styles.breadcrumb} aria-label="Đường dẫn mã nguồn">
           <Link
@@ -204,7 +212,7 @@ export function TreeBrowser({
           )}
         </div>
       ) : "kind" in result.data ? (
-        <BlobViewer data={result.data} />
+        <><FileCommit key={`${endpoint}/${refName}/${path}/${user?.id}`} endpoint={endpoint} refName={refName} path={path} /><BlobViewer data={result.data} /></>
       ) : (
         <>
           {result.data.storageState === "RESET" && (
@@ -240,12 +248,13 @@ export function TreeBrowser({
                       </span>
                     )}
                   </div>
-                  <small>
+                  {entry.lastCommit && <><Link className={styles.entryCommit} title={entry.lastCommit.subject} href={`${pathname}?${new URLSearchParams({ ...(refName ? { ref: refName } : {}), view: "commit", sha: entry.lastCommit.sha })}`}>{entry.lastCommit.subject || "(Không có thông điệp)"}</Link><time className={styles.entryTime} dateTime={entry.lastCommit.committedAt} title={new Date(entry.lastCommit.committedAt).toLocaleString("vi-VN")}>{relativeTime(entry.lastCommit.committedAt)}</time></>}
+                  {!entry.lastCommit && <small>
                     {labels[entry.type]}
                     {entry.type === "directory" && !entry.navigable
                       ? " · Đường dẫn không được hỗ trợ"
                       : ""}
-                  </small>
+                  </small>}
                 </li>
               ))}
             </ul>
@@ -273,6 +282,55 @@ export function TreeBrowser({
           )}
         </>
       )}
+      </div>
     </section>
   );
+}
+
+function FileSidebar({ endpoint, refName, selected, href }: { endpoint: string; refName: string | null; selected: string; href: (path: string, blob?: boolean) => string }) {
+  return <aside className={styles.fileSidebar}><h2>Tệp dự án</h2><DirectoryNodes endpoint={endpoint} refName={refName} path="" selected={selected} href={href} /></aside>;
+}
+function DirectoryNodes({ endpoint, refName, path, selected, href }: { endpoint: string; refName: string | null; path: string; selected: string; href: (path: string, blob?: boolean) => string }) {
+  const [result, setResult] = useState<{ entries?: Entry[]; error?: string }>({});
+  const [attempt, retry] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    const params = new URLSearchParams({ path });
+    if (refName) params.set("ref", refName);
+    sessionFetch(`${endpoint}/tree?${params}`, { signal: controller.signal, cache: "no-store" }).then(async response => {
+      if (!response.ok) throw new Error("Chưa thể tải thư mục.");
+      const data = await response.json() as Tree;
+      if (!controller.signal.aborted) setResult({ entries: data.entries });
+    }).catch(error => { if (!controller.signal.aborted) setResult({ error: error instanceof Error ? error.message : "Lỗi tải thư mục." }); });
+    return () => controller.abort();
+  }, [endpoint, refName, path, attempt]);
+  if (result.error) return <p role="alert">{result.error} <button onClick={() => retry(value => value + 1)}>Thử lại</button></p>;
+  if (!result.entries) return <p role="status">Đang tải…</p>;
+  return <ul>{result.entries.map(entry => <li key={entry.path}>{entry.type === "directory" && entry.navigable ? <SidebarDirectory entry={entry} endpoint={endpoint} refName={refName} selected={selected} href={href} /> : <Link href={entry.navigable ? href(entry.path, true) : href(path)} aria-current={entry.path === selected ? "page" : undefined}><FileIcon tone={fileTone(entry.name)} /><span>{entry.name}</span></Link>}</li>)}</ul>;
+}
+function SidebarDirectory({ entry, endpoint, refName, selected, href }: { entry: Entry; endpoint: string; refName: string | null; selected: string; href: (path: string, blob?: boolean) => string }) {
+  const [open, setOpen] = useState(selected.startsWith(`${entry.path}/`));
+  return <><button type="button" aria-expanded={open} onClick={() => setOpen(value => !value)}><span aria-hidden="true">{open ? "⌄" : "›"}</span><FolderIcon /><span>{entry.name}</span></button>{open && <DirectoryNodes endpoint={endpoint} refName={refName} path={entry.path} selected={selected} href={href} />}</>;
+}
+
+function FileCommit({ endpoint, refName, path }: { endpoint: string; refName: string | null; path: string }) {
+  const pathname = usePathname();
+  const [result, setResult] = useState<{ commit?: Entry["lastCommit"]; error?: string }>({});
+  const [attempt, retry] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    const params = new URLSearchParams({ path: path.split("/").slice(0, -1).join("/") });
+    if (refName) params.set("ref", refName);
+    sessionFetch(`${endpoint}/tree?${params}`, { signal: controller.signal, cache: "no-store" }).then(async response => {
+      if (!response.ok) throw new Error("Chưa thể tải commit của tệp.");
+      const tree = await response.json() as Tree;
+      if (!controller.signal.aborted) setResult({ commit: tree.entries.find(entry => entry.path === path)?.lastCommit ?? null });
+    }).catch(error => { if (!controller.signal.aborted) setResult({ error: error instanceof Error ? error.message : "Lỗi tải commit." }); });
+    return () => controller.abort();
+  }, [endpoint, refName, path, attempt]);
+  if (result.error) return <p role="alert">{result.error} <button onClick={() => retry(value => value + 1)}>Thử lại</button></p>;
+  if (result.commit === undefined) return <p role="status">Đang tải commit của tệp…</p>;
+  const commit = result.commit;
+  if (!commit) return null;
+  return <div className={styles.fileCommit}><strong>{commit.authorName}</strong><Link title={commit.subject} className={styles.fileCommitSubject} href={`${pathname}?${new URLSearchParams({ ...(refName ? { ref: refName } : {}), view: "commit", sha: commit.sha })}`}>{commit.subject}</Link><code>{commit.sha.slice(0, 7)}</code><time dateTime={commit.committedAt} title={new Date(commit.committedAt).toLocaleString("vi-VN")}>{relativeTime(commit.committedAt)}</time></div>;
 }

@@ -529,6 +529,10 @@ describe('GitStorageService with real Git', () => {
       expect.objectContaining({ name: 'space & ü.txt', path: 'src # ü/space & ü.txt', type: 'file' }),
     ]);
     expect((await storage.tree(key, commit, ':(glob)*')).entries).toHaveLength(1);
+    const enriched = await storage.tree(key, commit, ':(glob)*', true);
+    expect(enriched.entries[0]).toMatchObject({ lastCommit: { sha: commit, subject: 'Tree', authorName: 'Test' } });
+    const original = await storage.tree(key, oldCommit, '', true);
+    expect(original.entries[0]).toMatchObject({ lastCommit: { sha: oldCommit } });
     expect((await storage.tree(key, oldCommit)).entries.map((entry) => entry.name)).toEqual(['README.md']);
     for (const path of ['link', 'README.md']) await expect(storage.tree(key, commit, path)).rejects.toMatchObject({ response: { error: { code: 'PATH_NOT_DIRECTORY' } } });
     for (const path of ['missing', 'link/secret']) await expect(storage.tree(key, commit, path)).rejects.toMatchObject({ response: { error: { code: 'PATH_NOT_FOUND' } } });

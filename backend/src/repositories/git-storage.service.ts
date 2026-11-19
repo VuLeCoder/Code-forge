@@ -580,7 +580,7 @@ export class GitStorageService {
     return { branches, defaultBranch, selectedBranch };
   }
 
-  async tree(key: string, commitSha: string, path = '') {
+  async tree(key: string, commitSha: string, path = '', includeCommits = false) {
     this.validateSourcePath(path);
     if (!/^[a-f0-9]{40,64}$/.test(commitSha)) throw new Error('Invalid commit SHA');
     const args = ['--git-dir', this.path(key)];
@@ -614,7 +614,21 @@ export class GitStorageService {
         type: mode === '120000' ? 'symlink' : objectType === 'commit' ? 'submodule' : objectType === 'tree' ? 'directory' : 'file', navigable };
     });
     entries.sort((a, b) => Number(b.type === 'directory') - Number(a.type === 'directory') || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-    return { path, commitSha, entries };
+    if (!includeCommits) return { path, commitSha, entries };
+    // Bound Git subprocess concurrency for large directories. Pin all reads to the same snapshot.
+    const enriched = new Array<typeof entries[number] & { lastCommit: { sha: string; subject: string; committedAt: string; authorName: string } | null }>(entries.length);
+    let cursor = 0;
+    await Promise.all(Array.from({ length: Math.min(4, entries.length) }, async () => {
+      while (cursor < entries.length) {
+        const index = cursor++;
+        const entry = entries[index]!;
+        const output = (await this.git([...args, 'log', '-1', '--no-notes', '--format=%H%x00%s%x00%cI%x00%an', commitSha, '--', `:(literal)${entry.path}`])).stdout.trimEnd();
+        const [sha, subject, committedAt, authorName] = output.split('\0');
+        if (output && (!sha || !/^[a-f0-9]{40,64}$/.test(sha) || !committedAt || !Number.isFinite(Date.parse(committedAt)))) throw this.commitUnavailable();
+        enriched[index] = { ...entry, lastCommit: sha ? { sha, subject: subject ?? '', committedAt: committedAt!, authorName: authorName ?? '' } : null };
+      }
+    }));
+    return { path, commitSha, entries: enriched };
   }
 
   async blob(key: string, commitSha: string, path: string, image = false) {

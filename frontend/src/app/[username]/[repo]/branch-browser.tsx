@@ -38,6 +38,7 @@ export function BranchBrowser({
   const ref = query.get("ref");
   const [attempt, setAttempt] = useState(0);
   const [filter, setFilter] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const branchesMenu = useRef<HTMLDetailsElement>(null);
   const key = JSON.stringify([endpoint, ref, user?.id, attempt]);
   const [result, setResult] = useState<{
@@ -83,8 +84,10 @@ export function BranchBrowser({
 
   function select(value: string) {
     const next = new URLSearchParams(query.toString());
-    next.delete("path");
-    if (next.get("view") !== "commits") next.delete("view");
+    if (next.get("view") !== "blob") {
+      next.delete("path");
+      if (next.get("view") !== "commits") next.delete("view");
+    }
     next.delete("page");
     next.delete("snapshot");
     next.delete("sha");
@@ -114,9 +117,12 @@ export function BranchBrowser({
     );
   const data = result.data;
   const history = query.get("view") === "commits";
+  const fileView = query.get("view") === "blob";
 
   return (
-    <>
+    <div className={fileView ? `${styles.fileMode} ${sidebarOpen ? "" : styles.fileModeCollapsed}` : undefined}>
+      {fileView && <button type="button" className={`button buttonSecondary ${styles.sidebarToggle}`} title={sidebarOpen ? "Thu gọn cây tệp" : "Mở cây tệp"} aria-expanded={sidebarOpen} aria-label={sidebarOpen ? "Thu gọn thanh tệp dự án" : "Mở thanh tệp dự án"} onClick={() => setSidebarOpen(open => !open)}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /><path d={sidebarOpen ? "m7 9-3 3 3 3" : "m12 9 3 3-3 3"} /></svg></button>}
+      {fileView && sidebarOpen && <h2 className={styles.sidebarHeading}>Tệp dự án</h2>}
       {history && <h2 className={styles.historyHeading}>Lịch sử commit</h2>}
       <div className={styles.repoToolbar}>
         <details ref={branchesMenu} className={styles.branchPicker}><summary className="dropdownTrigger" aria-label="Branch" aria-disabled={!data.branches.length} data-branch={data.selectedBranch?.name ?? ""}><RepositoryIcon name="branch" /><span>{data.selectedBranch?.name ?? "Chưa có nhánh"}</span><RepositoryIcon name="chevron" /></summary>
@@ -126,9 +132,9 @@ export function BranchBrowser({
         {history && <CommitFilters endpoint={endpoint} />}
         {!history && <><button type="button" className={styles.branchCount} onClick={() => { if (branchesMenu.current) branchesMenu.current.open = !branchesMenu.current.open; }}><RepositoryIcon name="branch" /><span><strong>{data.branches.length}</strong> nhánh</span></button>
         <FileFinder endpoint={endpoint} refName={data.selectedBranch?.name ?? null} />
-        <CloneDialog repository={repository} /></>}
+        {!fileView && <CloneDialog repository={repository} />}</>}
       </div>
-      {!history && data.selectedBranch && <RepositoryOverview endpoint={endpoint} refName={data.selectedBranch.name} />}
+      {!history && query.get("view") !== "blob" && data.selectedBranch && <RepositoryOverview endpoint={endpoint} refName={data.selectedBranch.name} />}
       {query.get("view") === "commits" ? (
         <CommitBrowser endpoint={endpoint} />
       ) : data.selectedBranch || query.get("path") ? (
@@ -144,6 +150,6 @@ export function BranchBrowser({
           <p>Chọn một branch hiện có để xem thông tin.</p>
         </section>
       )}
-    </>
+    </div>
   );
 }

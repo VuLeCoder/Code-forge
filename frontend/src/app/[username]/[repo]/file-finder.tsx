@@ -34,7 +34,7 @@ export function FileFinder({ endpoint, refName }: { endpoint: string; refName: s
     {open && refName && <div id="file-results" role="listbox" aria-label="Kết quả tìm file" className={styles.fileResults}>
       {result.key !== key ? <p role="status">Đang tìm file…</p> : result.error ? <p role="alert">{result.error}</p> : <>
         {!files.length && <p>Không tìm thấy file.</p>}
-        {files.map((file, index) => <Link role="option" aria-selected={index === selected} id={`file-result-${index}`} key={file} aria-current={index === selected ? "true" : undefined} href={`${pathname}?${new URLSearchParams({ ref: refName, path: file, view: "blob" })}`} onClick={() => setOpen(false)}>{file}</Link>)}
+        {files.map((file, index) => <Link role="option" aria-selected={index === selected} id={`file-result-${index}`} key={file} title={file} aria-current={index === selected ? "true" : undefined} href={`${pathname}?${new URLSearchParams({ ref: refName, path: file, view: "blob" })}`} onMouseEnter={() => setSelected(index)} onClick={() => setOpen(false)}>{file}</Link>)}
         {result.hasMore && <p>Còn kết quả khác. Hãy nhập đường dẫn cụ thể hơn.</p>}
       </>}
     </div>}

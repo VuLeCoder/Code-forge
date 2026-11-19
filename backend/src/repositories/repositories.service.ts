@@ -182,7 +182,7 @@ export class RepositoriesService {
             if (branchQuery.blob && selected) {
               return { ...await this.storage.blob(current.storageKey, selected.commitSha, path, branchQuery.image), ref: selected.name, storageState: 'READY', storageGeneration: current.storageGeneration };
             }
-            const tree = selected ? await this.storage.tree(current.storageKey, selected.commitSha, path) : { path, commitSha: null, entries: [] };
+            const tree = selected ? await this.storage.tree(current.storageKey, selected.commitSha, path, true) : { path, commitSha: null, entries: [] };
             return { ...tree, ref: selected?.name ?? null, storageState: selected ? 'READY' : current.storageGeneration > 0 ? 'RESET' : 'EMPTY', storageGeneration: current.storageGeneration };
           } catch (error) { return { readError: error }; }
         }
