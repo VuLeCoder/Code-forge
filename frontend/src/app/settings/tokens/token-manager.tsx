@@ -18,6 +18,7 @@ async function api<T>(path = "", init?: RequestInit): Promise<T> {
 }
 
 export function TokenManager() {
+  const [tab, setTab] = useState<"active" | "inactive">("active");
   const [creating, setCreating] = useState(false);
   const [tokens, setTokens] = useState<Token[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,7 +55,7 @@ export function TokenManager() {
     try {
       const result = await api<{ token: Token; secret: string }>("", { method: "POST", body: JSON.stringify({ name: name.trim(), scopes: write ? ["repo:read", "repo:write"] : ["repo:read"], expiresAt: new Date(Date.now() + Number(days) * 86400000).toISOString() }) });
       if (!alive.current) return;
-      creation.current?.close(); setTokens((previous) => [result.token, ...previous]); setSecret(result.secret); setName("");
+      creation.current?.close(); setTokens((previous) => [result.token, ...previous]); setSecret(result.secret); setTab("active"); setName("");
     } catch (e) { if (alive.current) setError(e instanceof Error ? e.message : "Không thể tạo token."); }
     finally { if (alive.current) setBusy(false); }
   }
@@ -73,33 +74,40 @@ export function TokenManager() {
     try { await navigator.clipboard.writeText(secret); setMessage("Đã sao chép token."); }
     catch { secretInput.current?.focus(); secretInput.current?.select(); setMessage("Hãy sao chép token đã chọn."); }
   }
+  const isActive = (token: Token) => !token.revokedAt && new Date(token.expiresAt).getTime() > now;
+  const activeCount = tokens.filter(isActive).length;
+  const visibleTokens = tokens.filter(token => tab === "active" ? isActive(token) : !isActive(token));
   return <div className={styles.manager}>
-    <header className={styles.intro}><span className={styles.eyebrow}>TRUY CẬP GIT</span><h2>Token truy cập cá nhân</h2><p>Tạo chìa khóa riêng cho từng thiết bị hoặc công cụ của bạn.</p>
-      <div className={styles.guide}><h3>Sử dụng PAT với Git</h3><p>Dùng tên tài khoản làm username và PAT thay cho mật khẩu khi clone, fetch hoặc push.</p><p>Token chỉ truy cập được các repository bạn có quyền. Giữ token riêng tư và không đặt trong URL clone.</p></div>
+    <header className={styles.intro}>
+      <div className={styles.introTitle}><span className={styles.keyIcon} aria-hidden="true">⌘</span><div><span className={styles.eyebrow}>TRUY CẬP GIT</span><h2>Token truy cập cá nhân</h2><p>Chìa khóa riêng cho từng thiết bị và công cụ của bạn.</p></div></div>
+      <div className={styles.guide}><h3>Kết nối Git bằng PAT</h3><div className={styles.credentials}><div><span>Username</span><strong>Tên tài khoản của bạn</strong></div><div><span>Password</span><strong>Token truy cập cá nhân</strong></div></div><p>Dùng khi clone, fetch hoặc push. Token chỉ có hiệu lực với repo bạn được phép truy cập; giữ riêng tư và không đặt trong URL clone.</p></div>
     </header>
 
     {error && !creating && <p role="alert">{error}</p>}
-    <p role="status">{message}</p>
+    <p role="status" className={styles.feedback}>{message}</p>
     {secret && <section className={styles.secret} aria-label="Token mới">
       <h2>Lưu token ngay</h2><p>Secret chỉ hiển thị lần này. Sau khi đóng hoặc rời trang, bạn không thể xem lại.</p>
       <label htmlFor="token-secret">Secret PAT</label><input ref={secretInput} id="token-secret" value={secret} readOnly onFocus={(event) => event.target.select()} />
       <div className={styles.actions}><button className="button buttonSecondary" onClick={copy}>Sao chép token</button><button className="button buttonSecondary" onClick={() => { setSecret(""); setMessage(""); }}>Đã lưu, đóng secret</button></div>
     </section>}
-    <section className={styles.inventory}><div className={styles.listHeading}><h2>Token của bạn</h2><div className={styles.actions}><span className={styles.count}>{tokens.filter(token => !token.revokedAt && new Date(token.expiresAt).getTime() > now).length} đang hoạt động</span><button className="button buttonPrimary" disabled={busy || !!secret} onClick={() => { setError(""); setCreating(true); creation.current?.showModal(); }}>Tạo token</button></div></div>
+    <section className={styles.inventory}><div className={styles.listHeading}><h2>Token của bạn</h2><div className={styles.actions}><button className="button buttonPrimary" disabled={busy || !!secret} onClick={() => { setError(""); setCreating(true); creation.current?.showModal(); }}>Tạo token</button></div></div>
+      <div className={styles.filterBar}><div className={styles.tabs} role="tablist" aria-label="Trạng thái token">{(["active", "inactive"] as const).map(value => <button key={value} id={`tokens-${value}-tab`} type="button" role="tab" aria-selected={tab === value} aria-controls="tokens-panel" tabIndex={tab === value ? 0 : -1} onClick={() => setTab(value)} onKeyDown={event => { if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) { event.preventDefault(); const next = event.key === "Home" ? "active" : event.key === "End" ? "inactive" : tab === "active" ? "inactive" : "active"; setTab(next); document.getElementById(`tokens-${next}-tab`)?.focus(); } }}>{value === "active" ? "Đang hoạt động" : "Đã thu hồi / hết hạn"}<span>{value === "active" ? activeCount : tokens.length - activeCount}</span></button>)}</div><button className={styles.refresh} onClick={reload} disabled={busy || loading}>Tải lại danh sách</button></div>
+      <div id="tokens-panel" role="tabpanel" aria-labelledby={`tokens-${tab}-tab`}>
       {loading ? <p role="status">Đang tải token…</p> : <>
-        <button className="button buttonSecondary" onClick={reload} disabled={busy}>Tải lại danh sách</button>
-        {!tokens.length && !error && <div className={styles.empty}><span aria-hidden="true">⌘</span><h3>Chưa có token nào.</h3><p>Tạo token đầu tiên để kết nối Git từ máy tính của bạn.</p></div>}
-        <ul className={styles.list}>{tokens.map((token) => {
+        {!visibleTokens.length && !error && <div className={styles.empty}><span aria-hidden="true">⌘</span><h3>{!tokens.length ? "Chưa có token nào." : tab === "active" ? "Chưa có token đang hoạt động." : "Chưa có token đã thu hồi hoặc hết hạn."}</h3><p>{tab === "active" ? "Tạo token để kết nối Git từ máy tính của bạn." : "Các token không còn hiệu lực sẽ xuất hiện tại đây."}</p></div>}
+        <ul className={styles.list}>{visibleTokens.map((token) => {
           const expired = new Date(token.expiresAt).getTime() <= now;
           const stateClass = token.revokedAt ? styles.tokenRevoked : expired ? styles.tokenExpired : styles.tokenActive;
           const stateLabel = token.revokedAt ? "Đã thu hồi" : expired ? "Đã hết hạn" : "Đang hoạt động";
           return <li key={token.id}>
-          <h3>{token.name}</h3><p>Prefix: <code>{token.tokenPrefix}</code> · {token.scopes.join(", ")}</p>
-          <p><span className={`${styles.tokenState} ${stateClass}`}>{stateLabel}</span> · Hết hạn: {new Date(token.expiresAt).toLocaleString("vi-VN")}</p>
-          <p>Lần dùng gần nhất: {token.lastUsedAt ? new Date(token.lastUsedAt).toLocaleString("vi-VN") : "Chưa dùng"}</p>
-          {!token.revokedAt && <button className="button buttonSecondary" disabled={busy} onClick={() => { setRevoking(token); confirmation.current?.showModal(); }}>Thu hồi {token.name}</button>}
+          <div className={styles.cardHeading}><span className={styles.cardIcon} aria-hidden="true">⌘</span><h3>{token.name}</h3><span className={`${styles.tokenState} ${stateClass}`}>{stateLabel}</span></div>
+          <p className={styles.prefix}>Prefix <code>{token.tokenPrefix}</code></p>
+          <div className={styles.scopes}>{token.scopes.map(scope => <span key={scope}>{scope === "repo:write" ? "Đọc & ghi · push" : "Đọc · clone / fetch"}</span>)}</div>
+          <dl className={styles.metadata}><div><dt>Hết hạn</dt><dd>{new Date(token.expiresAt).toLocaleString("vi-VN")}</dd></div><div><dt>Lần dùng gần nhất</dt><dd>{token.lastUsedAt ? new Date(token.lastUsedAt).toLocaleString("vi-VN") : "Chưa dùng"}</dd></div></dl>
+          <div className={styles.cardFooter}>{!token.revokedAt ? <button className="button buttonSecondary" disabled={busy} onClick={() => { setRevoking(token); confirmation.current?.showModal(); }}>Thu hồi {token.name}</button> : <span>Đã ngừng quyền truy cập Git</span>}</div>
         </li>})}</ul>
       </>}
+      </div>
     </section>
     <dialog ref={creation} className={styles.dialog} aria-labelledby="create-token-title" aria-busy={busy} onCancel={(event) => { if (busy) event.preventDefault(); }} onClose={() => { setCreating(false); setName(""); setWrite(false); setDays("30"); setError(""); }}>
     <form onSubmit={create} className={styles.form}>

@@ -132,3 +132,48 @@
 .empty { padding: 32px 20px; margin-top: 16px; text-align: center; border: 1px dashed var(--border-strong); border-radius: var(--radius-md); background: var(--surface); }
 .empty > span { display: block; font-size: 2rem; color: var(--brand-700); margin-bottom: 10px; }
 .empty h3 { font-size: 1rem; margin-bottom: 8px; }
+
+.intro { display: grid; grid-template-columns: .9fr 1.1fr; gap: 24px; padding: 24px; align-items: center; }
+.introTitle { display: flex; align-items: flex-start; gap: 14px; min-width: 0; }
+.keyIcon, .cardIcon { display: grid; place-items: center; flex-shrink: 0; color: var(--brand-700); background: var(--surface); border: 1px solid var(--brand-100); border-radius: 12px; width: 44px; height: 44px; font-size: 1.5rem; }
+.guide { margin: 0; padding: 0 0 0 24px; border-top: 0; border-left: 1px solid var(--brand-100); }
+.credentials { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; }
+.credentials div { display: grid; gap: 4px; }
+.credentials span { color: var(--muted); font-size: .75rem; }
+.credentials strong { color: var(--text); font-size: .85rem; font-weight: 600; }
+.guide p { font-size: .82rem; }
+.feedback:empty { display: none; }
+.filterBar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.tabs button { display: flex; align-items: center; gap: 8px; border: 1px solid transparent; border-radius: var(--radius-sm); padding: 9px 12px; background: transparent; color: var(--muted); font-size: .85rem; font-weight: 650; cursor: pointer; }
+.tabs button[aria-selected="true"] { background: var(--brand-50); color: var(--brand-700); border-color: var(--brand-100); }
+.tabs button span { padding: 1px 6px; border-radius: 6px; background: var(--surface); font-size: .75rem; }
+.refresh { padding: 8px; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: .8rem; }
+.tabs button:focus-visible, .refresh:focus-visible { outline: 2px solid var(--brand-600); outline-offset: 2px; }
+.list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.list li { border-inline-start: 1px solid var(--border); padding: 18px; gap: 14px; }
+.cardHeading { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.cardIcon { width: 34px; height: 34px; border-radius: 9px; font-size: 1.2rem; }
+.cardHeading h3 { flex: 1; min-width: 0; }
+.tokenState { font-size: .68rem; }
+.prefix { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.scopes { display: flex; flex-wrap: wrap; gap: 6px; }
+.scopes span { font-size: .75rem; padding: 4px 8px; border-radius: 6px; color: var(--brand-700); background: var(--brand-50); border: 1px solid var(--brand-100); }
+.metadata { display: grid; gap: 10px; font-size: .8rem; }
+.metadata div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; }
+.metadata dt { color: var(--muted); }
+.metadata dd { margin: 0; color: var(--text); }
+.cardFooter { display: flex; align-items: center; min-height: 43px; border-top: 1px solid var(--border); padding-top: 12px; margin-top: auto; }
+.cardFooter button { color: var(--danger); font-size: .8rem; }
+.cardFooter > span { color: var(--muted); font-size: .78rem; }
+@media (max-width: 900px) {
+  .intro { grid-template-columns: 1fr; gap: 18px; }
+  .guide { padding: 16px 0 0; border-left: 0; border-top: 1px solid var(--brand-100); }
+  .list { grid-template-columns: 1fr; }
+}
+@media (max-width: 480px) {
+  .intro { padding: 18px; }
+  .introTitle { gap: 10px; }
+  .credentials { grid-template-columns: 1fr; }
+  .tabs button { padding: 8px; font-size: .78rem; }
+}

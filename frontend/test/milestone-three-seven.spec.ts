@@ -51,6 +51,12 @@ test('M3.7 PAT UI creates once, copies, hides on reload, confirms revoke and fit
   await expect(page.getByRole('dialog', { name: /Thu hồi token/ })).not.toBeVisible();
   await expect(page.getByRole('status')).toHaveText('Đã thu hồi token.');
   expect(revoked).toBe(1);
+  await expect(page.getByRole('heading', { name: 'Laptop', exact: true })).toHaveCount(0);
+  await page.getByRole('tab', { name: /Đã thu hồi/ }).click();
+  await expect(page.getByRole('heading', { name: 'Laptop', exact: true })).toBeVisible();
+  await expect(page.getByText('Đã thu hồi', { exact: true })).toBeVisible();
+  await page.getByRole('tab', { name: /Đang hoạt động/ }).click();
+  await expect(page.getByRole('heading', { name: 'Laptop', exact: true })).toHaveCount(0);
 });
 
 test('M3.7 PAT guard, loading, error retry, creation failure and expiry state', async ({ page }) => {
@@ -70,7 +76,9 @@ test('M3.7 PAT guard, loading, error retry, creation failure and expiry state', 
     ? route.fulfill({ status: 403, json: { error: { message: 'Đã đạt giới hạn token' } } })
     : route.fulfill({ json: { tokens: [{ ...token, expiresAt: '2000-01-01T00:00:00Z' }] } }));
   await page.getByRole('button', { name: 'Tải lại danh sách' }).click();
-  await expect(page.getByText('Đã hết hạn', { exact: false })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Laptop', exact: true })).toHaveCount(0);
+  await page.getByRole('tab', { name: /Đã thu hồi/ }).click();
+  await expect(page.getByText('Đã hết hạn', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Tạo token', exact: true }).click();
   await page.getByLabel('Tên token').fill('New');
   await page.getByRole('dialog').getByRole('button', { name: 'Tạo token', exact: true }).click();
