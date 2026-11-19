@@ -262,7 +262,7 @@
 }
 
 .codeLines > div { display: grid; grid-template-columns: 44px 1fr; }
-.codeLines em { color: #46566c; font-style: normal; text-align: right; padding-right: 16px; user-select: none; }
+.codeLines em { color: #91a4bd; font-style: normal; text-align: right; padding-right: 16px; user-select: none; }
 .codeLines b { color: #84adff; font-weight: 500; }
 .codeLines span { color: #fdb022; }
 

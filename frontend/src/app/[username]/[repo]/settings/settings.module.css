@@ -16,8 +16,8 @@
 .form > button { justify-self: start; margin-top: 8px; }
 .hint { color: var(--muted); font-size: .82rem; line-height: 1.5; }
 .error, .success { margin-top: 16px; padding: 12px 14px; border-radius: var(--radius-sm); line-height: 1.5; }
-.error { background: #ffebe9; color: var(--danger); border: 1px solid #ff8182; border-left: 3px solid var(--danger); }
-.success { background: #dafbe1; color: #1a7f37; border: 1px solid #aceebb; border-left: 3px solid #1f883d; }
+.error { background: var(--danger-surface); color: var(--danger-text); border: 1px solid var(--danger-border); border-left: 3px solid var(--danger); }
+.success { background: var(--success-surface); color: var(--success-text); border: 1px solid var(--success-border); border-left: 3px solid #1f883d; }
 .danger { border-color: #ff8182; background: color-mix(in srgb, #ffebe9 25%, var(--surface)); }
 .danger h2 { color: var(--danger); }
 .dialog { width: min(480px, calc(100% - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 22px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); color: var(--text); box-shadow: var(--shadow-lg); }
@@ -26,7 +26,7 @@
 .dialog p { margin-bottom: 18px; color: var(--muted); line-height: 1.6; }
 .dialog label { display: block; margin-bottom: 8px; }
 .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
-.deleteButton { min-height: 40px; padding: 9px 14px; border: 0; border-radius: var(--radius-sm); color: #fff; background: var(--danger); font-weight: 700; cursor: pointer; }
+.deleteButton { min-height: 40px; padding: 9px 14px; border: 0; border-radius: var(--radius-sm); color: #fff; background: var(--danger-button); font-weight: 700; cursor: pointer; }
 .deleteButton:hover:not(:disabled) { filter: brightness(.92); }
 .deleteButton:disabled { opacity: .55; cursor: not-allowed; }
 .memberList { list-style: none; padding: 0; margin: 4px 0 0; display: grid; gap: 8px; }
@@ -39,12 +39,12 @@
 .roleSelect { min-width: 130px; }
 .removeBtn, .revokeBtn { min-height: 38px; padding: 6px 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--muted); font-size: .82rem; font-weight: 650; cursor: pointer; }
 .removeBtn { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); color: var(--danger); }
-.removeBtn:hover { background: #ffebe9; }
+.removeBtn:hover { background: var(--danger-surface); }
 .revokeBtn:hover { background: var(--canvas); color: var(--text); }
 .removeBtn:disabled, .revokeBtn:disabled { opacity: .55; cursor: not-allowed; }
 .emptyHint { color: var(--muted); font-size: .9rem; }
 .subheading { margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--border); font-size: 1rem; }
-.inlineError { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 10px 12px; border: 1px solid #ff8182; border-radius: var(--radius-sm); color: var(--danger); background: #ffebe9; line-height: 1.5; }
+.inlineError { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 10px 12px; border: 1px solid var(--danger-border); border-radius: var(--radius-sm); color: var(--danger-text); background: var(--danger-surface); line-height: 1.5; }
 .inlineError button { min-height: 36px; border: 0; color: inherit; background: transparent; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
 .inviteForm { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 2px; }
 .inviteForm input { flex: 1 1 220px; min-width: 160px; min-height: 40px; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
