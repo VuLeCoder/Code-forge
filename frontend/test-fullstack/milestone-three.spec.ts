@@ -76,7 +76,7 @@ test('M3.8 real registration, source browser desktop/mobile, history and public 
       await expect(viewer.getByText('hello ü', { exact: true })).toBeVisible();
       expect(await publicPage.evaluate(() => 'm38xss' in window)).toBe(false);
       expect(await publicPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-      await viewer.getByRole('link', { name: '← Thư mục cha' }).click();
+      await publicPage.getByRole('link', { name: '← Thư mục cha' }).click();
       await expect(publicPage.getByRole('link', { name: 'code ü.txt', exact: true })).toBeVisible();
       await publicPage.getByLabel('Branch', { exact: true }).selectOption('main');
       await expect(publicPage).toHaveURL(/\?ref=main$/);

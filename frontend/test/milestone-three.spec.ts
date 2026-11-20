@@ -262,7 +262,7 @@ test('M3.3 opens files through proxy with safe code, line numbers, URL and mobil
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.reload();
   await expect(viewer.getByRole('rowheader', { name: '1', exact: true })).toBeVisible();
-  await viewer.getByRole('link', { name: '← Thư mục cha' }).click();
+  await page.getByRole('link', { name: '← Thư mục cha' }).click();
   await expect(page.getByRole('link', { name: 'hello & ü.ts', exact: true })).toBeVisible();
   await page.goBack();
   await expect(viewer).toBeVisible();

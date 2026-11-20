@@ -71,6 +71,7 @@ test('owner sees deleted repositories and restores one from the profile', async 
   await page.route('**/api/v1/repos/alice/old-project/restore', (route) => { restored = true; return route.fulfill({ status: 201, json: { repository: { name: 'old-project' } } }); });
   await page.goto('/alice?deleted=1');
   await expect(page.getByRole('status').filter({ hasText: 'Repository đã được xóa thành công.' })).toBeVisible();
+  await page.getByRole('tab', { name: 'Repo đã xóa', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Repository đã xóa' })).toBeVisible();
   await page.getByRole('button', { name: 'Khôi phục' }).click();
   await expect(page.getByRole('link', { name: 'old-project' }).first()).toBeVisible();
@@ -144,7 +145,7 @@ test('public profile is accessible anonymously and fits a mobile viewport', asyn
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto('/alice');
   await expect(page.getByRole('heading', { name: 'alice', exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Repository', exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Repo', exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'hello-world' })).toBeVisible();
   await expect(page.getByText(user.email)).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

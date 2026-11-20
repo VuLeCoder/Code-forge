@@ -109,16 +109,16 @@ test("admin can inspect users, repositories and audit, then confirm a restore", 
   await lockUserButton.click();
   await page.getByRole("dialog", { name: "Khóa alice?" }).getByRole("button", { name: "Xác nhận" }).click();
   await expect(page.getByRole("table").getByText("Đã khóa", { exact: true })).toBeVisible();
-  await selectChoice(page.getByLabel("Trạng thái"), "LOCKED");
+  await selectChoice(page.getByRole("combobox", { name: "Trạng thái", exact: true }), "LOCKED");
   await expect(page.getByRole("row", { name: /alice/ })).toBeVisible();
   await expect(page.getByRole("row", { name: /another-admin/ })).toHaveCount(0);
   await page.getByRole("button", { name: "Mở khóa" }).click();
   await page.getByRole("dialog", { name: "Mở khóa alice?" }).getByRole("button", { name: "Xác nhận" }).click();
   await expect(page.getByRole("row", { name: /alice/ })).toHaveCount(0);
-  await selectChoice(page.getByLabel("Trạng thái"), "");
+  await selectChoice(page.getByRole("combobox", { name: "Trạng thái", exact: true }), "");
   await expect(page.getByRole("row", { name: /alice/ }).getByText("Hoạt động", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "Repositories" }).click();
+  await page.getByRole("button", { name: "Repository" }).click();
   await expect(page.getByRole("table").getByText("Đã khóa", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Mở khóa", exact: true }).click();
   await page.getByRole("dialog", { name: "Mở khóa demo?" }).getByRole("button", { name: "Xác nhận" }).click();

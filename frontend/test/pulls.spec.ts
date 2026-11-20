@@ -85,7 +85,7 @@ test("owner creates a pull request from a slash branch and reviews the compare s
     sourceBranch: "feature/greeting", targetBranch: "main",
   });
   await expect(page.getByRole("heading", { name: /Add greeting/ })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /Commits/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^Commit/ })).toBeVisible();
   await expect(page.getByText("feature/greeting", { exact: true }).first()).toBeVisible();
   await expect(page.getByLabel("Diff của README.md")).toContainText("Hello from Code Forge");
 });
@@ -343,8 +343,8 @@ test("branch loading error is distinct from an empty list and can be retried", a
   await expect(page.getByRole("button", { name: "Tạo pull request", exact: true }).last()).toBeDisabled();
 
   await page.getByRole("button", { name: "Thử tải lại branch" }).click();
-  await expect(page.getByLabel("Branch nguồn")).toHaveValue("");
-  await expect(page.getByLabel("Branch đích")).toHaveValue("main");
+  await expect(page.getByRole("combobox", { name: "Branch nguồn" })).toContainText("Chọn");
+  await expect(page.getByRole("combobox", { name: "Branch đích" })).toContainText("main");
   await expect(branchError).toHaveCount(0);
   expect(branchCalls).toBe(2);
 });
