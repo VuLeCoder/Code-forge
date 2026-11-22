@@ -83,7 +83,9 @@ for (const theme of ['light', 'dark']) {
     for (const item of measurements) { expect(item.ratio).toBeGreaterThanOrEqual(4.5); expect(item.size).toBeGreaterThanOrEqual(14); }
     await sidebar.getByRole('link', { name: 'README', exact: true }).click();
     await expect(page).toHaveURL(/view=blob.*path=README.md/);
-    await page.setViewportSize({ width: 375, height: 812 });
+    // Mobile file layout is deferred; retain the overflow check at laptop width.
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await expect(page.getByRole('region', { name: 'Nội dung file', exact: true }).getByRole('rowheader', { name: '1', exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });
 }

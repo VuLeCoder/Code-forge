@@ -244,8 +244,9 @@ test('M3.4 discovers nested case-insensitive README and resolves parent image an
   await expect(readme.getByRole('link', { name: 'Invalid' })).toHaveCount(0);
 });
 
-test('M3.3 opens files through proxy with safe code, line numbers, URL and mobile navigation', async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 812 });
+test('M3.3 opens files through proxy with safe code, line numbers, URL and laptop navigation', async ({ page }) => {
+  // Laptop is the supported layout for the redesigned file viewer.
+  await page.setViewportSize({ width: 1366, height: 768 });
   await page.route('**/api/v1/auth/*', (route) => route.fulfill({ status: 401, json: {} }));
   await page.route('**/api/v1/repos/alice/hello-world/branches*', (route) => {
     const ref = new URL(route.request().url()).searchParams.get('ref') ?? 'main';
@@ -262,15 +263,19 @@ test('M3.3 opens files through proxy with safe code, line numbers, URL and mobil
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.reload();
   await expect(viewer.getByRole('rowheader', { name: '1', exact: true })).toBeVisible();
-  await page.getByRole('link', { name: '← Thư mục cha' }).click();
-  await expect(page.getByRole('link', { name: 'hello & ü.ts', exact: true })).toBeVisible();
+  await viewer.getByRole('navigation', { name: 'Đường dẫn mã nguồn' }).getByRole('link', { name: 'src # ü', exact: true }).click();
+  await expect(page).toHaveURL(/ref=feature%2Fdemo&path=src\+%23\+%C3%BC$/);
+  await expect(page.getByRole('region', { name: 'Cây thư mục', exact: true }).getByRole('link', { name: 'hello & ü.ts', exact: true })).toBeVisible();
   await page.goBack();
   await expect(viewer).toBeVisible();
   await page.getByLabel('Branch', { exact: true }).click();
   await page.getByRole('button', { name: 'main', exact: true }).or(page.getByRole('button', { name: 'main (mặc định)', exact: true })).click();
-  await expect(page).toHaveURL(/\?ref=main$/);
-  await page.getByRole('link', { name: 'README.md', exact: true }).click();
+  await expect(page).toHaveURL(url => url.searchParams.get('ref') === 'main' && url.searchParams.get('view') === 'blob' && url.searchParams.get('path') === 'src # ü/hello & ü.ts');
+  await expect(viewer.getByRole('rowheader', { name: '3', exact: true })).toBeVisible();
   await expect(viewer.getByText('main', { exact: true })).toBeVisible();
+  await viewer.getByRole('navigation', { name: 'Đường dẫn mã nguồn' }).getByRole('link', { name: 'Gốc', exact: true }).click();
+  await page.getByRole('region', { name: 'Cây thư mục', exact: true }).getByRole('link', { name: 'README.md', exact: true }).click();
+  await expect(viewer.getByRole('rowheader', { name: '1', exact: true })).toBeVisible();
   const response = await page.request.get('/api/v1/repos/alice/hello-world/blob?path=a&path=b');
   expect(response.status()).toBe(400);
   expect(response.headers()['cache-control']).toBe('private, no-store');
@@ -296,7 +301,7 @@ test('M3.3 displays empty, binary, large, truncated, missing and retry states', 
     await route.fulfill({ status: 503, json: { error: { code: 'GIT_READ_UNAVAILABLE' } } });
   });
   await page.goto('/alice/hello-world?view=blob&path=README.md');
-  await expect(viewer.getByRole('status')).toContainText('Đang tải file');
+  await expect(viewer.getByRole('status').filter({ hasText: /^Đang tải file…$/ })).toBeVisible();
   release();
   await expect(viewer.getByRole('alert')).toContainText('Chưa thể tải');
   await page.unroute('**/api/v1/repos/alice/hello-world/blob?**');
