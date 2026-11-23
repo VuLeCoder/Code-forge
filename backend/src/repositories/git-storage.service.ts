@@ -699,11 +699,15 @@ export class GitStorageService {
   }
 
   private async git(args: string[], env?: NodeJS.ProcessEnv, maxBuffer = 128 * 1024, signal?: AbortSignal) {
+    // execFile can spawn before processing an already-aborted signal. A fast
+    // update-ref could then commit a write before the child is killed.
+    signal?.throwIfAborted();
     return runFile('git', [...(process.platform === 'win32' ? ['-c', 'core.longpaths=true'] : []), ...args],
       { timeout: 15_000, maxBuffer, signal, env: { ...process.env, ...env } });
   }
 
   private async gitWithInput(args: string[], input: string, maxBuffer: number, signal?: AbortSignal) {
+    signal?.throwIfAborted();
     return new Promise<{ stdout: string; stderr: string }>((resolveResult, rejectResult) => {
       const child = spawn('git', [...(process.platform === 'win32' ? ['-c', 'core.longpaths=true'] : []), ...args], {
         env: process.env, stdio: ['pipe', 'pipe', 'pipe'],

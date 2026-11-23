@@ -460,6 +460,23 @@ describe('GitStorageService with real Git', () => {
     expect(await storage.snapshotRefs(key)).toEqual(beforeRefs);
   });
 
+  it('never moves a branch when the repository lock signal is already aborted before ref CAS', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'main', true, 'Lock loss');
+    const base = (await storage.branchSha(key, 'main'))!;
+    const candidate = await storage.createMergeCandidate(key, 'main', base, base, 1);
+    expect(candidate).not.toBe(base);
+    const before = await storage.snapshotRefs(key);
+    const controller = new AbortController();
+    controller.abort(new Error('Repository lock connection was lost.'));
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+      await expect(storage.compareAndSwapBranch(key, 'main', candidate, base, controller.signal))
+        .rejects.toMatchObject({ response: { error: { code: 'MERGE_REF_UPDATE_FAILED' } } });
+      expect(await storage.snapshotRefs(key)).toEqual(before);
+    }
+  });
+
   it('rejects a merge candidate containing a file above the configured file quota', async () => {
     const key = `${randomUUID()}.git`;
     await storage.create(key, 'main', true, 'Quota');
