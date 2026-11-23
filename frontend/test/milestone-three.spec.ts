@@ -257,7 +257,7 @@ test('M3.3 opens files through proxy with safe code, line numbers, URL and lapto
   await page.getByRole('link', { name: 'hello & ü.ts', exact: true }).click();
   const viewer = page.getByRole('region', { name: 'Nội dung file', exact: true });
   await expect(viewer.getByRole('rowheader', { name: '3', exact: true })).toBeVisible();
-  await expect(viewer.getByText('feature/demo', { exact: true })).toBeVisible();
+  await expect(viewer.getByRole('region', { name: 'Mã nguồn có số dòng', exact: true }).getByText('feature/demo', { exact: true })).toBeVisible();
   await expect(viewer.getByText('<script>window.sourceExecuted = true</script>', { exact: true })).toBeVisible();
   const fileUrl = page.url();
   const collapseSidebar = page.getByRole('button', { name: 'Thu gọn thanh tệp dự án', exact: true });
@@ -282,7 +282,7 @@ test('M3.3 opens files through proxy with safe code, line numbers, URL and lapto
   await page.getByRole('button', { name: 'main', exact: true }).or(page.getByRole('button', { name: 'main (mặc định)', exact: true })).click();
   await expect(page).toHaveURL(url => url.searchParams.get('ref') === 'main' && url.searchParams.get('view') === 'blob' && url.searchParams.get('path') === 'src # ü/hello & ü.ts');
   await expect(viewer.getByRole('rowheader', { name: '3', exact: true })).toBeVisible();
-  await expect(viewer.getByText('main', { exact: true })).toBeVisible();
+  await expect(viewer.getByRole('region', { name: 'Mã nguồn có số dòng', exact: true }).getByText('main', { exact: true })).toBeVisible();
   await viewer.getByRole('navigation', { name: 'Đường dẫn mã nguồn' }).getByRole('link', { name: 'Gốc', exact: true }).click();
   await page.getByRole('region', { name: 'Cây thư mục', exact: true }).getByRole('link', { name: 'README.md', exact: true }).click();
   await expect(viewer.getByRole('rowheader', { name: '1', exact: true })).toBeVisible();

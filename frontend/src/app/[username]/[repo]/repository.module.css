@@ -338,3 +338,7 @@
   .fileModeCollapsed .fileFinder { grid-column: 1 / -1; grid-row: 2; }
   .fileModeCollapsed .fileMain > .sourceNav { grid-column: 1 / -1; grid-row: 3; }
 }
+
+/* Give commit diffs the full repository width. */
+.repositoryColumns:has(.commitPanel) { grid-template-columns: minmax(0, 1fr); }
+.repositoryColumns:has(.commitPanel) > .about { display: none; }

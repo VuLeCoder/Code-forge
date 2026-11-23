@@ -281,6 +281,41 @@ describe('GitStorageService with real Git', () => {
     await expect(storage.branches('../escape.git', 'main')).rejects.toThrow();
   });
 
+  it('reads root and first-parent commit diffs, preserving rename, deletion and bounded file states', async () => {
+    const key = `${randomUUID()}.git`;
+    await storage.create(key, 'main', true, 'Commit changes');
+    const git = (args: string[], input?: string | Buffer) => execFileSync('git', ['--git-dir', join(root, key), ...args], { encoding: 'utf8', input }).trim();
+    const base = git(['rev-parse', 'refs/heads/main']);
+    const rootCommit = await storage.commitDetail(key, base);
+    expect(rootCommit.changes).toMatchObject({ baseSha: null, status: 'READY', files: [expect.objectContaining({ path: 'README.md', status: 'A', diffStatus: 'TEXT' })] });
+    expect(rootCommit.changes.files[0]?.diff).toContain('+# Commit changes');
+    const originalBlob = git(['rev-parse', `${base}:README.md`]);
+    const binaryBlob = git(['hash-object', '-w', '--stdin'], Buffer.from([0, 1, 2, 3]));
+    const largeBlob = git(['hash-object', '-w', '--stdin'], 'x'.repeat(140 * 1024));
+    const tree = git(['mktree'], `100644 blob ${originalBlob}\tRenamed.md\n100644 blob ${binaryBlob}\tbinary.dat\n100644 blob ${largeBlob}\tlarge.txt\n`);
+    const second = git(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', tree, '-p', base, '-m', 'Rename and add']);
+    git(['update-ref', 'refs/heads/main', second]);
+    const changed = await storage.commitDetail(key, second);
+    expect(changed.changes).toMatchObject({ baseSha: base, status: 'READY' });
+    expect(changed.changes.files).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: 'R', previousPath: 'README.md', path: 'Renamed.md', diffStatus: 'TEXT' }),
+      expect.objectContaining({ path: 'binary.dat', diffStatus: 'BINARY' }),
+      expect.objectContaining({ path: 'large.txt', diffStatus: 'TRUNCATED' }),
+    ]));
+    const baseTree = git(['rev-parse', `${base}^{tree}`]);
+    const merge = git(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', baseTree, '-p', second, '-p', base, '-m', 'Merge']);
+    git(['update-ref', 'refs/heads/main', merge]);
+    const merged = await storage.commitDetail(key, merge);
+    expect(merged.changes.baseSha).toBe(second);
+    expect(merged.changes.files).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'binary.dat', status: 'D' })]));
+    const manyTree = git(['mktree'], Array.from({ length: 201 }, (_, index) => `100644 blob ${originalBlob}\tf${index}.txt\n`).join(''));
+    const many = git(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', manyTree, '-p', merge, '-m', 'Many files']);
+    git(['update-ref', 'refs/heads/main', many]);
+    expect((await storage.commitDetail(key, many)).changes).toMatchObject({ status: 'LIMIT_EXCEEDED', files: [] });
+    const dangling = git(['-c', 'user.name=Test', '-c', 'user.email=test@example.test', 'commit-tree', baseTree, '-m', 'Unreachable']);
+    await expect(storage.commitDetail(key, dangling)).rejects.toThrow();
+  });
+
   it('pins a compare snapshot to exact branch commits and returns bounded text diff data', async () => {
     const key = `${randomUUID()}.git`;
     await storage.create(key, 'main', true, 'Compare');

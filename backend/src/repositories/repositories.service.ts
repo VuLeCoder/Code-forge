@@ -137,7 +137,7 @@ export class RepositoriesService {
       }
       if (branchQuery) {
         if (branchQuery.sha !== undefined) {
-          try { return { commit: await this.storage.commit(current.storageKey, branchQuery.sha), storageGeneration: current.storageGeneration }; }
+          try { return { commit: await this.storage.commitDetail(current.storageKey, branchQuery.sha), storageGeneration: current.storageGeneration }; }
           catch (error) { return { readError: error }; }
         }
         const result = await this.storage.branches(current.storageKey, current.defaultBranch);

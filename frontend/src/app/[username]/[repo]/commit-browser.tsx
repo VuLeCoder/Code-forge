@@ -5,12 +5,13 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { sessionFetch } from "@/lib/auth";
+import { CommitChanges, type CommitChangesData } from "./commit-changes";
 import { RepositoryIcon } from "./repository-icon";
 import styles from "./repository.module.css";
 
 type Commit = { sha: string; parentShas: string[]; subject: string; message: string;
   author: { name: string; email: string }; authoredAt: string;
-  committer: { name: string; email: string }; committedAt: string };
+  committer: { name: string; email: string }; committedAt: string; changes?: CommitChangesData };
 type History = { commits: Commit[]; page: number; hasMore: boolean; snapshot: string | null; storageState: string };
 const errors: Record<string, string> = {
   INVALID_COMMIT_FILTER: "Tác giả hoặc khoảng ngày không hợp lệ. Ngày kết thúc phải từ ngày bắt đầu trở đi.",
@@ -92,6 +93,7 @@ export function CommitBrowser({ endpoint, detail = false }: { endpoint: string; 
         <dt>Commit cha</dt><dd>{data.commit.parentShas.length ? data.commit.parentShas.map((parent) => <Link className={styles.parentCommit} key={parent} href={href(parent)}><code>{parent}</code></Link>) : "Commit đầu tiên, không có commit cha."}</dd>
       </dl>
       <pre className={styles.commitMessage}>{data.commit.message || "(Không có thông điệp)"}</pre>
+      <CommitChanges key={data.commit.sha} changes={data.commit.changes} />
     </> : <>
       {data.storageState === "RESET" && <p className={styles.notice}>Git storage đã được khởi tạo lại; lịch sử trước đó không còn.</p>}
       {data.commits.length ? Array.from(groups, ([day, commits]) => <section className={styles.commitDay} key={day} aria-label={`Commit ngày ${day}`}>

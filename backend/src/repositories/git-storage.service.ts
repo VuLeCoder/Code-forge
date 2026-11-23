@@ -123,6 +123,22 @@ export class GitStorageService {
     }
   }
 
+  async commitDetail(key: string, sha: string) {
+    const commit = await this.commit(key, sha);
+    const args = ['--git-dir', this.path(key)];
+    const baseSha = commit.parentShas[0] ?? null;
+    try {
+      const signal = AbortSignal.timeout(20_000);
+      const files = await this.listCompareFiles(args, baseSha, sha, signal);
+      const changes = await this.readCompareFileDiffs(args, baseSha, sha, files, signal);
+      return { ...commit, changes: { baseSha, status: 'READY' as const, files: changes } };
+    } catch (error) {
+      const code = error instanceof ServiceUnavailableException
+        ? (error.getResponse() as { error?: { code?: string } }).error?.code : undefined;
+      return { ...commit, changes: { baseSha, status: code === 'GIT_COMPARE_LIMIT_EXCEEDED' || (error as NodeJS.ErrnoException).code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ? 'LIMIT_EXCEEDED' as const : 'UNAVAILABLE' as const, files: [] } };
+    }
+  }
+
   async commits(key: string, headSha: string, page = 1, snapshot = headSha, filters: { author?: string; since?: string; until?: string } = {}) {
     this.validateCommitFilters(filters);
     this.validateCommitSha(headSha);
@@ -316,8 +332,8 @@ export class GitStorageService {
     return { state: commitCount ? 'READY' as const : 'ALREADY_MERGED' as const, sourceSha, targetSha, mergeBase };
   }
 
-  private async listCompareFiles(args: string[], mergeBase: string, sourceSha: string, signal: AbortSignal): Promise<CompareFile[]> {
-    const rawFiles = (await this.git([...args, 'diff', '--name-status', '-z', '--find-renames', mergeBase, sourceSha], undefined, 128 * 1024, signal)).stdout;
+  private async listCompareFiles(args: string[], mergeBase: string | null, sourceSha: string, signal: AbortSignal): Promise<CompareFile[]> {
+    const rawFiles = (await this.git([...args, ...(mergeBase ? ['diff'] : ['diff-tree', '--root', '--no-commit-id', '-r']), '--name-status', '-z', '--find-renames', ...(mergeBase ? [mergeBase] : []), sourceSha], undefined, 128 * 1024, signal)).stdout;
     const tokens = rawFiles.split('\0').filter(Boolean);
     const files: CompareFile[] = [];
     for (let i = 0; i < tokens.length;) {
@@ -336,7 +352,7 @@ export class GitStorageService {
     return files;
   }
 
-  private async readCompareFileDiffs(args: string[], mergeBase: string, sourceSha: string, files: CompareFile[], signal: AbortSignal): Promise<CompareFileDiff[]> {
+  private async readCompareFileDiffs(args: string[], mergeBase: string | null, sourceSha: string, files: CompareFile[], signal: AbortSignal): Promise<CompareFileDiff[]> {
     const result: CompareFileDiff[] = [];
     let usedBytes = 0;
     for (const file of files) {
@@ -348,8 +364,8 @@ export class GitStorageService {
       const pathspecs = [...new Set(paths)].map((path) => `:(literal)${path}`);
       let diff: string;
       try {
-        diff = (await this.git([...args, 'diff', '--no-ext-diff', '--no-color', '--no-textconv', '--unified=3', '--find-renames',
-          mergeBase, sourceSha, '--', ...pathspecs], undefined, 128 * 1024 + 8192, signal)).stdout;
+        diff = (await this.git([...args, ...(mergeBase ? ['diff'] : ['diff-tree', '--root', '--no-commit-id', '-r', '-p']), '--no-ext-diff', '--no-color', '--no-textconv', '--unified=3', '--find-renames',
+          ...(mergeBase ? [mergeBase] : []), sourceSha, '--', ...pathspecs], undefined, 128 * 1024 + 8192, signal)).stdout;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
           result.push({ ...file, diffStatus: 'TRUNCATED' });

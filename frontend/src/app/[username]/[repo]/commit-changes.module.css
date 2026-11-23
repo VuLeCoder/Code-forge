@@ -1,0 +1,28 @@
+.changes { margin-top: 28px; min-width: 0; }
+.overview { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; border-block: 1px solid var(--border); padding: 12px 0; }
+.workspace { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 24px; align-items: start; }
+.sidebar { min-width: 0; position: sticky; top: 20px; }
+.sidebar label { display: block; font-weight: 600; margin-bottom: 8px; }
+.sidebar input { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--canvas); color: var(--text); font: inherit; }
+.sidebar ul { list-style: none; margin: 12px 0 0; padding: 0; max-height: 65vh; overflow: auto; }
+.sidebar a { display: flex; align-items: baseline; gap: 8px; padding: 8px; border-radius: 6px; overflow-wrap: anywhere; }
+.sidebar a:hover { background: var(--canvas); }
+.status { color: var(--muted); font-size: .8rem; flex-shrink: 0; }
+.files { min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+.file { min-width: 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; scroll-margin-top: 20px; }
+.file summary { padding: 14px 16px; background: var(--canvas); cursor: pointer; overflow-wrap: anywhere; }
+.fileName { font-family: monospace; font-weight: 600; margin-right: 12px; }
+.stats { float: right; margin-left: 12px; white-space: nowrap; }
+.added { color: var(--success-text); }
+.removed { color: var(--danger-text); }
+tr.added { background: var(--success-surface); }
+tr.removed { background: var(--danger-surface); }
+.meta { color: var(--muted); background: var(--canvas); }
+.context { color: var(--text); }
+.scroll { max-width: 100%; overflow: auto; max-height: 75vh; }
+.scroll table { border-collapse: collapse; width: 100%; font: 13px/1.7 monospace; }
+.number { min-width: 42px; padding: 0 8px; text-align: right; user-select: none; border-right: 1px solid var(--border); }
+.code { white-space: pre; padding: 0 12px; width: 100%; overflow-wrap: normal; }
+.notice { padding: 4px 16px; }
+.srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+@media (max-width: 800px) { .workspace { grid-template-columns: minmax(0, 1fr); gap: 16px; } .sidebar { position: static; } .sidebar ul { max-height: 180px; } .number { min-width: 30px; padding-inline: 4px; } }
