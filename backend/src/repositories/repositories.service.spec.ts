@@ -124,7 +124,7 @@ describe('RepositoriesService repository overview', () => {
       storageKey: 'storage.git', storageGeneration: 3, defaultBranch: 'develop', members: [] };
     const tx = { $queryRaw: jest.fn(), repository: { findUniqueOrThrow: jest.fn().mockResolvedValue(repo) },
       branchUpdate: { findFirst: jest.fn().mockResolvedValue({ actorId: 'pusher', kind: 'PUSH' }) },
-      user: { findUnique: jest.fn().mockResolvedValue({ username: 'bob' }) } };
+      user: { findUnique: jest.fn().mockResolvedValue({ username: 'bob', avatarUrl: 'data:image/jpeg;base64,current' }) } };
     const db = { repository: { findFirst: jest.fn().mockResolvedValue(repo) },
       $transaction: jest.fn((callback: (client: typeof tx) => unknown) => callback(tx)) };
     const branch = { name: 'develop', commitSha: sha, isDefault: true };
@@ -140,11 +140,18 @@ describe('RepositoriesService repository overview', () => {
   it('reports the verified pusher for the exact branch, SHA and storage generation without author email', async () => {
     const f = fixture();
     const data = await f.service.read('owner', 'repo', undefined, { overview: true });
-    expect(data).toMatchObject({ commitCount: 12, update: { username: 'bob', kind: 'PUSH' } });
+    expect(data).toMatchObject({ commitCount: 12, update: { username: 'bob', kind: 'PUSH', avatarUrl: 'data:image/jpeg;base64,current' } });
     expect(JSON.stringify(data)).not.toContain('secret@example.test');
     expect(f.tx.branchUpdate.findFirst).toHaveBeenCalledWith({ where: { repositoryId: 'repo', storageGeneration: 3, branch: 'develop', sha: f.sha }, orderBy: { createdAt: 'desc' } });
     expect(f.storage.commitCount).toHaveBeenCalledWith('storage.git', f.sha);
     expect(f.release).toHaveBeenCalledTimes(1);
+  });
+  it('reads the current avatar and reflects its removal on subsequent reads', async () => {
+    const f = fixture();
+    await f.service.read('owner', 'repo', undefined, { overview: true });
+    expect(f.tx.user.findUnique).toHaveBeenCalledWith({ where: { id: 'pusher' }, select: { username: true, avatarUrl: true } });
+    f.tx.user.findUnique.mockResolvedValueOnce({ username: 'bob', avatarUrl: null });
+    expect(await f.service.read('owner', 'repo', undefined, { overview: true })).toMatchObject({ update: { username: 'bob', avatarUrl: null } });
   });
   it('does not invent a pusher for old commits', async () => {
     const f = fixture(); f.tx.branchUpdate.findFirst.mockResolvedValueOnce(null);

@@ -4,9 +4,10 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { sessionFetch } from "@/lib/auth";
 import { useAuth } from "@/components/auth-provider";
+import { Avatar } from "@/components/avatar";
 import { RepositoryIcon } from "./repository-icon";
 import styles from "./repository.module.css";
-type Overview = { commit: { sha: string; subject: string; committedAt: string } | null; commitCount: number; update: { username: string; kind: string } | null };
+type Overview = { commit: { sha: string; subject: string; committedAt: string } | null; commitCount: number; update: { username: string; kind: string; avatarUrl?: string | null } | null };
 export function RepositoryOverview({ endpoint, refName }: { endpoint: string; refName: string }) {
   const pathname = usePathname(); const { user } = useAuth();
   const [attempt, retry] = useState(0); const [now, setNow] = useState(() => Date.now());
@@ -29,7 +30,7 @@ export function RepositoryOverview({ endpoint, refName }: { endpoint: string; re
   const unit = Math.abs(delta) >= 86400 ? "day" : Math.abs(delta) >= 3600 ? "hour" : "minute";
   const relative = new Intl.RelativeTimeFormat("vi", { numeric: "auto" }).format(Math.round(delta / (unit === "day" ? 86400 : unit === "hour" ? 3600 : 60)), unit);
   return <div className={styles.overview}>
-    {update ? <span className={styles.pushIdentity}><span className={styles.pushAvatar} aria-hidden="true">{update.username.slice(0, 1).toUpperCase()}</span><Link href={`/${encodeURIComponent(update.username)}`}>{update.username}</Link> {update.kind !== "PUSH" && <small>{update.kind === "MERGE" ? "đã merge" : update.kind === "INITIALIZE" ? "đã khởi tạo" : ""}</small>}</span> : <span className={styles.unknownPusher}>Chưa có dữ liệu người push</span>}
+    {update ? <span className={styles.pushIdentity}><Avatar className={styles.pushAvatar} username={update.username} avatarUrl={user?.username === update.username ? user.avatarUrl : update.avatarUrl} /><Link href={`/${encodeURIComponent(update.username)}`}>{update.username}</Link> {update.kind !== "PUSH" && <small>{update.kind === "MERGE" ? "đã merge" : update.kind === "INITIALIZE" ? "đã khởi tạo" : ""}</small>}</span> : <span className={styles.unknownPusher}>Chưa có dữ liệu người push</span>}
     <Link className={styles.commitSubject} title={commit.subject} href={detail}>{commit.subject || "(Không có thông điệp)"}</Link>
     <div className={styles.commitMetadata}><Link href={detail}><code>{commit.sha.slice(0, 7)}</code></Link>
     <button className={styles.overviewCopy} aria-label="Sao chép SHA" title={commit.sha} onClick={async () => { try { await navigator.clipboard.writeText(commit.sha); setCopyMessage("Đã sao chép SHA."); } catch { setCopyMessage("Không thể sao chép SHA: " + commit.sha); } }}><RepositoryIcon name="copy" /></button>

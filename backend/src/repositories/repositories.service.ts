@@ -150,9 +150,9 @@ export class RepositoriesService {
             const commit = await this.storage.commit(current.storageKey, selected.commitSha);
             const commitCount = await this.storage.commitCount(current.storageKey, selected.commitSha);
             const update = await tx.branchUpdate.findFirst({ where: { repositoryId: current.id, storageGeneration: current.storageGeneration, branch: selected.name, sha: selected.commitSha }, orderBy: { createdAt: 'desc' } });
-            const actor = update ? await tx.user.findUnique({ where: { id: update.actorId }, select: { username: true } }) : null;
+            const actor = update ? await tx.user.findUnique({ where: { id: update.actorId }, select: { username: true, avatarUrl: true } }) : null;
             return { selectedBranch: selected, commit: { sha: commit.sha, subject: commit.subject, committedAt: commit.committedAt }, commitCount,
-              update: update && actor ? { kind: update.kind, username: actor.username } : null };
+              update: update && actor ? { kind: update.kind, username: actor.username, avatarUrl: actor.avatarUrl } : null };
           } catch (error) { return { readError: error }; }
         }
         if (branchQuery.commits) {

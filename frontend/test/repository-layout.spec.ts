@@ -115,3 +115,24 @@ test('file navigation stays compact beside tall code and contains long lines', a
   await expect(workspace.getByRole('complementary')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test('pusher avatar uses the current account photo and falls back after removal', async ({ page }) => {
+  await page.route('**/api/v1/auth/*', route => route.fulfill({ status: 401, json: {} }));
+  const branch = { name: 'main', commitSha: 'a'.repeat(40), isDefault: true };
+  await page.route('**/api/v1/repos/alice/hello-world/branches*', route => route.fulfill({ json: { branches: [branch], selectedBranch: branch } }));
+  const avatar = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=';
+  let avatarUrl: string | null = avatar;
+  await page.route('**/api/v1/repos/alice/hello-world/overview?*', route => route.fulfill({ json: {
+    commit: { sha: branch.commitSha, subject: 'Avatar change', committedAt: '2026-11-23T00:00:00Z' },
+    commitCount: 1, update: { username: 'bob', kind: 'PUSH', avatarUrl },
+  } }));
+  await page.goto('/alice/hello-world');
+  const identity = page.locator('span').filter({ has: page.getByRole('link', { name: 'bob', exact: true }) }).filter({ has: page.locator('img') });
+  await expect(identity.locator('img')).toHaveAttribute('src', avatar);
+  avatarUrl = null;
+  await page.reload();
+  await expect(page.getByRole('link', { name: 'bob', exact: true })).toBeVisible();
+  const fallback = page.getByRole('link', { name: 'bob', exact: true }).locator('..');
+  await expect(fallback.locator('img')).toHaveCount(0);
+  await expect(fallback).toContainText('B');
+});
