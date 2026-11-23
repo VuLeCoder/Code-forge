@@ -85,15 +85,28 @@ export function CommitBrowser({ endpoint, detail = false }: { endpoint: string; 
     </div> : "commit" in data ? <>
       <h3>{data.commit.subject || "(Không có thông điệp)"}</h3>
       <dl className={styles.commitDetails}>
-        <dt>SHA</dt><dd><code>{data.commit.sha}</code></dd>
         <dt>Tác giả</dt><dd>{data.commit.author.name} &lt;{data.commit.author.email}&gt;</dd>
         <dt>Thời gian tác giả</dt><dd><CommitTime value={data.commit.authoredAt} /></dd>
-        <dt>Người ghi commit</dt><dd>{data.commit.committer.name} &lt;{data.commit.committer.email}&gt;</dd>
-        <dt>Thời gian commit</dt><dd><CommitTime value={data.commit.committedAt} /></dd>
-        <dt>Commit cha</dt><dd>{data.commit.parentShas.length ? data.commit.parentShas.map((parent) => <Link className={styles.parentCommit} key={parent} href={href(parent)}><code>{parent}</code></Link>) : "Commit đầu tiên, không có commit cha."}</dd>
+        {(data.commit.author.name !== data.commit.committer.name || data.commit.author.email !== data.commit.committer.email) && <>
+          <dt>Người ghi commit</dt><dd>{data.commit.committer.name} &lt;{data.commit.committer.email}&gt;</dd>
+        </>}
+        {new Date(data.commit.authoredAt).getTime() !== new Date(data.commit.committedAt).getTime() && <>
+          <dt>Thời gian commit</dt><dd><CommitTime value={data.commit.committedAt} /></dd>
+        </>}
       </dl>
+      <details key={`metadata-${data.commit.sha}`} className={styles.commitTechnicalDetails}>
+        <summary>Thông tin chi tiết</summary>
+        <dl className={styles.commitDetails}>
+          <dt>SHA</dt><dd><code>{data.commit.sha}</code></dd>
+          <dt>Tác giả</dt><dd>{data.commit.author.name} &lt;{data.commit.author.email}&gt;</dd>
+          <dt>Thời gian tác giả</dt><dd><CommitTime value={data.commit.authoredAt} /></dd>
+          <dt>Người ghi commit</dt><dd>{data.commit.committer.name} &lt;{data.commit.committer.email}&gt;</dd>
+          <dt>Thời gian commit</dt><dd><CommitTime value={data.commit.committedAt} /></dd>
+          <dt>Commit cha</dt><dd>{data.commit.parentShas.length ? data.commit.parentShas.map((parent) => <Link className={styles.parentCommit} key={parent} href={href(parent)}><code>{parent}</code></Link>) : "Commit đầu tiên, không có commit cha."}</dd>
+        </dl>
+      </details>
       <pre className={styles.commitMessage}>{data.commit.message || "(Không có thông điệp)"}</pre>
-      <CommitChanges key={data.commit.sha} changes={data.commit.changes} />
+      <CommitChanges key={`changes-${data.commit.sha}`} changes={data.commit.changes} />
     </> : <>
       {data.storageState === "RESET" && <p className={styles.notice}>Git storage đã được khởi tạo lại; lịch sử trước đó không còn.</p>}
       {data.commits.length ? Array.from(groups, ([day, commits]) => <section className={styles.commitDay} key={day} aria-label={`Commit ngày ${day}`}>
