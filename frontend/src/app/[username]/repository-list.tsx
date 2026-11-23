@@ -13,23 +13,24 @@ export function RepositoryList({ username, initial, showDeletedNotice = false }:
   const { user, loading } = useAuth();
   const [tab, setTab] = useState<"active" | "deleted">("active");
   const [attempt, setAttempt] = useState(0);
-  const [owned, setOwned] = useState<{ key: string; repositories: RepositorySummary[]; error: boolean } | null>(null);
+  const [accessible, setAccessible] = useState<{ key: string; repositories: RepositorySummary[]; error: boolean } | null>(null);
   const [deleted, setDeleted] = useState<{ key: string; repositories: RepositorySummary[]; error: boolean } | null>(null);
   const [restoring, setRestoring] = useState<string | null>(null);
   const [restoreMessage, setRestoreMessage] = useState("");
   const [restoredRepository, setRestoredRepository] = useState<RepositorySummary | null>(null);
   const key = `${user?.id ?? ""}/${username}/${attempt}`;
   const isOwner = user?.username.toLowerCase() === username.toLowerCase();
-  const repositories = isOwner && owned?.key === key ? owned.repositories : initial;
+  const isSignedIn = Boolean(user);
+  const repositories = isSignedIn && accessible?.key === key ? accessible.repositories : initial;
   useEffect(() => {
-    if (loading || !isOwner) return;
+    if (loading || !isSignedIn) return;
     let active = true;
     sessionFetch(`/api/v1/users/${encodeURIComponent(username)}`, { cache: "no-store" })
       .then((response) => { if (!response.ok) throw new Error("Không thể tải repository."); return response.json(); })
-      .then((data: { repositories: RepositorySummary[] }) => { if (active) setOwned({ key, repositories: data.repositories, error: false }); })
-      .catch(() => { if (active) setOwned({ key, repositories: [], error: true }); });
+      .then((data: { repositories: RepositorySummary[] }) => { if (active) setAccessible({ key, repositories: data.repositories, error: false }); })
+      .catch(() => { if (active) setAccessible({ key, repositories: [], error: true }); });
     return () => { active = false; };
-  }, [isOwner, loading, username, key]);
+  }, [isSignedIn, loading, username, key]);
 
   useEffect(() => {
     if (loading || !isOwner) return;
@@ -73,10 +74,10 @@ export function RepositoryList({ username, initial, showDeletedNotice = false }:
       <button className="button buttonSecondary" type="button" aria-label="Đóng thông báo khôi phục repository" onClick={() => setRestoredRepository(null)}>Đóng</button>
     </div>;
 
-  const activeContent = loading || (isOwner && owned?.key !== key) ? <div className={styles.empty}><p role="status">Đang tải repository…</p></div> : isOwner && owned?.error ? <div className={styles.empty}><p role="alert">Chưa thể tải danh sách repository. Vui lòng thử lại.</p><button className="button buttonSecondary" onClick={() => setAttempt((value) => value + 1)}>Thử lại</button></div> : !repositories.length ? <div className={styles.empty}>
+  const activeContent = loading || (isSignedIn && accessible?.key !== key) ? <div className={styles.empty}><p role="status">Đang tải repository…</p></div> : isSignedIn && accessible?.error ? <div className={styles.empty}><p role="alert">Chưa thể tải danh sách repository. Vui lòng thử lại.</p><button className="button buttonSecondary" onClick={() => setAttempt((value) => value + 1)}>Thử lại</button></div> : !repositories.length ? <div className={styles.empty}>
     <span className={styles.repoIcon} aria-hidden="true">&lt;/&gt;</span>
     <h3>Chưa có repository</h3>
-    <p>{isOwner ? "Bạn chưa tạo repository nào." : "Repository công khai của thành viên sẽ xuất hiện ở đây."}</p>
+    <p>{isOwner ? "Bạn chưa tạo repository nào." : "Repository bạn có quyền xem sẽ xuất hiện ở đây."}</p>
     <Link className="button buttonSecondary" href={isOwner ? "/new" : "/"}>{isOwner ? "Tạo repository" : "Khám phá Code Forge"}</Link>
   </div> : <ul className={styles.repoList}>{repositories.map((repo) => <li key={repo.id}>
     <div><Link href={repositoryPath(repo)}>{repo.name}</Link><span className="badge">{repo.visibility === "PRIVATE" ? "Riêng tư" : "Công khai"}</span></div>

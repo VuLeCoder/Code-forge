@@ -151,6 +151,29 @@ test('public profile is accessible anonymously and fits a mobile viewport', asyn
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
+test('collaborator sees accessible private repositories on another owner profile and loses them on logout', async ({ page }) => {
+  await page.route('**/api/v1/auth/me', (route) => route.fulfill({ json: { user: { ...user, id: 'bob-id', username: 'bob' } } }));
+  await page.route('**/api/v1/auth/logout', (route) => route.fulfill({ status: 204 }));
+  await page.route('**/api/v1/users/alice', (route) => route.fulfill({ json: { repositories: [
+    { id: 'public', name: 'hello-world', visibility: 'PUBLIC', owner: { username: 'alice' } },
+    { id: 'shared', name: 'shared-private', visibility: 'PRIVATE', owner: { username: 'alice' } },
+  ] } }));
+  const deletedRequests: string[] = [];
+  await page.route('**/api/v1/repositories/deleted', (route) => {
+    deletedRequests.push(route.request().url());
+    return route.fulfill({ json: { repositories: [] } });
+  });
+  await page.goto('/alice');
+  await expect(page.getByRole('link', { name: 'shared-private' })).toHaveAttribute('href', '/alice/shared-private');
+  await expect(page.getByRole('link', { name: 'hello-world' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Repo đã xóa' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Mở menu tài khoản bob' }).click();
+  await page.getByRole('menuitem', { name: 'Đăng xuất' }).click();
+  await expect(page.getByRole('link', { name: 'shared-private' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'hello-world' })).toBeVisible();
+  expect(deletedRequests).toEqual([]);
+});
+
 test('explore lists public repositories and searches real API results', async ({ page }) => {
   await anonymous(page);
   await page.setViewportSize({ width: 375, height: 812 });
