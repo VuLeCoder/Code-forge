@@ -12,6 +12,7 @@ const password = 'mvp-pr-journey-password-1';
 const run = promisify(execFile);
 const requireBackend = createRequire(resolve('../backend/package.json'));
 const { PrismaClient } = requireBackend('@prisma/client') as typeof import('../../backend/test/fullstack-types');
+const { hash, argon2id } = requireBackend('argon2') as Pick<typeof import('../../backend/test/fullstack-types'), 'hash' | 'argon2id'>;
 const gitEnv = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0' };
 const git = (args: string[], env: NodeJS.ProcessEnv = gitEnv) => run('git', ['-c', 'credential.helper=', ...args], { env, timeout: 30_000 });
 const mutation = (request: APIRequestContext, path: string, data: unknown) =>
@@ -36,11 +37,20 @@ test('two authenticated writers racing on one branch preserve the winning commit
   const names = [`RaceOwner${suffix}`, `RaceWriter${suffix}`];
   const contexts = await Promise.all(names.map(() => browser.newContext({ baseURL: origin })));
   try {
+    // Registration is covered by other journeys. Seed only this isolated test's
+    // users so the combined suite respects the registration rate limit.
+    const passwordHash = await hash(password, { type: argon2id, memoryCost: 19_456, timeCost: 2, parallelism: 1 });
     for (let i = 0; i < 2; i++) {
-      const registered = await mutation(contexts[i]!.request, 'auth/register', {
-        username: names[i], email: `${names[i]}@example.test`, password,
+      const username = names[i]!;
+      const email = `${username}@example.test`;
+      await db.user.create({ data: {
+        username, normalizedUsername: username.toLowerCase(),
+        email, normalizedEmail: email.toLowerCase(), passwordHash,
+      } });
+      const loggedIn = await mutation(contexts[i]!.request, 'auth/login', {
+        login: username, password,
       });
-      expect(registered.status()).toBe(201);
+      expect(loggedIn.status()).toBe(200);
     }
     const repo = `Race${suffix}`;
     expect((await mutation(contexts[0]!.request, 'repositories', {

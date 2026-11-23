@@ -41,7 +41,7 @@ function seed(bare: string) {
   return head;
 }
 
-test('M3.8 real registration, source browser desktop/mobile, history and public CLI', async ({ page, context, browser }, testInfo) => {
+test('M3.8 real registration, source browser on laptops, history and public CLI', async ({ page, context, browser }, testInfo) => {
   await page.goto('/register?returnTo=%2Fnew');
   await page.getByLabel('Username', { exact: true }).fill('M38Owner');
   await page.getByLabel('Email', { exact: true }).fill('m38owner@example.test');
@@ -59,7 +59,7 @@ test('M3.8 real registration, source browser desktop/mobile, history and public 
   const anonymous = await browser.newContext();
   const publicPage = await anonymous.newPage();
   try {
-    for (const width of [1440, 375]) {
+    for (const width of [1440, 1366]) {
       await publicPage.setViewportSize({ width, height: 900 });
       await publicPage.goto(`${origin}/M38Owner/Source?ref=feature%2Fdemo`);
       const readme = publicPage.getByRole('region', { name: 'README', exact: true });
@@ -76,9 +76,11 @@ test('M3.8 real registration, source browser desktop/mobile, history and public 
       await expect(viewer.getByText('hello ü', { exact: true })).toBeVisible();
       expect(await publicPage.evaluate(() => 'm38xss' in window)).toBe(false);
       expect(await publicPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-      await publicPage.getByRole('link', { name: '← Thư mục cha' }).click();
-      await expect(publicPage.getByRole('link', { name: 'code ü.txt', exact: true })).toBeVisible();
-      await publicPage.getByLabel('Branch', { exact: true }).selectOption('main');
+      await viewer.getByRole('navigation', { name: 'Đường dẫn mã nguồn' }).getByRole('link', { name: 'docs', exact: true }).click();
+      await expect(publicPage).toHaveURL(url => url.searchParams.get('ref') === 'feature/demo' && url.searchParams.get('path') === 'docs' && !url.searchParams.has('view'));
+      await expect(publicPage.getByRole('region', { name: 'Cây thư mục', exact: true }).getByRole('link', { name: 'code ü.txt', exact: true })).toBeVisible();
+      await publicPage.getByLabel('Branch', { exact: true }).click();
+      await publicPage.getByRole('button', { name: 'main (mặc định)', exact: true }).click();
       await expect(publicPage).toHaveURL(/\?ref=main$/);
       await expect(publicPage.getByRole('region', { name: 'README', exact: true }).getByRole('heading', { name: 'Source' })).toBeVisible();
     }
@@ -110,7 +112,7 @@ test('M3.8 real registration, source browser desktop/mobile, history and public 
     expect((await mutation(context.request, 'repositories', { name: 'Empty', visibility: 'PUBLIC' })).status()).toBe(201);
     await publicPage.goto(`${origin}/M38Owner/Empty`);
     await expect(publicPage.getByRole('heading', { name: 'Repository chưa có mã nguồn' })).toBeVisible();
-    await expect(publicPage.getByLabel('Branch', { exact: true })).toBeDisabled();
+    await expect(publicPage.getByLabel('Branch', { exact: true })).toHaveAttribute('aria-disabled', 'true');
     await git(['clone', `${origin}/git/M38Owner/Empty.git`, join(state.root, 'empty-clone')]);
     await rm(bare, { recursive: true });
     await publicPage.goto(`${origin}/M38Owner/Source`);
@@ -131,9 +133,13 @@ test('M4 real private PAT UI, READ/WRITE/OWNER, push, revocation, audit and sani
   const { repository } = await created.json();
   const repo = await db.repository.findUniqueOrThrow({ where: { id: repository.id } });
   await page.setViewportSize({ width: 375, height: 812 });
-  await page.getByLabel('Tên token').fill('Acceptance laptop');
-  await page.getByLabel(/Thêm quyền/).check();
   await page.getByRole('button', { name: 'Tạo token', exact: true }).click();
+  const createToken = page.getByRole('dialog', { name: 'Tạo token', exact: true });
+  await expect(createToken).toBeVisible();
+  await createToken.getByLabel('Tên token').fill('Acceptance laptop');
+  await createToken.getByLabel(/Thêm quyền/).check();
+  await createToken.getByRole('button', { name: 'Tạo token', exact: true }).click();
+  await expect(createToken).not.toBeVisible();
   await expect(page.getByLabel('Secret PAT')).toHaveValue(/^cfg_/);
   const secret = await page.getByLabel('Secret PAT').inputValue();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

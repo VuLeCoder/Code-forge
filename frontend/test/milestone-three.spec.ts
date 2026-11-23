@@ -259,6 +259,16 @@ test('M3.3 opens files through proxy with safe code, line numbers, URL and lapto
   await expect(viewer.getByRole('rowheader', { name: '3', exact: true })).toBeVisible();
   await expect(viewer.getByText('feature/demo', { exact: true })).toBeVisible();
   await expect(viewer.getByText('<script>window.sourceExecuted = true</script>', { exact: true })).toBeVisible();
+  const fileUrl = page.url();
+  const collapseSidebar = page.getByRole('button', { name: 'Thu gọn thanh tệp dự án', exact: true });
+  await expect(collapseSidebar).toHaveAttribute('aria-expanded', 'true');
+  await collapseSidebar.click();
+  const expandSidebar = page.getByRole('button', { name: 'Mở thanh tệp dự án', exact: true });
+  await expect(expandSidebar).toHaveAttribute('aria-expanded', 'false');
+  await expect(viewer.getByRole('rowheader', { name: '3', exact: true })).toBeVisible();
+  await expect(page).toHaveURL(fileUrl);
+  await expandSidebar.click();
+  await expect(collapseSidebar).toHaveAttribute('aria-expanded', 'true');
   expect(await page.evaluate(() => 'sourceExecuted' in window)).toBe(false);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.reload();
