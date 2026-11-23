@@ -89,3 +89,29 @@ for (const theme of ['light', 'dark']) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });
 }
+
+test('file navigation stays compact beside tall code and contains long lines', async ({ page }) => {
+  await page.route('**/api/v1/auth/*', route => route.fulfill({ status: 401, json: {} }));
+  const branch = { name: 'main', commitSha: 'a'.repeat(40), isDefault: true };
+  await page.route('**/api/v1/repos/alice/hello-world/branches*', route => route.fulfill({ json: { branches: [branch], selectedBranch: branch } }));
+  const content = Array.from({ length: 200 }, () => 'const value = "' + 'x'.repeat(500) + '";').join('\n');
+  await page.route('**/api/v1/repos/alice/hello-world/blob?*', route => route.fulfill({ json: { path: 'src/index.ts', size: content.length, objectSha: 'b'.repeat(40), commitSha: 'a'.repeat(40), kind: 'text', content, truncated: false } }));
+  await page.goto('/alice/hello-world?view=blob&path=src/index.ts&ref=main');
+  const workspace = page.getByRole('region', { name: 'Nội dung file', exact: true });
+  await expect(workspace.getByRole('rowheader', { name: '200', exact: true })).toBeAttached();
+  const heading = await page.getByRole('heading', { name: 'Tệp dự án' }).first().boundingBox();
+  const picker = await page.getByLabel('Branch', { exact: true }).boundingBox();
+  const finder = await page.getByRole('combobox', { name: 'Tìm file' }).boundingBox();
+  const tree = await workspace.getByRole('complementary').boundingBox();
+  expect(picker!.y - (heading!.y + heading!.height)).toBeLessThan(40);
+  expect(tree!.y - (finder!.y + finder!.height)).toBeLessThan(30);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('button', { name: 'Thu gọn thanh tệp dự án' }).click();
+  await expect(workspace.getByRole('complementary')).toBeHidden();
+  await expect(page.getByRole('combobox', { name: 'Tìm file' })).toBeVisible();
+  await page.setViewportSize({ width: 375, height: 812 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole('button', { name: 'Mở thanh tệp dự án' }).click();
+  await expect(workspace.getByRole('complementary')).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});

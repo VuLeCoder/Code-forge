@@ -119,11 +119,9 @@ export function BranchBrowser({
   const history = query.get("view") === "commits";
   const fileView = query.get("view") === "blob";
 
-  return (
-    <div className={fileView ? `${styles.fileMode} ${sidebarOpen ? "" : styles.fileModeCollapsed}` : undefined}>
+  const navigation = <>
       {fileView && <button type="button" className={`button buttonSecondary ${styles.sidebarToggle}`} title={sidebarOpen ? "Thu gọn cây tệp" : "Mở cây tệp"} aria-expanded={sidebarOpen} aria-label={sidebarOpen ? "Thu gọn thanh tệp dự án" : "Mở thanh tệp dự án"} onClick={() => setSidebarOpen(open => !open)}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /><path d={sidebarOpen ? "m7 9-3 3 3 3" : "m12 9 3 3-3 3"} /></svg></button>}
       {fileView && sidebarOpen && <h2 className={styles.sidebarHeading}>Tệp dự án</h2>}
-      {history && <h2 className={styles.historyHeading}>Lịch sử commit</h2>}
       <div className={styles.repoToolbar}>
         <details ref={branchesMenu} className={styles.branchPicker}><summary className="dropdownTrigger" aria-label="Branch" aria-disabled={!data.branches.length} data-branch={data.selectedBranch?.name ?? ""}><RepositoryIcon name="branch" /><span>{data.selectedBranch?.name ?? "Chưa có nhánh"}</span><RepositoryIcon name="chevron" /></summary>
           <div><label>Lọc nhánh<input value={filter} onChange={event => setFilter(event.target.value)} /></label>
@@ -134,12 +132,19 @@ export function BranchBrowser({
         <FileFinder endpoint={endpoint} refName={data.selectedBranch?.name ?? null} />
         {!fileView && <CloneDialog repository={repository} />}</>}
       </div>
+  </>;
+
+  return (
+    <div className={fileView ? `${styles.fileMode} ${sidebarOpen ? "" : styles.fileModeCollapsed}` : undefined}>
+      {history && <h2 className={styles.historyHeading}>Lịch sử commit</h2>}
+      {!fileView && navigation}
       {!history && query.get("view") !== "blob" && data.selectedBranch && <RepositoryOverview endpoint={endpoint} refName={data.selectedBranch.name} />}
       {query.get("view") === "commits" ? (
         <CommitBrowser endpoint={endpoint} />
       ) : data.selectedBranch || query.get("path") ? (
         <TreeBrowser
           endpoint={endpoint}
+          fileNavigation={fileView ? navigation : undefined}
           refName={data.selectedBranch?.name ?? null}
         />
       ) : !data.branches.length ? (

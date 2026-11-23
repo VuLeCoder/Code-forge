@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { sessionFetch } from "@/lib/auth";
@@ -78,10 +78,12 @@ function relativeTime(date: string) {
 }
 
 export function TreeBrowser({
+  fileNavigation,
   endpoint,
   refName,
 }: {
   endpoint: string;
+  fileNavigation?: ReactNode;
   refName: string | null;
 }) {
   const query = useSearchParams();
@@ -154,7 +156,10 @@ export function TreeBrowser({
       className={isBlob ? styles.fileWorkspace : styles.source}
       aria-label={isBlob ? "Nội dung file" : "Cây thư mục"}
     >
-      {isBlob && <FileSidebar key={`${endpoint}/${refName}/${user?.id}`} endpoint={endpoint} refName={refName} selected={path} href={href} />}
+      {isBlob && <div className={styles.fileNavigation}>
+        <div className={styles.fileNavigationControls}>{fileNavigation}</div>
+        <FileSidebar key={`${endpoint}/${refName}/${user?.id}`} endpoint={endpoint} refName={refName} selected={path} href={href} />
+      </div>}
       <div className={styles.fileMain}>
       {path && <div className={styles.sourceNav}>
         <nav className={styles.breadcrumb} aria-label="Đường dẫn mã nguồn">

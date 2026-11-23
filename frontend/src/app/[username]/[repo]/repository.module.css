@@ -309,23 +309,32 @@
 .fileCommit time { white-space: nowrap; color: var(--muted); font-size: .85rem; }
 
 /* Keep file navigation available in both sidebar states. */
-.fileMode { display: grid; grid-template-columns: 270px minmax(0, 1fr); column-gap: 24px; align-items: start; }
-.fileMode .repoToolbar { grid-column: 1; grid-row: 2; flex-wrap: wrap; gap: 12px; margin: 0 0 16px; }
+.fileMode { min-width: 0; }
+.fileMode .fileWorkspace { grid-template-columns: 270px minmax(0, 1fr); align-items: start; }
+.fileNavigation { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.fileNavigationControls { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 16px 12px; align-items: center; min-width: 0; }
+.fileMode .repoToolbar { grid-column: 1 / -1; grid-row: 2; flex-wrap: wrap; gap: 12px; margin: 0; }
 .fileMode .branchCount { display: none; }
 .fileMode .fileFinder { flex-basis: 100%; min-width: 0; }
-.fileMode .fileWorkspace { display: contents; }
-.fileMode .fileSidebar { grid-column: 1; grid-row: 3; }
 .fileMode .fileSidebar h2 { display: none; }
-.fileMode .fileMain { grid-column: 2; grid-row: 1 / span 3; }
 .fileMode .sourceNav { min-height: 40px; padding: 0; border: 0; background: transparent; margin-bottom: 18px; }
 .fileMode .parentLink { display: none; }
-.sidebarToggle { grid-column: 1; grid-row: 1; justify-self: start; display: grid; place-items: center; width: 40px; height: 40px; padding: 0; margin-bottom: 18px; }
-.sidebarHeading { grid-column: 1; grid-row: 1; margin: 0 0 18px 52px; align-self: center; font-size: 1rem; }
-.fileModeCollapsed { grid-template-columns: 40px auto minmax(0, 1fr) minmax(200px, 320px); gap: 0 16px; }
-.fileModeCollapsed .repoToolbar, .fileModeCollapsed .fileMain { display: contents; }
+.sidebarToggle { grid-column: 1; grid-row: 1; justify-self: start; display: grid; place-items: center; width: 40px; height: 40px; padding: 0; margin: 0; }
+.sidebarHeading { grid-column: 2; grid-row: 1; margin: 0; align-self: center; font-size: 1rem; }
+.fileModeCollapsed .fileWorkspace { grid-template-columns: 40px auto minmax(0, 1fr) minmax(200px, 320px); gap: 0 16px; }
+.fileModeCollapsed .fileNavigation, .fileModeCollapsed .fileNavigationControls, .fileModeCollapsed .repoToolbar, .fileModeCollapsed .fileMain { display: contents; }
 .fileModeCollapsed .fileSidebar { display: none; }
 .fileModeCollapsed .branchPicker { grid-column: 2; grid-row: 1; }
 .fileModeCollapsed .fileFinder { grid-column: 4; grid-row: 1; width: 100%; max-width: none; }
 .fileModeCollapsed .fileMain > * { grid-column: 1 / -1; }
 .fileModeCollapsed .fileMain > .sourceNav { grid-column: 3; grid-row: 1; }
 .fileModeCollapsed .breadcrumb { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 700px) {
+  .fileMode .fileWorkspace { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .fileMode .fileSidebar { border-right: 0; padding-right: 0; max-height: 35vh; overflow: auto; }
+  .fileModeCollapsed .fileWorkspace { grid-template-columns: 40px minmax(0, 1fr); gap: 12px; }
+  .fileModeCollapsed .branchPicker { grid-column: 2; }
+  .fileModeCollapsed .fileFinder { grid-column: 1 / -1; grid-row: 2; }
+  .fileModeCollapsed .fileMain > .sourceNav { grid-column: 1 / -1; grid-row: 3; }
+}
