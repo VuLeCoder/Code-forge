@@ -5,9 +5,9 @@ Read this first, then load only the relevant source and acceptance slice.
 ## Project map
 
 - Stack: pnpm workspace, Node 24, Next.js frontend, NestJS backend, PostgreSQL/Prisma, Git CLI.
-- Current acceptance source: `docs/operations/acceptance-task-board-2026-10-25.md`.
-- Historical evidence: `docs/operations/task-execution-log-2026-10-25.md`; do not treat old snapshots as current status.
-- Git recovery contract: `docs/operations/git-operation-recovery.md`.
+- Current open tasks and acceptance requirements: `docs/cong-viec-con-lai.md`.
+- Documentation index: `docs/README.md`; verification evidence: `docs/ket-qua-kiem-thu.md`. Historical reports are dated; older removed boards remain in Git history.
+- Git recovery contract: `docs/van-hanh/khoi-phuc-thao-tac-git.md`.
 - CI is the full verification source of truth: `.github/workflows/ci.yml`.
 - Read `CONSTRAINTS.md` before editing; never weaken it to make a check pass.
 
