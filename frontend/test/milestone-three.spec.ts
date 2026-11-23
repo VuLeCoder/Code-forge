@@ -88,13 +88,15 @@ test('M3.5 paginates through proxy, opens direct commit URLs and parents, preser
   await history.getByRole('link', { name: 'Commit 21', exact: true }).click();
   const detail = page.getByRole('region', { name: 'Chi tiết commit', exact: true });
   await expect(detail.getByRole('heading', { name: 'Commit 21', exact: true })).toBeVisible();
-  await expect(detail.getByText('Tác giả ü <author@example.test>', { exact: true })).toBeVisible();
-  await expect(detail.getByText('Committer <committer@example.test>', { exact: true })).toBeVisible();
+  const summary = detail.locator(':scope > dl');
+  await expect(summary.getByText('Tác giả ü <author@example.test>', { exact: true })).toBeVisible();
+  await expect(summary.getByText('Committer <committer@example.test>', { exact: true })).toBeVisible();
   await expect(detail.locator('time').first()).toContainText('UTC');
   await expect(detail.locator('pre')).toContainText('<script>window.commitExecuted = true</script>');
   expect(await page.evaluate(() => 'commitExecuted' in window)).toBe(false);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.reload();
+  await detail.getByText('Thông tin chi tiết', { exact: true }).click();
   await detail.getByRole('link', { name: '14'.padStart(40, '0'), exact: true }).click();
   await expect(detail.getByRole('heading', { name: 'Commit 20', exact: true })).toBeVisible();
   await page.goBack();
@@ -118,6 +120,7 @@ test('M3.5 paginates through proxy, opens direct commit URLs and parents, preser
   expect(commitResponse.status()).toBe(200);
   expect(commitResponse.headers()['cache-control']).toBe('private, no-store');
   await page.goto(`/alice/hello-world?view=commit&sha=${'1'.padStart(40, '0')}`);
+  await detail.getByText('Thông tin chi tiết', { exact: true }).click();
   await expect(detail.getByText('Commit đầu tiên, không có commit cha.')).toBeVisible();
 });
 
