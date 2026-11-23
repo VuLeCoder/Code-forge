@@ -1,5 +1,8 @@
 "use client";
 
+import { Select } from "@/components/select";
+
+
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/components/auth-provider";
@@ -204,7 +207,7 @@ export default function AdminPage() {
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "overview", label: "Tổng quan" }, { id: "users", label: "Người dùng" },
-    { id: "repositories", label: "Repositories" }, { id: "journals", label: "Đối soát Git" },
+    { id: "repositories", label: "Repository" }, { id: "journals", label: "Đối soát Git" },
     { id: "audit", label: "Nhật ký" },
   ];
 
@@ -224,7 +227,7 @@ export default function AdminPage() {
       {tab === "overview" && <>
         {loading && !stats ? <p role="status">Đang tải thống kê…</p> : stats && <div className={styles.statsGrid}>
           <article className={styles.statCard}><span>Người dùng</span><strong>{stats.users.total}</strong><small>{stats.users.active} hoạt động · {stats.users.locked} bị khóa</small></article>
-          <article className={styles.statCard}><span>Repositories</span><strong>{stats.repositories.total}</strong><small>{stats.repositories.active} hoạt động · {stats.repositories.locked} khóa · {stats.repositories.deleted} đã xóa</small></article>
+          <article className={styles.statCard}><span>Repository</span><strong>{stats.repositories.total}</strong><small>{stats.repositories.active} hoạt động · {stats.repositories.locked} khóa · {stats.repositories.deleted} đã xóa</small></article>
           <article className={styles.statCard}><span>Pull requests</span><strong>{stats.pullRequests.total}</strong><small>{stats.pullRequests.open} đang mở · {stats.pullRequests.pendingMerges} cần đối soát</small></article>
           <article className={styles.statCard}><span>Git journals chưa phân giải</span><strong>{stats.gitJournals.unresolved}</strong><small>{stats.gitJournals.pushes} push · {stats.gitJournals.merges} merge</small></article>
         </div>}
@@ -250,7 +253,7 @@ export default function AdminPage() {
       {(tab === "users" || tab === "repositories" || tab === "journals" || tab === "audit") && <>
         <form className={styles.filters} onSubmit={search}>
           <label className={styles.searchField}><span>{tab === "users" ? "Tìm username hoặc email" : tab === "repositories" ? "Tìm repository hoặc chủ sở hữu" : tab === "journals" ? "Tìm operation ID, repository hoặc chủ sở hữu" : "Tìm hành động hoặc target ID"}</span><input type="search" value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder="Nhập từ khóa" /></label>
-          {tab !== "audit" ? <label><span>{tab === "journals" ? "Loại thao tác" : "Trạng thái"}</span><select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }}><option value="">Tất cả</option>{tab === "users" ? <><option value="ACTIVE">Hoạt động</option><option value="LOCKED">Đã khóa</option></> : tab === "journals" ? <><option value="PUSH">Push</option><option value="MERGE">Merge</option></> : <><option value="ACTIVE">Hoạt động</option><option value="LOCKED">Đã khóa</option><option value="DELETED">Đã xóa</option></>}</select></label> : <label><span>Hành động</span><input value={actionFilter} onChange={(event) => { setActionFilter(event.target.value); setPage(1); }} placeholder="Ví dụ ADMIN_USER_LOCKED" /></label>}
+          {tab !== "audit" ? <label><span>{tab === "journals" ? "Loại thao tác" : "Trạng thái"}</span><Select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }}><option value="">Tất cả</option>{tab === "users" ? <><option value="ACTIVE">Hoạt động</option><option value="LOCKED">Đã khóa</option></> : tab === "journals" ? <><option value="PUSH">Push</option><option value="MERGE">Merge</option></> : <><option value="ACTIVE">Hoạt động</option><option value="LOCKED">Đã khóa</option><option value="DELETED">Đã xóa</option></>}</Select></label> : <label><span>Hành động</span><input value={actionFilter} onChange={(event) => { setActionFilter(event.target.value); setPage(1); }} placeholder="Ví dụ ADMIN_USER_LOCKED" /></label>}
           <button className="button buttonPrimary" type="submit">Tìm kiếm</button>
         </form>
 

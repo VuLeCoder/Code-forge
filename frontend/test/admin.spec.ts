@@ -1,3 +1,4 @@
+import { selectChoice } from "./select-choice";
 import { expect, test } from "@playwright/test";
 
 const admin = { id: "admin-1", username: "site-admin", email: "admin@example.test", systemRole: "ADMIN", status: "ACTIVE", createdAt: "2026-10-01T00:00:00.000Z" };
@@ -108,16 +109,19 @@ test("admin can inspect users, repositories and audit, then confirm a restore", 
   await lockUserButton.click();
   await page.getByRole("dialog", { name: "Khóa alice?" }).getByRole("button", { name: "Xác nhận" }).click();
   await expect(page.getByRole("table").getByText("Đã khóa", { exact: true })).toBeVisible();
-  await page.getByLabel("Trạng thái").selectOption("LOCKED");
+  const statusFilter = page.locator("label").filter({ has: page.getByText("Trạng thái", { exact: true }) }).getByRole("combobox");
+  await selectChoice(statusFilter, "LOCKED");
+  await expect(statusFilter).toContainText("Đã khóa");
   await expect(page.getByRole("row", { name: /alice/ })).toBeVisible();
   await expect(page.getByRole("row", { name: /another-admin/ })).toHaveCount(0);
   await page.getByRole("button", { name: "Mở khóa" }).click();
   await page.getByRole("dialog", { name: "Mở khóa alice?" }).getByRole("button", { name: "Xác nhận" }).click();
   await expect(page.getByRole("row", { name: /alice/ })).toHaveCount(0);
-  await page.getByLabel("Trạng thái").selectOption("");
+  await selectChoice(statusFilter, "");
+  await expect(statusFilter).toContainText("Tất cả");
   await expect(page.getByRole("row", { name: /alice/ }).getByText("Hoạt động", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "Repositories" }).click();
+  await page.getByRole("button", { name: "Repository", exact: true }).click();
   await expect(page.getByRole("table").getByText("Đã khóa", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Mở khóa", exact: true }).click();
   await page.getByRole("dialog", { name: "Mở khóa demo?" }).getByRole("button", { name: "Xác nhận" }).click();

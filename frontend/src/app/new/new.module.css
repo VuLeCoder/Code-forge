@@ -1,6 +1,6 @@
 .page {
   min-height: calc(100vh - 72px);
-  padding: 52px 0 88px;
+  padding: var(--page-space) 0;
   background: var(--canvas);
 }
 
@@ -285,7 +285,7 @@
 @media (max-width: 700px) {
   .page {
     min-height: calc(100vh - 56px);
-    padding: 34px 0 60px;
+
   }
 
   .heading {

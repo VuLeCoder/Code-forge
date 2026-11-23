@@ -16,7 +16,8 @@ describe('GitPushJournalService', () => {
       beforeRefs: { 'refs/heads/main': 'a'.repeat(40) }, createdAt: new Date(0), repository, ...overrides };
     const tx = {
       gitPushOperation: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-      auditLog: { create: jest.fn().mockResolvedValue({}) },
+      branchUpdate: { createMany: jest.fn().mockResolvedValue({ count: 1 }) }, auditLog: { create: jest.fn().mockResolvedValue({}) },
+      repository: { update: jest.fn().mockResolvedValue({}) },
     };
     const db = {
       gitPushOperation: {
@@ -28,7 +29,8 @@ describe('GitPushJournalService', () => {
       pullRequestMergeOperation: { count: jest.fn().mockResolvedValue(0) },
       $transaction: jest.fn((callback: (client: typeof tx) => unknown) => Promise.resolve(callback(tx))),
     };
-    const storage = { exists: jest.fn().mockResolvedValue(true), snapshotRefs: jest.fn().mockResolvedValue({}),
+    const storage = { initializeDefaultBranch: jest.fn<Promise<string | undefined>, [string, Record<string, string>, Record<string, string>]>().mockResolvedValue(undefined),
+      exists: jest.fn().mockResolvedValue(true), snapshotRefs: jest.fn().mockResolvedValue({}),
       validateRef: jest.fn() };
     const lock = { release: jest.fn().mockResolvedValue(undefined) };
     const locks = { acquire: jest.fn().mockResolvedValue(lock) };
@@ -36,6 +38,19 @@ describe('GitPushJournalService', () => {
       storage as unknown as GitStorageService, locks as unknown as RepositoryLockService);
     return { service, db, tx, storage, lock, locks, operation };
   }
+
+  it('persists the first pushed branch together with journal completion and retries HEAD setup after failure', async () => {
+    const f = fixture({ beforeRefs: {} });
+    const after = { 'refs/heads/develop': 'b'.repeat(40) };
+    f.storage.initializeDefaultBranch.mockResolvedValue('develop');
+    await expect(f.service.finish(operationId, after)).resolves.toBe(true);
+    expect(f.storage.initializeDefaultBranch).toHaveBeenCalledWith('repo.git', {}, after);
+    expect(f.tx.branchUpdate.createMany).toHaveBeenCalledWith({ data: [{ operationId, repositoryId, storageGeneration: 4, actorId, branch: 'develop', sha: 'b'.repeat(40), kind: 'PUSH' }], skipDuplicates: true });
+    expect(f.tx.repository.update).toHaveBeenCalledWith({ where: { id: repositoryId }, data: { defaultBranch: 'develop' } });
+    f.storage.initializeDefaultBranch.mockRejectedValueOnce(new Error('HEAD unavailable'));
+    await expect(f.service.finish(operationId, after)).rejects.toThrow('HEAD unavailable');
+    expect(f.db.$transaction).toHaveBeenCalledTimes(1);
+  });
 
   it('blocks repository work while a push outcome is unresolved', async () => {
     const f = fixture();

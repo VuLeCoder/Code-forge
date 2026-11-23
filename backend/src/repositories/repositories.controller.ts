@@ -51,6 +51,13 @@ export class RepositoriesController {
     return this.repositories.update(owner, repo, request.user.id, dto);
   }
 
+  @Get('repos/:owner/:repo/commit-authors')
+  @Header('Cache-Control', 'private, no-store')
+  @UseGuards(OptionalAccessTokenGuard)
+  commitAuthors(@Param('owner') owner: string, @Param('repo') repo: string, @Req() request: Request & { user?: AuthPrincipal }) {
+    return this.repositories.commitAuthors(owner, repo, request.user?.id);
+  }
+
   @Get('repos/:owner/:repo/branches')
   @Header('Cache-Control', 'private, no-store')
   @UseGuards(OptionalAccessTokenGuard)
@@ -58,6 +65,20 @@ export class RepositoriesController {
     @Req() request: Request & { user?: AuthPrincipal }) {
     // Read the raw query: ValidationPipe coerces duplicate primitive params to a string.
     return this.repositories.read(owner, repo, request.user?.id, { ref: request.query.ref as string | undefined });
+  }
+
+  @Get('repos/:owner/:repo/overview')
+  @Header('Cache-Control', 'private, no-store')
+  @UseGuards(OptionalAccessTokenGuard)
+  overview(@Param('owner') owner: string, @Param('repo') repo: string, @Req() request: Request & { user?: AuthPrincipal }) {
+    return this.repositories.read(owner, repo, request.user?.id, { overview: true, ref: request.query.ref as string | undefined });
+  }
+
+  @Get('repos/:owner/:repo/files')
+  @Header('Cache-Control', 'private, no-store')
+  @UseGuards(OptionalAccessTokenGuard)
+  files(@Param('owner') owner: string, @Param('repo') repo: string, @Req() request: Request & { user?: AuthPrincipal }) {
+    return this.repositories.read(owner, repo, request.user?.id, { files: true, ref: request.query.ref as string | undefined, q: request.query.q as string | undefined });
   }
 
   @Get('repos/:owner/:repo/tree')
@@ -97,6 +118,7 @@ export class RepositoriesController {
     @Req() request: Request & { user?: AuthPrincipal }) {
     return this.repositories.read(owner, repo, request.user?.id, {
       commits: true, ref: request.query.ref as string | undefined,
+      author: request.query.author as string | undefined, since: request.query.since as string | undefined, until: request.query.until as string | undefined,
       page: request.query.page as string | undefined, snapshot: request.query.snapshot as string | undefined,
     });
   }

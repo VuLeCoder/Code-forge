@@ -1,3 +1,4 @@
+import { selectChoice } from "./select-choice";
 import { expect, test } from '@playwright/test';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -47,18 +48,19 @@ test('M3.7 private repository offers a clean URL and username/PAT instructions',
   await page.route('**/api/v1/repos/alice/private', (route) => route.fulfill({ json: { repository: {
     id: 'private', owner: { username: 'alice' }, name: 'private', visibility: 'PRIVATE', permissions: { canRead: true, canWrite: true, canManage: true }, defaultBranch: 'main', cloneUrl: 'http://localhost:3111/git/alice/private.git',
   } } }));
-  await page.goto('/alice/private');
+  await page.goto('/alice/private/guide');
   const quickSetup = page.getByRole('region', { name: 'Bắt đầu với repository này' });
   await expect(quickSetup).toBeVisible();
   await expect(quickSetup).toContainText('git clone http://localhost:3111/git/alice/private.git');
   await expect(quickSetup).toContainText('không đưa PAT vào URL');
+  await page.getByRole('navigation', { name: 'Điều hướng repository' }).getByRole('link', { name: 'Mã nguồn', exact: true }).click();
   await page.getByRole('button', { name: 'Code', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('Khi Git hỏi mật khẩu, nhập PAT');
   await expect(dialog).toContainText('repo:write');
   await expect(dialog).toContainText('git push origin ten-branch');
   await expect(dialog.getByLabel('URL clone')).toHaveValue('http://localhost:3111/git/alice/private.git');
-  await expect(dialog.getByRole('link', { name: 'Tạo hoặc quản lý PAT' })).toHaveAttribute('href', '/settings/tokens');
+  await expect(dialog.getByRole('link', { name: 'Tạo hoặc quản lý PAT' })).toHaveAttribute('href', '/settings#tokens');
 });
 
 test('M3.5 paginates through proxy, opens direct commit URLs and parents, preserves branch and fits mobile', async ({ page }) => {
@@ -70,9 +72,13 @@ test('M3.5 paginates through proxy, opens direct commit URLs and parents, preser
     return route.fulfill({ json: { branches, selectedBranch: branches.find((branch) => branch.name === ref) } });
   });
   await page.goto('/alice/hello-world?ref=feature%2Fdemo');
-  await page.getByRole('navigation', { name: 'Nội dung repository' }).getByRole('link', { name: 'Lịch sử commit' }).click();
+  await page.getByRole('link', { name: '21 commit', exact: true }).click();
   const history = page.getByRole('region', { name: 'Lịch sử commit', exact: true });
   await expect(history.getByRole('listitem')).toHaveCount(20);
+  await expect(history.getByRole('heading', { level: 3 }).first()).toBeVisible();
+  await expect(history.getByRole('button', { name: /^Sao chép SHA/ })).toHaveCount(20);
+  await expect(page.getByRole('link', { name: '← Về mã nguồn', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Code', exact: true })).toHaveCount(0);
   await history.getByRole('link', { name: 'Trang sau' }).click();
   await expect(history.getByRole('listitem')).toHaveCount(1);
   await expect(page).toHaveURL(/page=2&snapshot=/);
@@ -82,22 +88,29 @@ test('M3.5 paginates through proxy, opens direct commit URLs and parents, preser
   await history.getByRole('link', { name: 'Commit 21', exact: true }).click();
   const detail = page.getByRole('region', { name: 'Chi tiết commit', exact: true });
   await expect(detail.getByRole('heading', { name: 'Commit 21', exact: true })).toBeVisible();
-  await expect(detail.getByText('Tác giả ü <author@example.test>', { exact: true })).toBeVisible();
-  await expect(detail.getByText('Committer <committer@example.test>', { exact: true })).toBeVisible();
+  const summary = detail.locator(':scope > dl');
+  await expect(summary.getByText('Tác giả ü <author@example.test>', { exact: true })).toBeVisible();
+  await expect(summary.getByText('Committer <committer@example.test>', { exact: true })).toBeVisible();
   await expect(detail.locator('time').first()).toContainText('UTC');
   await expect(detail.locator('pre')).toContainText('<script>window.commitExecuted = true</script>');
   expect(await page.evaluate(() => 'commitExecuted' in window)).toBe(false);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.reload();
+  await detail.getByText('Thông tin chi tiết', { exact: true }).click();
   await detail.getByRole('link', { name: '14'.padStart(40, '0'), exact: true }).click();
   await expect(detail.getByRole('heading', { name: 'Commit 20', exact: true })).toBeVisible();
   await page.goBack();
   await expect(detail.getByRole('heading', { name: 'Commit 21', exact: true })).toBeVisible();
   await detail.getByRole('link', { name: '← Về lịch sử commit' }).click();
-  await expect(page.getByLabel('Branch', { exact: true })).toHaveValue('feature/demo');
-  await page.getByLabel('Branch', { exact: true }).selectOption('main');
+  await expect(page.getByLabel('Branch', { exact: true })).toHaveAttribute('data-branch', 'feature/demo');
+  await page.getByLabel('Branch', { exact: true }).click();
+  await page.getByRole('button', { name: 'main', exact: true }).or(page.getByRole('button', { name: 'main (mặc định)', exact: true })).click();
   await expect(page).toHaveURL(/\?ref=main&view=commits$/);
   await expect(history.getByRole('listitem')).toHaveCount(20);
+  await expect(history.getByRole('heading', { level: 3 }).first()).toBeVisible();
+  await expect(history.getByRole('button', { name: /^Sao chép SHA/ })).toHaveCount(20);
+  await expect(page.getByRole('link', { name: '← Về mã nguồn', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Code', exact: true })).toHaveCount(0);
   const response = await page.request.get('/api/v1/repos/alice/hello-world/commits?page=1&page=2');
   expect(response.status()).toBe(400);
   expect(response.headers()['cache-control']).toBe('private, no-store');
@@ -107,6 +120,7 @@ test('M3.5 paginates through proxy, opens direct commit URLs and parents, preser
   expect(commitResponse.status()).toBe(200);
   expect(commitResponse.headers()['cache-control']).toBe('private, no-store');
   await page.goto(`/alice/hello-world?view=commit&sha=${'1'.padStart(40, '0')}`);
+  await detail.getByText('Thông tin chi tiết', { exact: true }).click();
   await expect(detail.getByText('Commit đầu tiên, không có commit cha.')).toBeVisible();
 });
 
@@ -174,7 +188,8 @@ test('M3.4 renders branch README, GFM, safe links/images and mobile layout', asy
   await expect(page).toHaveURL(/#readme-usage$/);
   await expect(readme.locator('#readme-usage')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.getByLabel('Branch', { exact: true }).selectOption('feature/demo');
+  await page.getByLabel('Branch', { exact: true }).click();
+  await page.getByRole('button', { name: 'feature/demo', exact: true }).or(page.getByRole('button', { name: 'feature/demo (mặc định)', exact: true })).click();
   await expect(readme.getByRole('heading', { name: 'README feature/demo' })).toBeVisible();
   await expect(readme.getByRole('heading', { name: 'README main' })).toHaveCount(0);
   await page.reload();
@@ -232,8 +247,9 @@ test('M3.4 discovers nested case-insensitive README and resolves parent image an
   await expect(readme.getByRole('link', { name: 'Invalid' })).toHaveCount(0);
 });
 
-test('M3.3 opens files through proxy with safe code, line numbers, URL and mobile navigation', async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 812 });
+test('M3.3 opens files through proxy with safe code, line numbers, URL and laptop navigation', async ({ page }) => {
+  // Laptop is the supported layout for the redesigned file viewer.
+  await page.setViewportSize({ width: 1366, height: 768 });
   await page.route('**/api/v1/auth/*', (route) => route.fulfill({ status: 401, json: {} }));
   await page.route('**/api/v1/repos/alice/hello-world/branches*', (route) => {
     const ref = new URL(route.request().url()).searchParams.get('ref') ?? 'main';
@@ -244,20 +260,35 @@ test('M3.3 opens files through proxy with safe code, line numbers, URL and mobil
   await page.getByRole('link', { name: 'hello & ü.ts', exact: true }).click();
   const viewer = page.getByRole('region', { name: 'Nội dung file', exact: true });
   await expect(viewer.getByRole('rowheader', { name: '3', exact: true })).toBeVisible();
-  await expect(viewer.getByText('feature/demo', { exact: true })).toBeVisible();
+  await expect(viewer.getByRole('region', { name: 'Mã nguồn có số dòng', exact: true }).getByText('feature/demo', { exact: true })).toBeVisible();
   await expect(viewer.getByText('<script>window.sourceExecuted = true</script>', { exact: true })).toBeVisible();
+  const fileUrl = page.url();
+  const collapseSidebar = page.getByRole('button', { name: 'Thu gọn thanh tệp dự án', exact: true });
+  await expect(collapseSidebar).toHaveAttribute('aria-expanded', 'true');
+  await collapseSidebar.click();
+  const expandSidebar = page.getByRole('button', { name: 'Mở thanh tệp dự án', exact: true });
+  await expect(expandSidebar).toHaveAttribute('aria-expanded', 'false');
+  await expect(viewer.getByRole('rowheader', { name: '3', exact: true })).toBeVisible();
+  await expect(page).toHaveURL(fileUrl);
+  await expandSidebar.click();
+  await expect(collapseSidebar).toHaveAttribute('aria-expanded', 'true');
   expect(await page.evaluate(() => 'sourceExecuted' in window)).toBe(false);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.reload();
   await expect(viewer.getByRole('rowheader', { name: '1', exact: true })).toBeVisible();
-  await viewer.getByRole('link', { name: '← Thư mục cha' }).click();
-  await expect(page.getByRole('link', { name: 'hello & ü.ts', exact: true })).toBeVisible();
+  await viewer.getByRole('navigation', { name: 'Đường dẫn mã nguồn' }).getByRole('link', { name: 'src # ü', exact: true }).click();
+  await expect(page).toHaveURL(/ref=feature%2Fdemo&path=src\+%23\+%C3%BC$/);
+  await expect(page.getByRole('region', { name: 'Cây thư mục', exact: true }).getByRole('link', { name: 'hello & ü.ts', exact: true })).toBeVisible();
   await page.goBack();
   await expect(viewer).toBeVisible();
-  await page.getByLabel('Branch', { exact: true }).selectOption('main');
-  await expect(page).toHaveURL(/\?ref=main$/);
-  await page.getByRole('link', { name: 'README.md', exact: true }).click();
-  await expect(viewer.getByText('main', { exact: true })).toBeVisible();
+  await page.getByLabel('Branch', { exact: true }).click();
+  await page.getByRole('button', { name: 'main', exact: true }).or(page.getByRole('button', { name: 'main (mặc định)', exact: true })).click();
+  await expect(page).toHaveURL(url => url.searchParams.get('ref') === 'main' && url.searchParams.get('view') === 'blob' && url.searchParams.get('path') === 'src # ü/hello & ü.ts');
+  await expect(viewer.getByRole('rowheader', { name: '3', exact: true })).toBeVisible();
+  await expect(viewer.getByRole('region', { name: 'Mã nguồn có số dòng', exact: true }).getByText('main', { exact: true })).toBeVisible();
+  await viewer.getByRole('navigation', { name: 'Đường dẫn mã nguồn' }).getByRole('link', { name: 'Gốc', exact: true }).click();
+  await page.getByRole('region', { name: 'Cây thư mục', exact: true }).getByRole('link', { name: 'README.md', exact: true }).click();
+  await expect(viewer.getByRole('rowheader', { name: '1', exact: true })).toBeVisible();
   const response = await page.request.get('/api/v1/repos/alice/hello-world/blob?path=a&path=b');
   expect(response.status()).toBe(400);
   expect(response.headers()['cache-control']).toBe('private, no-store');
@@ -283,7 +314,7 @@ test('M3.3 displays empty, binary, large, truncated, missing and retry states', 
     await route.fulfill({ status: 503, json: { error: { code: 'GIT_READ_UNAVAILABLE' } } });
   });
   await page.goto('/alice/hello-world?view=blob&path=README.md');
-  await expect(viewer.getByRole('status')).toContainText('Đang tải file');
+  await expect(viewer.getByRole('status').filter({ hasText: /^Đang tải file…$/ })).toBeVisible();
   release();
   await expect(viewer.getByRole('alert')).toContainText('Chưa thể tải');
   await page.unroute('**/api/v1/repos/alice/hello-world/blob?**');
@@ -306,23 +337,24 @@ test('M3.1 selects branches, persists URL, handles missing ref and fits mobile',
     return route.fulfill(selectedBranch ? { json: { branches, selectedBranch, defaultBranch: 'main', storageState: 'READY' } } : { status: 404, json: { error: { code: 'REF_NOT_FOUND' } } });
   });
   await page.goto('/alice/hello-world');
-  await expect(page.getByLabel('Branch', { exact: true })).toHaveValue('main');
-  await page.getByLabel('Branch', { exact: true }).selectOption('feature/demo');
+  await expect(page.getByLabel('Branch', { exact: true })).toHaveAttribute('data-branch', 'main');
+  await page.getByLabel('Branch', { exact: true }).click();
+  await page.getByRole('button', { name: 'feature/demo', exact: true }).or(page.getByRole('button', { name: 'feature/demo (mặc định)', exact: true })).click();
   await expect(page).toHaveURL(/ref=feature%2Fdemo/);
   await expect(page.getByRole('region', { name: 'Cây thư mục' }).getByText('README.md', { exact: true })).toBeVisible();
   await page.reload();
-  await expect(page.getByLabel('Branch', { exact: true })).toHaveValue('feature/demo');
+  await expect(page.getByLabel('Branch', { exact: true })).toHaveAttribute('data-branch', 'feature/demo');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.goto('/alice/hello-world?ref=missing');
   await expect(page.getByRole('main').getByRole('alert')).toContainText('Branch không tồn tại');
   await page.getByRole('button', { name: 'Về nhánh mặc định' }).click();
-  await expect(page.getByLabel('Branch', { exact: true })).toHaveValue('main');
+  await expect(page.getByLabel('Branch', { exact: true })).toHaveAttribute('data-branch', 'main');
 });
 
 test('M3.1 branch proxy renders empty state', async ({ page }) => {
   await page.route('**/api/v1/auth/*', (route) => route.fulfill({ status: 401, json: {} }));
   await page.goto('/alice/hello-world');
-  await expect(page.getByLabel('Branch', { exact: true })).toBeDisabled();
+  await expect(page.getByLabel('Branch', { exact: true })).toHaveAttribute('aria-disabled', 'true');
   await expect(page.getByRole('heading', { name: 'Repository chưa có mã nguồn' })).toBeVisible();
 });
 
@@ -337,7 +369,7 @@ test('M3.2 navigates tree URLs, breadcrumbs, parent and history through the Next
   await page.goto('/alice/hello-world?ref=feature%2Fdemo&path=src+%23+%C3%BC');
   const tree = page.getByRole('region', { name: 'Cây thư mục' });
   await expect(tree.getByText('hello & ü.ts', { exact: true })).toBeVisible();
-  await expect(page.getByLabel('Branch', { exact: true })).toHaveValue('feature/demo');
+  await expect(page.getByLabel('Branch', { exact: true })).toHaveAttribute('data-branch', 'feature/demo');
   await tree.getByRole('link', { name: 'nested/' }).click();
   await expect(tree.getByText('Thư mục chưa có nội dung.')).toBeVisible();
   await page.reload();
@@ -349,7 +381,8 @@ test('M3.2 navigates tree URLs, breadcrumbs, parent and history through the Next
   await tree.getByRole('navigation').getByRole('link', { name: 'src # ü' }).click();
   await expect(tree.getByText('hello & ü.ts', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.getByLabel('Branch', { exact: true }).selectOption('main');
+  await page.getByLabel('Branch', { exact: true }).click();
+  await page.getByRole('button', { name: 'main', exact: true }).or(page.getByRole('button', { name: 'main (mặc định)', exact: true })).click();
   await expect(page).toHaveURL(/\?ref=main$/);
   await expect(tree.getByRole('link', { name: 'src # ü/' })).toBeVisible();
   await expect(tree.getByRole('link', { name: 'link', exact: true })).toHaveCount(0);
@@ -380,4 +413,56 @@ test('M3.2 handles missing paths, retry and loading', async ({ page }) => {
   await page.unroute('**/api/v1/repos/alice/hello-world/tree?**');
   await tree.getByRole('button', { name: 'Tải lại thư mục' }).click();
   await expect(tree.getByText('hello & ü.ts', { exact: true })).toBeVisible();
+});
+
+ test('commit filters preserve author and dates through pagination and detail', async ({ page }) => {
+  await page.route('**/api/v1/auth/*', route => route.fulfill({ status: 401, json: {} }));
+  await page.route('**/commit-authors', route => route.fulfill({ json: { authors: [{ username: 'Alice' }, { username: 'Bob' }] } }));
+  const sha = 'a'.repeat(40);
+  await page.route('**/api/v1/repos/alice/hello-world/branches*', route => route.fulfill({ json: { branches: [{ name: 'main', commitSha: sha, isDefault: true }], selectedBranch: { name: 'main', commitSha: sha } } }));
+  await page.route('**/api/v1/repos/alice/hello-world/commits?**', route => {
+    const query = new URL(route.request().url()).searchParams;
+    expect(query.get('author')).toBe('Alice');
+    expect(query.get('since')).toBe('2026-11-01');
+    expect(query.get('until')).toBe('2026-11-18');
+    return route.fulfill({ json: { commits: [{ sha, subject: 'Filtered commit', author: { name: 'Alice', email: 'alice@test.local' }, committedAt: '2026-11-18T00:00:00Z' }], page: Number(query.get('page') ?? 1), hasMore: !query.has('page'), snapshot: sha, storageState: 'READY' } });
+  });
+  await page.goto('/alice/hello-world?view=commits&ref=main&author=Alice&since=2026-11-01&until=2026-11-18');
+  await expect(page.getByLabel('Tác giả', { exact: true })).toHaveText('Alice');
+  await page.getByRole('link', { name: 'Trang sau' }).click();
+  await expect(page).toHaveURL(/page=2/);
+  await expect(page.getByRole('link', { name: 'Filtered commit', exact: true })).toHaveAttribute('href', /author=Alice&since=2026-11-01&until=2026-11-18/);
+  await page.setViewportSize({ width: 375, height: 812 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.unroute('**/api/v1/repos/alice/hello-world/commits?**');
+  await page.route('**/api/v1/repos/alice/hello-world/commits?**', route => route.fulfill({ json: { commits: [], page: 1, hasMore: false, snapshot: sha, storageState: 'READY' } }));
+  await selectChoice(page.getByLabel('Tác giả', { exact: true }), 'Bob');
+  await expect(page).toHaveURL(/author=Bob/);
+  expect(new URL(page.url()).searchParams.has('page')).toBe(false);
+  expect(new URL(page.url()).searchParams.has('snapshot')).toBe(false);
+  await expect(page.getByText('Không có commit phù hợp với bộ lọc.')).toBeVisible();
+  await selectChoice(page.getByLabel('Tác giả', { exact: true }), '');
+  await page.getByLabel('Lọc theo thời gian', { exact: true }).click();
+  await page.getByLabel('Năm', { exact: true }).fill('2026');
+  await selectChoice(page.getByLabel('Tháng', { exact: true }), '10');
+  await page.getByRole('button', { name: '2026-11-10', exact: true }).click();
+  await expect(page.getByText('Chọn ngày kết thúc')).toBeVisible();
+  await page.getByRole('button', { name: '2026-11-18', exact: true }).click();
+  await expect(page).toHaveURL(/since=2026-11-10&until=2026-11-18/);
+  await page.getByLabel('Lọc theo thời gian', { exact: true }).click();
+  await expect(page.getByRole('button', { name: '2026-11-14', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.getByRole('button', { name: 'Xóa', exact: true }).click();
+  await expect(page).toHaveURL(url => url.searchParams.get('view') === 'commits' && url.searchParams.get('ref') === 'main' && !url.searchParams.has('author') && !url.searchParams.has('since') && !url.searchParams.has('until'));
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const branch = await page.getByLabel('Branch', { exact: true }).boundingBox();
+  const author = await page.getByLabel('Tác giả', { exact: true }).boundingBox();
+  expect(Math.abs(branch!.y - author!.y)).toBeLessThan(10);
+  await page.getByLabel('Lọc theo thời gian', { exact: true }).click();
+  await page.screenshot({ path: '/tmp/code-forge-calendar-light.png' });
+  await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
+  await expect(page.getByRole('button', { name: '2026-11-14', exact: true })).toBeVisible();
+  await page.screenshot({ path: '/tmp/code-forge-calendar-dark.png' });
+  await page.keyboard.press('Escape');
+  await expect(page.getByLabel('Chọn khoảng ngày', { exact: true })).not.toBeVisible();
 });

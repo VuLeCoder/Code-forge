@@ -32,13 +32,13 @@ describe('pre-receive branch protection', () => {
 
   afterEach(async () => { if (root) await rm(root, { recursive: true, force: true }); });
 
-  function run(oldSha: string, newSha: string, ref: string, actorIsOwner: boolean) {
+  function run(oldSha: string, newSha: string, ref: string, actorIsOwner: boolean, protect = true) {
     return spawnSync(process.execPath, [hook], {
       cwd: root,
       input: `${oldSha} ${newSha} ${ref}\n`,
       encoding: 'utf8',
       env: { ...process.env, GIT_DIR: bare, CODE_FORGE_DEFAULT_BRANCH: 'main',
-        CODE_FORGE_ALLOW_DEFAULT_BRANCH_INITIALIZATION: String(actorIsOwner),
+        CODE_FORGE_ALLOW_DEFAULT_BRANCH_INITIALIZATION: String(actorIsOwner), CODE_FORGE_PROTECT_DEFAULT_BRANCH: String(protect),
         CODE_FORGE_MAX_FILE_BYTES: String(1024 * 1024), CODE_FORGE_MAX_REPOSITORY_BYTES: String(4 * 1024 * 1024) },
       timeout: 10_000,
     });
@@ -56,6 +56,14 @@ describe('pre-receive branch protection', () => {
     }
   });
 
+  it('allows fast-forward default pushes when protection is disabled, but still blocks deletion and force pushes', () => {
+    const first = git(['--git-dir', bare, 'rev-parse', 'refs/heads/main']);
+    const second = git(['-C', work, 'rev-parse', 'HEAD']);
+    expect(run(first, second, 'refs/heads/main', false, false).status).toBe(0);
+    expect(run(first, '0'.repeat(40), 'refs/heads/main', true, false).stderr).toContain('không được xóa');
+    expect(run(second, first, 'refs/heads/main', true, false).stderr).toContain('fast-forward');
+  });
+
   it('allows only the owner to initialize an empty default branch and allows feature branches', () => {
     const first = git(['-C', work, 'rev-parse', 'HEAD^']);
     const zero = '0'.repeat(first.length);
@@ -64,6 +72,21 @@ describe('pre-receive branch protection', () => {
     expect(run(zero, first, 'refs/heads/main', false).status).toBe(1);
     expect(run(zero, first, 'refs/heads/main', true).status).toBe(0);
     expect(run(zero, first, 'refs/heads/feature/topic', false).status).toBe(0);
+  });
+
+  it('accepts a non-main first branch and rejects an ambiguous multi-branch initial push', () => {
+    const first = git(['-C', work, 'rev-parse', 'HEAD^']);
+    const zero = '0'.repeat(first.length);
+    git(['--git-dir', bare, 'update-ref', '-d', 'refs/heads/main']);
+    expect(run(zero, first, 'refs/heads/develop', true).status).toBe(0);
+    const result = spawnSync(process.execPath, [hook], {
+      input: `${zero} ${first} refs/heads/develop\n${zero} ${first} refs/heads/topic\n`,
+      encoding: 'utf8', env: { ...process.env, GIT_DIR: bare, CODE_FORGE_DEFAULT_BRANCH: 'main',
+        CODE_FORGE_ALLOW_DEFAULT_BRANCH_INITIALIZATION: 'true', CODE_FORGE_MAX_FILE_BYTES: '1048576',
+        CODE_FORGE_MAX_REPOSITORY_BYTES: '4194304' },
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('lần push đầu tiên cần tạo đúng một branch');
   });
 
   it('accepts a 255-byte branch suffix and rejects a 256-byte suffix before ref update', () => {

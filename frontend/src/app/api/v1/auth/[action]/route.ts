@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withBackendClientIp } from "@/lib/backend-client-ip";
 
-const actions = new Set(["register", "login", "refresh", "logout", "me"]);
+const actions = new Set(["register", "login", "refresh", "logout", "me", "account"]);
 
 function backendUrl(): string {
   return (process.env.BACKEND_URL ?? "http://localhost:4000").replace(/\/$/, "");

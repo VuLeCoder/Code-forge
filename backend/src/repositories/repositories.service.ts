@@ -52,7 +52,7 @@ export class RepositoriesService {
     return { repository: {
       id: repo.id, owner: { username: repo.owner.username }, name: repo.name,
       description: repo.description, visibility: repo.visibility, status: repo.status,
-      defaultBranch: repo.defaultBranch, createdAt: repo.createdAt, updatedAt: repo.updatedAt,
+      defaultBranch: repo.defaultBranch, protectDefaultBranch: repo.protectDefaultBranch, createdAt: repo.createdAt, updatedAt: repo.updatedAt,
       cloneUrl: `${gitBase}/git/${encodeURIComponent(repo.owner.username)}/${encodeURIComponent(repo.name)}.git`,
       permissions: this.policy.permissions(repo, userId),
       ...(storage ? { storageState: storage.state, storageGeneration: repo.storageGeneration, readme: storage.readme } : {}),
@@ -88,6 +88,11 @@ export class RepositoriesService {
       });
       await this.storage.create(repo.storageKey, repo.defaultBranch, dto.initializeReadme ?? false, repo.name);
       createdKey = repo.storageKey;
+      if (dto.initializeReadme) {
+        const sha = await this.storage.branchSha(repo.storageKey, repo.defaultBranch);
+        if (sha) await tx.branchUpdate.createMany({ data: [{ repositoryId: repo.id, storageGeneration: repo.storageGeneration,
+          operationId: repo.id, actorId: userId, branch: repo.defaultBranch, sha, kind: 'INITIALIZE' }], skipDuplicates: true });
+      }
       const inspected = await this.storage.inspect(repo.storageKey, repo.defaultBranch);
       await tx.auditLog.create({ data: { actorId: userId, action: 'REPOSITORY_CREATED', targetId: repo.id,
         details: { repositoryId: repo.id, visibility: repo.visibility, initializedWithReadme: dto.initializeReadme ?? false } } });
@@ -99,12 +104,22 @@ export class RepositoriesService {
     }
   }
 
-  async read(owner: string, name: string, userId?: string, branchQuery?: { ref?: string; path?: string; tree?: boolean; blob?: boolean; image?: boolean; commits?: boolean; sha?: string; page?: string; snapshot?: string }) {
+  async read(owner: string, name: string, userId?: string, branchQuery?: { overview?: boolean; files?: boolean; q?: string; ref?: string; path?: string; tree?: boolean; blob?: boolean; image?: boolean; commits?: boolean; sha?: string; page?: string; snapshot?: string; author?: string; since?: string; until?: string }) {
     const repo = await this.load(this.db, owner, name, userId);
     this.policy.assertRead(repo, userId);
+    if (branchQuery?.files && branchQuery.q !== undefined && (typeof branchQuery.q !== 'string' || branchQuery.q.length > 255)) throw new BadRequestException({ error: { code: 'INVALID_FILE_QUERY', message: 'Từ khóa không hợp lệ.' } });
     if (branchQuery?.sha !== undefined) this.storage.validateCommitSha(branchQuery.sha);
     if (branchQuery?.snapshot !== undefined) this.storage.validateCommitSha(branchQuery.snapshot);
-    if (branchQuery?.commits) this.storage.validateCommitPage(branchQuery.page);
+    if (branchQuery?.commits) {
+      this.storage.validateCommitPage(branchQuery.page);
+      this.storage.validateCommitFilters(branchQuery);
+      if (branchQuery.author) {
+        const author = await this.db.user.findUnique({ where: { normalizedUsername: branchQuery.author.toLowerCase() }, select: { id: true, email: true } });
+        const member = author && author.id !== repo.ownerId ? await this.db.repositoryMember.findUnique({ where: { repositoryId_userId: { repositoryId: repo.id, userId: author.id } } }) : null;
+        if (!author || (author.id !== repo.ownerId && !member)) throw new BadRequestException({ error: { code: 'INVALID_COMMIT_FILTER', message: 'Tác giả không phải thành viên repo.' } });
+        branchQuery = { ...branchQuery, author: `<${author.email}>` };
+      }
+    }
     if (branchQuery?.ref !== undefined) this.storage.validateRef(branchQuery.ref);
     if (branchQuery?.path !== undefined) this.storage.validateSourcePath(branchQuery.path);
     if (branchQuery?.blob && !branchQuery.path) throw new BadRequestException({ error: { code: 'INVALID_PATH', message: 'Cần đường dẫn tới file.' } });
@@ -122,10 +137,24 @@ export class RepositoriesService {
       }
       if (branchQuery) {
         if (branchQuery.sha !== undefined) {
-          try { return { commit: await this.storage.commit(current.storageKey, branchQuery.sha), storageGeneration: current.storageGeneration }; }
+          try { return { commit: await this.storage.commitDetail(current.storageKey, branchQuery.sha), storageGeneration: current.storageGeneration }; }
           catch (error) { return { readError: error }; }
         }
         const result = await this.storage.branches(current.storageKey, current.defaultBranch);
+        if (branchQuery.overview || branchQuery.files) {
+          try {
+            const selected = result.branches.find((branch) => branch.name === (branchQuery.ref ?? current.defaultBranch));
+            if (!selected && (branchQuery.ref !== undefined || result.branches.length)) throw new NotFoundException({ error: { code: 'REF_NOT_FOUND', message: 'Branch không tồn tại.' } });
+            if (branchQuery.files) return selected ? await this.storage.findFiles(current.storageKey, selected.commitSha, branchQuery.q ?? '') : { files: [], hasMore: false, commitSha: null };
+            if (!selected) return { selectedBranch: null, commit: null, commitCount: 0, update: null };
+            const commit = await this.storage.commit(current.storageKey, selected.commitSha);
+            const commitCount = await this.storage.commitCount(current.storageKey, selected.commitSha);
+            const update = await tx.branchUpdate.findFirst({ where: { repositoryId: current.id, storageGeneration: current.storageGeneration, branch: selected.name, sha: selected.commitSha }, orderBy: { createdAt: 'desc' } });
+            const actor = update ? await tx.user.findUnique({ where: { id: update.actorId }, select: { username: true, avatarUrl: true } }) : null;
+            return { selectedBranch: selected, commit: { sha: commit.sha, subject: commit.subject, committedAt: commit.committedAt }, commitCount,
+              update: update && actor ? { kind: update.kind, username: actor.username, avatarUrl: actor.avatarUrl } : null };
+          } catch (error) { return { readError: error }; }
+        }
         if (branchQuery.commits) {
           try {
             const selected = result.branches.find((branch) => branch.name === (branchQuery.ref ?? current.defaultBranch));
@@ -136,7 +165,7 @@ export class RepositoriesService {
               throw new NotFoundException({ error: { code: 'COMMIT_NOT_FOUND', message: 'Lịch sử đã thay đổi hoặc storage đã được khởi tạo lại.' } });
             }
             const page = this.storage.validateCommitPage(branchQuery.page);
-            return { ...(selected ? await this.storage.commits(current.storageKey, selected.commitSha, page, branchQuery.snapshot)
+            return { ...(selected ? await this.storage.commits(current.storageKey, selected.commitSha, page, branchQuery.snapshot, branchQuery)
               : { commits: [], page, pageSize: 20, hasMore: false, snapshot: null }),
               ref: selected?.name ?? null, storageState: selected ? 'READY' : current.storageGeneration > 0 ? 'RESET' : 'EMPTY', storageGeneration: current.storageGeneration };
           } catch (error) { return { readError: error }; }
@@ -153,7 +182,7 @@ export class RepositoriesService {
             if (branchQuery.blob && selected) {
               return { ...await this.storage.blob(current.storageKey, selected.commitSha, path, branchQuery.image), ref: selected.name, storageState: 'READY', storageGeneration: current.storageGeneration };
             }
-            const tree = selected ? await this.storage.tree(current.storageKey, selected.commitSha, path) : { path, commitSha: null, entries: [] };
+            const tree = selected ? await this.storage.tree(current.storageKey, selected.commitSha, path, true) : { path, commitSha: null, entries: [] };
             return { ...tree, ref: selected?.name ?? null, storageState: selected ? 'READY' : current.storageGeneration > 0 ? 'RESET' : 'EMPTY', storageGeneration: current.storageGeneration };
           } catch (error) { return { readError: error }; }
         }
@@ -210,7 +239,7 @@ export class RepositoriesService {
         this.policy.assertRead(current, userId);
       }
       return { storageKey: current.storageKey, defaultBranch: current.defaultBranch, repositoryId: current.id,
-        userId, actorIsOwner: current.ownerId === userId, operation, storageGeneration: current.storageGeneration };
+        userId, actorIsOwner: current.ownerId === userId, protectDefaultBranch: current.protectDefaultBranch, operation, storageGeneration: current.storageGeneration };
     }, { timeout: 30_000 });
   }
 
@@ -234,10 +263,11 @@ export class RepositoriesService {
         await this.storage.create(current.storageKey, current.defaultBranch, false, current.name);
         const updated = await tx.repository.update({ where: { id: current.id }, data: { storageGeneration: { increment: 1 } } });
         return { storageKey: updated.storageKey, defaultBranch: updated.defaultBranch,
-          repositoryId: updated.id, userId, actorIsOwner: updated.ownerId === userId, operation, storageGeneration: updated.storageGeneration };
+          repositoryId: updated.id, userId, actorIsOwner: updated.ownerId === userId, protectDefaultBranch: updated.protectDefaultBranch, operation, storageGeneration: updated.storageGeneration };
       }
+      await this.storage.syncDefaultHead(current.storageKey, current.defaultBranch);
       return { storageKey: current.storageKey, defaultBranch: current.defaultBranch,
-        repositoryId: current.id, userId, actorIsOwner: current.ownerId === userId, operation, storageGeneration: current.storageGeneration };
+        repositoryId: current.id, userId, actorIsOwner: current.ownerId === userId, protectDefaultBranch: current.protectDefaultBranch, operation, storageGeneration: current.storageGeneration };
     }, { timeout: 30_000 });
   }
 
@@ -267,16 +297,23 @@ export class RepositoriesService {
   }
 
   async update(owner: string, name: string, userId: string, dto: UpdateRepositoryDto) {
-    if (dto.name === undefined && dto.description === undefined && dto.visibility === undefined) {
+    if (dto.name === undefined && dto.description === undefined && dto.visibility === undefined && dto.defaultBranch === undefined && dto.protectDefaultBranch === undefined) {
       throw new BadRequestException({ error: { code: 'EMPTY_UPDATE', message: 'Cần ít nhất một trường để cập nhật.', details: {} } });
     }
     return this.withRepositoryLock(owner, name, () => this.conflict(() => this.db.$transaction(async (tx) => {
       await this.activeOwner(tx, userId);
       const repo = await this.load(tx, owner, name);
       this.policy.assertManage(repo, userId);
+      if (dto.defaultBranch !== undefined) {
+        // Only existing branches can become the default; the repository lock fences pushes.
+        const branches = await this.storage.branches(repo.storageKey, repo.defaultBranch);
+        if (!branches.branches.some((branch) => branch.name === dto.defaultBranch)) {
+          throw new BadRequestException({ error: { code: 'REF_NOT_FOUND', message: 'Nhánh mặc định phải là một nhánh đang tồn tại.' } });
+        }
+      }
       const updated = await tx.repository.update({
         where: { id: repo.id },
-        data: { name: dto.name, normalizedName: dto.name?.toLowerCase(), description: dto.description, visibility: dto.visibility },
+        data: { defaultBranch: dto.defaultBranch, protectDefaultBranch: dto.protectDefaultBranch, name: dto.name, normalizedName: dto.name?.toLowerCase(), description: dto.description, visibility: dto.visibility },
         include: { owner: { select: { username: true } } },
       });
       await tx.auditLog.create({ data: { actorId: userId, action: 'REPOSITORY_UPDATED', targetId: repo.id,
@@ -322,6 +359,14 @@ export class RepositoriesService {
     }));
   }
 
+  async commitAuthors(owner: string, name: string, userId?: string) {
+    const repo = await this.load(this.db, owner, name, userId);
+    this.policy.assertRead(repo, userId);
+    const members = await this.db.repositoryMember.findMany({ where: { repositoryId: repo.id },
+      select: { user: { select: { username: true } } }, orderBy: { createdAt: 'asc' } });
+    return { authors: [repo.owner, ...members.map(member => member.user)] };
+  }
+
   async listMembers(owner: string, name: string, userId: string) {
     const repo = await this.load(this.db, owner, name, userId);
     this.policy.assertManage(repo, userId);
@@ -333,7 +378,7 @@ export class RepositoriesService {
     return {
       members: rows.map((m) => ({
         userId: m.userId,
-        role: m.role,
+        role: m.role, canMerge: m.canMerge,
         createdAt: m.createdAt,
         updatedAt: m.updatedAt,
         user: { id: m.user.id, username: m.user.username },
@@ -479,9 +524,13 @@ export class RepositoriesService {
       if (!member) {
         throw new NotFoundException({ error: { code: 'MEMBER_NOT_FOUND', message: 'Thành viên không tồn tại trong repository.' } });
       }
+      if (dto.role === undefined && dto.canMerge === undefined) throw new BadRequestException({ error: { code: 'EMPTY_UPDATE', message: 'Cần chọn quyền để cập nhật.' } });
+      if (dto.canMerge === true && (dto.role ?? member.role) !== 'WRITE') {
+        throw new BadRequestException({ error: { code: 'MERGE_REQUIRES_WRITE', message: 'Chỉ thành viên có quyền ghi mới được cấp quyền merge.' } });
+      }
       const updated = await tx.repositoryMember.update({
         where: { repositoryId_userId: { repositoryId: repo.id, userId: memberUserId } },
-        data: { role: dto.role },
+        data: { role: dto.role, canMerge: dto.role === 'READ' ? false : dto.canMerge },
         include: { user: { select: { id: true, username: true } } },
       });
       await tx.auditLog.create({
@@ -490,7 +539,7 @@ export class RepositoriesService {
       return {
         member: {
           userId: updated.userId,
-          role: updated.role,
+          role: updated.role, canMerge: updated.canMerge,
           createdAt: updated.createdAt,
           updatedAt: updated.updatedAt,
           user: { id: updated.user.id, username: updated.user.username },

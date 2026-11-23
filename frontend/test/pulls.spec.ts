@@ -1,3 +1,4 @@
+import { selectChoice } from "./select-choice";
 import { expect, test } from "@playwright/test";
 
 const owner = {
@@ -74,7 +75,7 @@ test("owner creates a pull request from a slash branch and reviews the compare s
   await page.goto("/alice/project/pulls");
   await page.getByRole("button", { name: "Tạo pull request", exact: true }).first().click();
   await page.getByLabel("Tiêu đề").fill("Add greeting");
-  await page.getByLabel("Branch nguồn").selectOption("feature/greeting");
+  await selectChoice(page.getByLabel("Branch nguồn"), "feature/greeting");
   await page.getByLabel("Mô tả").fill("Adds a README greeting.");
   await page.getByRole("button", { name: "Tạo pull request", exact: true }).last().click();
 
@@ -84,7 +85,7 @@ test("owner creates a pull request from a slash branch and reviews the compare s
     sourceBranch: "feature/greeting", targetBranch: "main",
   });
   await expect(page.getByRole("heading", { name: /Add greeting/ })).toBeVisible();
-  await expect(page.getByRole("heading", { name: /Commits/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^Commit/ })).toBeVisible();
   await expect(page.getByText("feature/greeting", { exact: true }).first()).toBeVisible();
   await expect(page.getByLabel("Diff của README.md")).toContainText("Hello from Code Forge");
 });
@@ -303,8 +304,8 @@ test("pull request form announces validation, restores focus, and fits a 375px v
   await toggle.press("Enter");
   await expect(page.getByLabel("Tiêu đề")).toBeFocused();
   await page.getByLabel("Tiêu đề").fill("Invalid same-branch request");
-  await page.getByLabel("Branch nguồn").selectOption("main");
-  await page.getByLabel("Branch đích").selectOption("main");
+  await selectChoice(page.getByLabel("Branch nguồn"), "main");
+  await selectChoice(page.getByLabel("Branch đích"), "main");
   await page.getByRole("button", { name: "Tạo pull request", exact: true }).last().click();
   const validation = page.getByRole("alert").filter({ hasText: "Hãy chọn hai branch khác nhau." });
   await expect(validation).toBeFocused();
@@ -342,8 +343,8 @@ test("branch loading error is distinct from an empty list and can be retried", a
   await expect(page.getByRole("button", { name: "Tạo pull request", exact: true }).last()).toBeDisabled();
 
   await page.getByRole("button", { name: "Thử tải lại branch" }).click();
-  await expect(page.getByLabel("Branch nguồn")).toHaveValue("");
-  await expect(page.getByLabel("Branch đích")).toHaveValue("main");
+  await expect(page.getByRole("combobox", { name: "Branch nguồn" })).toContainText("Chọn");
+  await expect(page.getByRole("combobox", { name: "Branch đích" })).toContainText("main");
   await expect(branchError).toHaveCount(0);
   expect(branchCalls).toBe(2);
 });

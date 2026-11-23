@@ -165,7 +165,7 @@ describe('Git HTTP process lifecycle', () => {
     expect(response.headers.get('content-type')).toBe('application/x-git-receive-pack-advertisement');
     expect(await response.text()).toBe('0000');
     expect(prepareGit).toHaveBeenCalledWith('owner', 'repo', 'Basic test', 'write');
-    expect(start).toHaveBeenCalledWith('key', 'main', 'git-receive-pack', true, undefined, true);
+    expect(start).toHaveBeenCalledWith('key', 'main', 'git-receive-pack', true, undefined, true, undefined);
     const raw = logs.mock.calls.map(([value]) => String(value)).find((value) => value.includes('"event":"git_write"'))!;
     expect(JSON.parse(raw)).toMatchObject({ event: 'git_write', operation: 'receive-pack-discovery', status: 200 });
   });
@@ -179,7 +179,7 @@ describe('Git HTTP process lifecycle', () => {
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe('0000');
-    expect(start).toHaveBeenCalledWith('key', 'main', 'git-upload-pack', true, 'version=2', true);
+    expect(start).toHaveBeenCalledWith('key', 'main', 'git-upload-pack', true, 'version=2', true, undefined);
   });
 
   it('rejects unsupported Git protocol versions before starting a child', async () => {

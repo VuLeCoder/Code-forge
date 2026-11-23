@@ -1,8 +1,8 @@
 .page {
   display: grid;
-  min-height: calc(100vh - 64px);
+  flex-grow: 1;
   place-items: center;
-  padding: 48px 20px 72px;
+  padding: var(--page-space) var(--page-gutter);
   background: var(--canvas);
 }
 
@@ -169,7 +169,7 @@
 @media (max-width: 480px) {
   .page {
     place-items: start center;
-    padding: 32px 14px 48px;
+
   }
 
   .card {

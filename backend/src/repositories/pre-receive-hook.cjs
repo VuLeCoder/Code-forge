@@ -54,6 +54,11 @@ process.stdin.on('data', (chunk) => {
 process.stdin.on('end', () => {
   const lines = input.trim().split('\n').filter(Boolean);
   if (!lines.length || lines.length > 1000) reject('danh sách cập nhật ref không hợp lệ.');
+  const existingRefs = git(['for-each-ref', '--format=%(refname)', 'refs/heads/']);
+  if (existingRefs === null) reject('không thể kiểm tra branch.');
+  if (!existingRefs.trim() && lines.length !== 1) {
+    reject('lần push đầu tiên cần tạo đúng một branch để chọn nhánh mặc định.');
+  }
   const proposed = [];
   const updates = new Map();
   for (const line of lines) {
@@ -65,9 +70,9 @@ process.stdin.on('end', () => {
     const branch = ref.slice('refs/heads/'.length);
     if (git(['check-ref-format', '--branch', branch]) === null) reject('tên branch không hợp lệ.');
     if (Buffer.byteLength(branch, 'utf8') > 255) reject('branch vượt quá 255 byte.');
-    if (ref === `refs/heads/${defaultBranch}` &&
+    if (process.env.CODE_FORGE_PROTECT_DEFAULT_BRANCH !== 'false' && ref === `refs/heads/${defaultBranch}` &&
       !(zero(oldSha) && process.env.CODE_FORGE_ALLOW_DEFAULT_BRANCH_INITIALIZATION === 'true')) {
-      reject('branch mặc định chỉ được cập nhật qua pull request do owner merge.');
+      reject('branch mặc định chỉ được cập nhật qua pull request bởi người được cấp quyền merge.');
     }
     updates.set(ref, zero(newSha));
     if (zero(newSha)) {

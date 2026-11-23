@@ -1,3 +1,4 @@
+import { recordBranchUpdates } from '../repositories/branch-update';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../database/prisma.service';
@@ -129,6 +130,8 @@ export class AdminGitJournalService {
     if (changedRefCount > 0 && operation.errorCode !== 'GIT_CHILD_SUCCEEDED') {
       this.unresolved('GIT_OUTCOME_UNKNOWN', 'Refs đã thay đổi nhưng journal không chứng minh được tiến trình Git đã thành công.');
     }
+    const defaultBranch = changedRefCount > 0
+      ? await this.storage.initializeDefaultBranch(operation.repository.storageKey, before!, after) : undefined;
     const outcome = changedRefCount === 0 ? 'FAILED' : 'COMPLETED';
     const resolutionCode = changedRefCount === 0 ? 'REFS_UNCHANGED' : 'CHILD_SUCCEEDED_REFS_CHANGED';
     const result = await this.db.$transaction(async (tx) => {
@@ -138,6 +141,8 @@ export class AdminGitJournalService {
         changedRefCount: outcome === 'COMPLETED' ? changedRefCount : null, beforeRefs: Prisma.DbNull,
       } });
       if (!updated.count) return null;
+      if (outcome === 'COMPLETED') await recordBranchUpdates(tx, operation, before!, after);
+      if (defaultBranch !== undefined) await tx.repository.update({ where: { id: operation.repositoryId }, data: { defaultBranch } });
       if (outcome === 'COMPLETED') await tx.auditLog.create({ data: { actorId: operation.actorId, action: 'GIT_PUSH_COMPLETED',
         targetId: operation.repositoryId, details: { operationId, repositoryId: operation.repositoryId,
           storageGeneration: operation.storageGeneration, changedRefCount } } });
@@ -186,6 +191,8 @@ export class AdminGitJournalService {
         : { status: 'FAILED', errorCode: 'REF_NOT_UPDATED' } });
       if (!updated.count) return null;
       if (outcome === 'COMPLETED') {
+        await tx.branchUpdate.createMany({ data: [{ repositoryId: operation.repositoryId, storageGeneration: operation.storageGeneration,
+          operationId, actorId: operation.actorId, branch: operation.pullRequest.targetBranch, sha: operation.candidateSha!, kind: 'MERGE' }], skipDuplicates: true });
         await tx.pullRequest.updateMany({ where: { id: operation.pullRequestId, status: { not: 'MERGED' } },
           data: { status: 'MERGED', version: { increment: 1 }, mergedById: operation.actorId,
             mergedAt: new Date(), mergeCommitSha: operation.candidateSha } });

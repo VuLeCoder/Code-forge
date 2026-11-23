@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAuth } from "./auth-provider";
 import { BrandLogo } from "./brand-logo";
+import { Avatar } from "./avatar";
 import { ThemeToggle } from "./theme-toggle";
 
 type MenuIconName = "profile" | "invitations" | "token" | "admin" | "logout";
@@ -98,7 +99,7 @@ export function SiteHeader() {
             aria-expanded={menuOpen}
             onClick={() => setMenuOpen((open) => !open)}
           >
-            <span className="userAvatar" aria-hidden="true">{user.username.slice(0, 1).toUpperCase()}</span>
+            <Avatar className="userAvatar" username={user.username} avatarUrl={user.avatarUrl} />
             <span className="menuChevron" aria-hidden="true" />
           </button>
           {menuOpen && <div className="userMenuPanel" role="menu" aria-label="Menu tài khoản" onKeyDown={(event) => {
@@ -109,8 +110,9 @@ export function SiteHeader() {
           }}>
             <div className="userMenuSummary"><span className="eyebrow">Tài khoản</span><strong>{user.username}</strong><small>{user.email}</small></div>
             <Link className="userMenuItem" role="menuitem" href={`/${encodeURIComponent(user.username)}`} onClick={() => setMenuOpen(false)}><MenuIcon name="profile" /><span>Hồ sơ của tôi</span></Link>
+            <Link className="userMenuItem" role="menuitem" href="/settings" onClick={() => setMenuOpen(false)}><MenuIcon name="profile" /><span>Cài đặt cá nhân</span></Link>
             <Link className="userMenuItem" role="menuitem" href="/invitations" onClick={() => setMenuOpen(false)}><MenuIcon name="invitations" /><span>Lời mời cộng tác</span></Link>
-            <Link className="userMenuItem" role="menuitem" href="/settings/tokens" onClick={() => setMenuOpen(false)}><MenuIcon name="token" /><span>Personal access token</span></Link>
+            <Link className="userMenuItem" role="menuitem" href="/settings#tokens" onClick={() => setMenuOpen(false)}><MenuIcon name="token" /><span>Personal access token</span></Link>
             {user.systemRole === "ADMIN" && <Link className="userMenuItem" role="menuitem" href="/admin" onClick={() => setMenuOpen(false)}><MenuIcon name="admin" /><span>Khu vực quản trị</span></Link>}
             <div className="userMenuSeparator" role="separator" />
             <button className="userMenuItem userMenuLogout" role="menuitem" type="button" onClick={handleLogout} disabled={loggingOut}><MenuIcon name="logout" /><span>{loggingOut ? "Đang thoát…" : "Đăng xuất"}</span></button>

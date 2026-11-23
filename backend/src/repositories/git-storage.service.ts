@@ -22,7 +22,7 @@ export class GitStorageService {
   constructor(private readonly config: ConfigService) {}
 
   openPack(key: string, defaultBranch: string, service: 'git-upload-pack' | 'git-receive-pack', advertise: boolean,
-    protocol?: string, actorIsOwner = false) {
+    protocol?: string, actorIsOwner = false, protectDefaultBranch = true) {
     this.path(key); // Only server-owned UUID keys may enter the CGI environment.
     const write = service === 'git-receive-pack';
     return spawn('git', [
@@ -43,6 +43,7 @@ export class GitStorageService {
         CONTENT_TYPE: advertise ? '' : `application/x-${service}-request`,
         ...(write ? {
           CODE_FORGE_DEFAULT_BRANCH: defaultBranch,
+          CODE_FORGE_PROTECT_DEFAULT_BRANCH: String(protectDefaultBranch),
           CODE_FORGE_ALLOW_DEFAULT_BRANCH_INITIALIZATION: String(actorIsOwner),
           CODE_FORGE_MAX_FILE_BYTES: String(this.config.getOrThrow<number>('MAX_FILE_BYTES')),
           CODE_FORGE_MAX_REPOSITORY_BYTES: String(this.config.getOrThrow<number>('MAX_REPOSITORY_BYTES')),
@@ -64,6 +65,15 @@ export class GitStorageService {
       throw new BadRequestException({ error: { code: 'INVALID_PAGE', message: 'Trang phải từ 1 đến 1000.' } });
     }
     return page === undefined ? 1 : Number(page);
+  }
+
+  validateCommitFilters(filters: { author?: string; since?: string; until?: string }) {
+    const invalid = () => new BadRequestException({ error: { code: 'INVALID_COMMIT_FILTER', message: 'Tác giả hoặc khoảng ngày không hợp lệ.' } });
+    if (filters.author !== undefined && (typeof filters.author !== 'string' || filters.author.length > 200 || Array.from(filters.author).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127))) throw invalid();
+    for (const date of [filters.since, filters.until]) {
+      if (date !== undefined && (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date)) throw invalid();
+    }
+    if (filters.since && filters.until && filters.since > filters.until) throw invalid();
   }
 
   private commitUnavailable() {
@@ -113,7 +123,24 @@ export class GitStorageService {
     }
   }
 
-  async commits(key: string, headSha: string, page = 1, snapshot = headSha) {
+  async commitDetail(key: string, sha: string) {
+    const commit = await this.commit(key, sha);
+    const args = ['--git-dir', this.path(key)];
+    const baseSha = commit.parentShas[0] ?? null;
+    try {
+      const signal = AbortSignal.timeout(20_000);
+      const files = await this.listCompareFiles(args, baseSha, sha, signal);
+      const changes = await this.readCompareFileDiffs(args, baseSha, sha, files, signal);
+      return { ...commit, changes: { baseSha, status: 'READY' as const, files: changes } };
+    } catch (error) {
+      const code = error instanceof ServiceUnavailableException
+        ? (error.getResponse() as { error?: { code?: string } }).error?.code : undefined;
+      return { ...commit, changes: { baseSha, status: code === 'GIT_COMPARE_LIMIT_EXCEEDED' || (error as NodeJS.ErrnoException).code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ? 'LIMIT_EXCEEDED' as const : 'UNAVAILABLE' as const, files: [] } };
+    }
+  }
+
+  async commits(key: string, headSha: string, page = 1, snapshot = headSha, filters: { author?: string; since?: string; until?: string } = {}) {
+    this.validateCommitFilters(filters);
     this.validateCommitSha(headSha);
     this.validateCommitSha(snapshot);
     this.validateCommitPage(String(page));
@@ -121,7 +148,11 @@ export class GitStorageService {
     try {
       await this.git([...args, 'merge-base', '--is-ancestor', snapshot, headSha]);
       const output = (await this.git([...args, 'log', '--topo-order', '--no-notes', '-z',
-        `--format=format:${this.commitFormat}`, '--max-count=21', `--skip=${(page - 1) * 20}`, snapshot, '--'])).stdout;
+        `--format=format:${this.commitFormat}`,
+        ...(filters.author?.trim() ? ['--fixed-strings', '--regexp-ignore-case', `--author=${filters.author.trim()}`] : []),
+        ...(filters.since ? [`--since-as-filter=${filters.since}T00:00:00+07:00`] : []),
+        ...(filters.until ? [`--until=${filters.until}T23:59:59+07:00`] : []),
+        '--max-count=21', `--skip=${(page - 1) * 20}`, snapshot, '--'])).stdout;
       const commits = this.parseCommits(output);
       return { commits: commits.slice(0, 20), page, pageSize: 20, hasMore: commits.length > 20, snapshot };
     } catch (error) {
@@ -301,8 +332,8 @@ export class GitStorageService {
     return { state: commitCount ? 'READY' as const : 'ALREADY_MERGED' as const, sourceSha, targetSha, mergeBase };
   }
 
-  private async listCompareFiles(args: string[], mergeBase: string, sourceSha: string, signal: AbortSignal): Promise<CompareFile[]> {
-    const rawFiles = (await this.git([...args, 'diff', '--name-status', '-z', '--find-renames', mergeBase, sourceSha], undefined, 128 * 1024, signal)).stdout;
+  private async listCompareFiles(args: string[], mergeBase: string | null, sourceSha: string, signal: AbortSignal): Promise<CompareFile[]> {
+    const rawFiles = (await this.git([...args, ...(mergeBase ? ['diff'] : ['diff-tree', '--root', '--no-commit-id', '-r']), '--name-status', '-z', '--find-renames', ...(mergeBase ? [mergeBase] : []), sourceSha], undefined, 128 * 1024, signal)).stdout;
     const tokens = rawFiles.split('\0').filter(Boolean);
     const files: CompareFile[] = [];
     for (let i = 0; i < tokens.length;) {
@@ -321,7 +352,7 @@ export class GitStorageService {
     return files;
   }
 
-  private async readCompareFileDiffs(args: string[], mergeBase: string, sourceSha: string, files: CompareFile[], signal: AbortSignal): Promise<CompareFileDiff[]> {
+  private async readCompareFileDiffs(args: string[], mergeBase: string | null, sourceSha: string, files: CompareFile[], signal: AbortSignal): Promise<CompareFileDiff[]> {
     const result: CompareFileDiff[] = [];
     let usedBytes = 0;
     for (const file of files) {
@@ -333,8 +364,8 @@ export class GitStorageService {
       const pathspecs = [...new Set(paths)].map((path) => `:(literal)${path}`);
       let diff: string;
       try {
-        diff = (await this.git([...args, 'diff', '--no-ext-diff', '--no-color', '--no-textconv', '--unified=3', '--find-renames',
-          mergeBase, sourceSha, '--', ...pathspecs], undefined, 128 * 1024 + 8192, signal)).stdout;
+        diff = (await this.git([...args, ...(mergeBase ? ['diff'] : ['diff-tree', '--root', '--no-commit-id', '-r', '-p']), '--no-ext-diff', '--no-color', '--no-textconv', '--unified=3', '--find-renames',
+          ...(mergeBase ? [mergeBase] : []), sourceSha, '--', ...pathspecs], undefined, 128 * 1024 + 8192, signal)).stdout;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
           result.push({ ...file, diffStatus: 'TRUNCATED' });
@@ -519,6 +550,26 @@ export class GitStorageService {
     }
   }
 
+  async commitCount(key: string, sha: string) {
+    this.validateCommitSha(sha);
+    const count = Number((await this.git(['--git-dir', this.path(key), 'rev-list', '--count', sha, '--'])).stdout.trim());
+    if (!Number.isSafeInteger(count) || count < 0) throw this.commitUnavailable();
+    return count;
+  }
+
+  async findFiles(key: string, sha: string, query: string) {
+    this.validateCommitSha(sha);
+    if (typeof query !== 'string' || query.length > 255) throw new BadRequestException({ error: { code: 'INVALID_FILE_QUERY', message: 'Từ khóa quá dài.' } });
+    const output = (await this.git(['--git-dir', this.path(key), 'ls-tree', '-r', '-z', sha], undefined, 4 * 1024 * 1024)).stdout;
+    const files = output.split('\0').filter(Boolean).flatMap(record => {
+      const match = /^100(?:644|755) blob [a-f0-9]+\t([\s\S]+)$/.exec(record);
+      if (!match || !match[1]!.toLowerCase().includes(query.toLowerCase())) return [];
+      try { this.validateSourcePath(match[1]!); } catch { return []; }
+      return [match[1]!];
+    });
+    return { files: files.slice(0, 50), hasMore: files.length > 50, commitSha: sha };
+  }
+
   async branches(key: string, defaultBranch: string, ref?: string, signal?: AbortSignal) {
     if (ref !== undefined) this.validateRef(ref);
     let stdout: string;
@@ -545,7 +596,7 @@ export class GitStorageService {
     return { branches, defaultBranch, selectedBranch };
   }
 
-  async tree(key: string, commitSha: string, path = '') {
+  async tree(key: string, commitSha: string, path = '', includeCommits = false) {
     this.validateSourcePath(path);
     if (!/^[a-f0-9]{40,64}$/.test(commitSha)) throw new Error('Invalid commit SHA');
     const args = ['--git-dir', this.path(key)];
@@ -579,7 +630,21 @@ export class GitStorageService {
         type: mode === '120000' ? 'symlink' : objectType === 'commit' ? 'submodule' : objectType === 'tree' ? 'directory' : 'file', navigable };
     });
     entries.sort((a, b) => Number(b.type === 'directory') - Number(a.type === 'directory') || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-    return { path, commitSha, entries };
+    if (!includeCommits) return { path, commitSha, entries };
+    // Bound Git subprocess concurrency for large directories. Pin all reads to the same snapshot.
+    const enriched = new Array<typeof entries[number] & { lastCommit: { sha: string; subject: string; committedAt: string; authorName: string } | null }>(entries.length);
+    let cursor = 0;
+    await Promise.all(Array.from({ length: Math.min(4, entries.length) }, async () => {
+      while (cursor < entries.length) {
+        const index = cursor++;
+        const entry = entries[index]!;
+        const output = (await this.git([...args, 'log', '-1', '--no-notes', '--format=%H%x00%s%x00%cI%x00%an', commitSha, '--', `:(literal)${entry.path}`])).stdout.trimEnd();
+        const [sha, subject, committedAt, authorName] = output.split('\0');
+        if (output && (!sha || !/^[a-f0-9]{40,64}$/.test(sha) || !committedAt || !Number.isFinite(Date.parse(committedAt)))) throw this.commitUnavailable();
+        enriched[index] = { ...entry, lastCommit: sha ? { sha, subject: subject ?? '', committedAt: committedAt!, authorName: authorName ?? '' } : null };
+      }
+    }));
+    return { path, commitSha, entries: enriched };
   }
 
   async blob(key: string, commitSha: string, path: string, image = false) {
@@ -634,11 +699,15 @@ export class GitStorageService {
   }
 
   private async git(args: string[], env?: NodeJS.ProcessEnv, maxBuffer = 128 * 1024, signal?: AbortSignal) {
+    // execFile can spawn before processing an already-aborted signal. A fast
+    // update-ref could then commit a write before the child is killed.
+    signal?.throwIfAborted();
     return runFile('git', [...(process.platform === 'win32' ? ['-c', 'core.longpaths=true'] : []), ...args],
       { timeout: 15_000, maxBuffer, signal, env: { ...process.env, ...env } });
   }
 
   private async gitWithInput(args: string[], input: string, maxBuffer: number, signal?: AbortSignal) {
+    signal?.throwIfAborted();
     return new Promise<{ stdout: string; stderr: string }>((resolveResult, rejectResult) => {
       const child = spawn('git', [...(process.platform === 'win32' ? ['-c', 'core.longpaths=true'] : []), ...args], {
         env: process.env, stdio: ['pipe', 'pipe', 'pipe'],
@@ -706,6 +775,19 @@ export class GitStorageService {
   async exists(key: string) {
     try { return (await stat(this.path(key))).isDirectory(); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+  }
+
+  // Called under the repository lock, before the push journal becomes terminal.
+  // Retrying after a SQL failure is safe: symbolic-ref does not move a branch.
+  async initializeDefaultBranch(key: string, before: Record<string, string>, after: Record<string, string>) {
+    if (Object.keys(before).length !== 0) return undefined;
+    const refs = Object.keys(after);
+    if (refs.length !== 1) throw new Error('Initial push must create exactly one branch');
+    if (!refs[0]!.startsWith('refs/heads/')) throw new Error('Invalid initial branch');
+    const branch = refs[0]!.slice('refs/heads/'.length);
+    this.validateRef(branch);
+    await this.git(['--git-dir', this.path(key), 'symbolic-ref', 'HEAD', `refs/heads/${branch}`]);
+    return branch;
   }
 
   async create(key: string, branch: string, readme: boolean, name: string) {
@@ -784,9 +866,15 @@ export class GitStorageService {
     return removed;
   }
 
+  // SQL is authoritative for settings. Retrying HEAD synchronization never moves a branch ref.
+  async syncDefaultHead(key: string, branch: string) {
+    await this.git(['--git-dir', this.path(key), 'symbolic-ref', 'HEAD', `refs/heads/${branch}`]);
+  }
+
   async inspect(key: string, branch: string): Promise<{ state: 'READY' | 'EMPTY'; readme: string | null }> {
     const path = this.path(key);
     try {
+      await this.syncDefaultHead(key, branch);
       const { stdout: head } = await this.git(['--git-dir', path, 'symbolic-ref', 'HEAD']);
       if (head.trim() !== `refs/heads/${branch}`) throw new Error('Invalid default HEAD');
       try { await this.git(['--git-dir', path, 'rev-parse', '--verify', 'HEAD^{commit}']); }

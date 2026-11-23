@@ -9,7 +9,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ own
   const responseHeaders = { "content-type": "application/json", "cache-control": "private, no-store" };
   try {
     const url = new URL(`${(process.env.BACKEND_URL ?? "http://localhost:4000").replace(/\/$/, "")}/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits`);
-    for (const name of ["ref", "page", "snapshot"]) for (const value of request.nextUrl.searchParams.getAll(name)) url.searchParams.append(name, value);
+    for (const name of ["ref", "page", "snapshot", "author", "since", "until"]) for (const value of request.nextUrl.searchParams.getAll(name)) url.searchParams.append(name, value);
     const upstream = await fetch(url, { headers: withBackendClientIp(request, headers), cache: "no-store", signal: AbortSignal.timeout(35_000) });
     return new NextResponse(upstream.body, { status: upstream.status, headers: responseHeaders });
   } catch {

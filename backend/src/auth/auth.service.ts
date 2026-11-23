@@ -8,6 +8,7 @@ import { PrismaService } from '../database/prisma.service';
 import { UsersService } from '../users/users.service';
 import { toPublicUser, type PublicUser } from '../users/user-public';
 import { AuthError } from './auth-error';
+import type { AccountDto } from './dto/account.dto';
 import type { LoginDto } from './dto/login.dto';
 import type { RegisterDto } from './dto/register.dto';
 import { normalizeEmail, normalizeUsername } from './normalization';
@@ -68,6 +69,50 @@ export class AuthService {
       throw error;
     }
     return this.result(created.user, created.session, rawToken);
+  }
+
+  async updateAccount(userId: string, sessionId: string, dto: AccountDto): Promise<PublicUser> {
+    const reserved = ['api', 'login', 'register', 'new', 'invitations', 'settings', 'admin', 'git', 'explore', 'tokens', 'favicon.ico', 'robots.txt', 'sitemap.xml'];
+    if (dto.username && reserved.includes(normalizeUsername(dto.username))) {
+      throw new AuthError(HttpStatus.BAD_REQUEST, 'USERNAME_RESERVED', 'Username này được dành riêng cho hệ thống.');
+    }
+    if (dto.avatarUrl) {
+      const bytes = Buffer.from(dto.avatarUrl.split(',')[1] ?? '', 'base64');
+      if (bytes.length > 48_000 || bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff || bytes.at(-2) !== 0xff || bytes.at(-1) !== 0xd9) {
+        throw new AuthError(HttpStatus.BAD_REQUEST, 'INVALID_AVATAR', 'Ảnh đại diện không hợp lệ hoặc quá lớn.');
+      }
+    }
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM users WHERE id = ${userId}::uuid FOR UPDATE`;
+        const user = await tx.user.findUnique({ where: { id: userId } });
+        if (!user) throw new AuthError(HttpStatus.UNAUTHORIZED, 'AUTH_REQUIRED', 'Bạn cần đăng nhập.');
+        this.assertActive(user.status);
+        const session = await tx.session.findFirst({ where: { id: sessionId, userId, revokedAt: null, expiresAt: { gt: new Date() } } });
+        if (!session) throw new AuthError(HttpStatus.UNAUTHORIZED, 'AUTH_REQUIRED', 'Phiên đăng nhập đã hết hạn.');
+        const sensitive = dto.newPassword !== undefined || (dto.email !== undefined && dto.email !== user.email) || (dto.username !== undefined && dto.username !== user.username);
+        if (sensitive && (!dto.currentPassword || !await argon2.verify(user.passwordHash, dto.currentPassword))) {
+          throw new AuthError(HttpStatus.BAD_REQUEST, 'CURRENT_PASSWORD_INVALID', 'Mật khẩu hiện tại chưa chính xác.');
+        }
+        const passwordHash = dto.newPassword ? await argon2.hash(dto.newPassword, { type: argon2.argon2id, memoryCost: 19_456, timeCost: 2, parallelism: 1 }) : undefined;
+        const updated = await tx.user.update({ where: { id: userId }, data: {
+          ...(dto.username !== undefined ? { username: dto.username, normalizedUsername: normalizeUsername(dto.username) } : {}),
+          ...(dto.email !== undefined ? { email: dto.email, normalizedEmail: normalizeEmail(dto.email) } : {}),
+          ...(dto.avatarUrl !== undefined ? { avatarUrl: dto.avatarUrl || null } : {}),
+          ...(passwordHash ? { passwordHash, passwordChangedAt: new Date() } : {}),
+        } });
+        if (passwordHash) {
+          await tx.session.updateMany({ where: { userId, id: { not: sessionId }, revokedAt: null }, data: { revokedAt: new Date() } });
+          await tx.personalAccessToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+        }
+        return toPublicUser(updated);
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new AuthError(HttpStatus.CONFLICT, 'ACCOUNT_ALREADY_EXISTS', 'Username hoặc email đã được sử dụng.');
+      }
+      throw error;
+    }
   }
 
   async login(dto: LoginDto): Promise<AuthResult> {

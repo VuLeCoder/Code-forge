@@ -49,7 +49,7 @@ for (const viewport of [{ name: "desktop", width: 1280, height: 800 }, { name: "
 
     await page.goto("/admin");
     const tabs = page.getByRole("group", { name: "Các mục quản trị" });
-    const tabLabels = ["Tổng quan", "Người dùng", "Repositories", "Đối soát Git", "Nhật ký"];
+    const tabLabels = ["Tổng quan", "Người dùng", "Repository", "Đối soát Git", "Nhật ký"];
     const tabButtons = tabLabels.map((name) => tabs.getByRole("button", { name }));
     await expect(tabButtons[0]).toBeVisible();
 

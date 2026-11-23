@@ -1,5 +1,8 @@
 "use client";
 
+import { Select } from "@/components/select";
+
+
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -137,7 +140,6 @@ export default function PullRequestListPage() {
 
   return <main className={`container ${styles.page}`} aria-busy={loading || saving}>
     <RepositoryNavigation owner={owner} repository={repo} current="pulls" />
-    <nav className={styles.breadcrumb} aria-label="Điều hướng"><Link href={`/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`}>{owner}/{repo}</Link><span aria-hidden="true">/</span><strong>Pull requests</strong></nav>
     <header className={styles.header}>
       <div><span className="eyebrow">Cộng tác</span><h1>Pull requests</h1><p>Xem và trao đổi các thay đổi giữa những branch trong repository này.</p></div>
       {result?.permissions.canCreate && <button ref={headerCreateRef} className="button buttonPrimary" onClick={() => {
@@ -151,9 +153,9 @@ export default function PullRequestListPage() {
       <form className={styles.form} onSubmit={create}>
         <label htmlFor="pr-title">Tiêu đề</label><input ref={titleInputRef} id="pr-title" required maxLength={256} value={title} onChange={(event) => setTitle(event.target.value)} />
         {branchError ? <div className={`${styles.error} ${styles.branchError}`} role="alert"><span>{branchError}</span><button type="button" disabled={branchLoading} onClick={() => void retryBranches()}>{branchLoading ? "Đang tải…" : "Thử tải lại branch"}</button></div> : <div className={styles.branchFields}>
-          <div><label htmlFor="pr-source">Branch nguồn</label>{branches.length ? <select id="pr-source" required value={source} onChange={(event) => setSource(event.target.value)}><option value="">Chọn branch</option>{branches.map((branch) => <option key={branch.name} value={branch.name}>{branch.name}</option>)}</select> : <input id="pr-source" required value={source} onChange={(event) => setSource(event.target.value)} placeholder="feature/my-change" />}</div>
+          <div><label htmlFor="pr-source">Branch nguồn</label>{branches.length ? <Select id="pr-source" required value={source} onChange={(event) => setSource(event.target.value)}><option value="">Chọn branch</option>{branches.map((branch) => <option key={branch.name} value={branch.name}>{branch.name}</option>)}</Select> : <input id="pr-source" required value={source} onChange={(event) => setSource(event.target.value)} placeholder="feature/my-change" />}</div>
           <span className={styles.arrow} aria-hidden="true">→</span>
-          <div><label htmlFor="pr-target">Branch đích</label>{branches.length ? <select id="pr-target" required value={target} onChange={(event) => setTarget(event.target.value)}><option value="">Chọn branch</option>{branches.map((branch) => <option key={branch.name} value={branch.name}>{branch.name}</option>)}</select> : <input id="pr-target" required value={target} onChange={(event) => setTarget(event.target.value)} placeholder="main" />}</div>
+          <div><label htmlFor="pr-target">Branch đích</label>{branches.length ? <Select id="pr-target" required value={target} onChange={(event) => setTarget(event.target.value)}><option value="">Chọn branch</option>{branches.map((branch) => <option key={branch.name} value={branch.name}>{branch.name}</option>)}</Select> : <input id="pr-target" required value={target} onChange={(event) => setTarget(event.target.value)} placeholder="main" />}</div>
         </div>}
         <label htmlFor="pr-description">Mô tả <span className={styles.muted}>(không bắt buộc)</span></label><textarea id="pr-description" rows={5} maxLength={10000} value={description} onChange={(event) => setDescription(event.target.value)} />
         {formError && <p ref={formErrorRef} className={styles.error} role="alert" tabIndex={-1}>{formError}</p>}

@@ -1,6 +1,6 @@
 .page {
   width: min(52rem, 100%);
-  margin: 2rem auto 4rem;
+  margin: var(--page-space) auto;
   display: grid;
   gap: 1.5rem;
   min-width: 0;
@@ -43,7 +43,7 @@
 .declineButton:focus-visible, .actions button:focus-visible { outline: 2px solid var(--brand-600); outline-offset: 2px; }
 
 @media (max-width: 480px) {
-  .page { margin-block: 1.25rem 3rem; }
+
   .actions { align-items: stretch; flex-direction: column; }
   .actions > * { width: 100%; }
 }

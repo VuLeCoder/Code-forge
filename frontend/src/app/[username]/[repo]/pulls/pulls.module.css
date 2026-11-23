@@ -1,4 +1,4 @@
-.page { min-height: 70vh; padding-block: 24px 64px; }
+.page { min-height: 70vh; padding-block: var(--page-space); }
 .page :focus-visible { outline: 2px solid var(--brand-600); outline-offset: 2px; }
 .page [tabindex="-1"] { scroll-margin-block: 88px; }
 .breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: .875rem; overflow-wrap: anywhere; }
@@ -26,23 +26,24 @@
 .itemContent code { color: var(--brand-700); overflow-wrap: anywhere; }
 .muted { color: var(--muted); font-weight: 450; }
 .state { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; min-height: 26px; padding: 2px 9px; border: 1px solid var(--border); border-radius: 99px; color: var(--muted); background: var(--canvas); font-size: .72rem; font-weight: 700; white-space: nowrap; }
-.stateOPEN { color: #1a7f37; background: #dafbe1; border-color: #aceebb; }
+.stateOPEN { color: var(--success-text); background: var(--success-surface); border-color: #aceebb; }
 .stateCLOSED { color: #7a4d00; background: #fff8c5; border-color: #d4a72c; }
 .stateMERGED { color: #6941a5; background: #f7f0ff; border-color: #d8b4fe; }
 .panel, .confirm { min-width: 0; margin-block: 16px; padding: 18px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-sm); }
 .panel h2, .confirm h2 { margin-bottom: 15px; font-size: 1.05rem; letter-spacing: -.015em; }
 .form { display: grid; gap: 8px; }
 .form label { margin-top: 4px; font-size: .9rem; font-weight: 700; }
-.form input, .form select, .form textarea { width: 100%; min-height: 42px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); background: var(--surface); }
+.form :global(.selectControl) { width: 100%; }
+.form input, .form textarea { width: 100%; min-height: 42px; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); background: var(--surface); }
 .form textarea { resize: vertical; line-height: 1.55; }
 .branchFields { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: end; gap: 12px; margin-block: 6px; }
 .branchFields > div { display: grid; gap: 9px; min-width: 0; }
 .arrow { padding-bottom: 12px; color: var(--muted); }
 .form .actions { margin-top: 8px; }
-.error { margin-block: 12px; padding: 12px 14px; border: 1px solid #ff8182; border-left: 3px solid var(--danger); border-radius: var(--radius-sm); color: var(--danger); background: #ffebe9; line-height: 1.55; }
+.error { margin-block: 12px; padding: 12px 14px; border: 1px solid var(--danger-border); border-left: 3px solid var(--danger); border-radius: var(--radius-sm); color: var(--danger-text); background: var(--danger-surface); line-height: 1.55; }
 .branchError { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
 .branchError button { min-height: 36px; border: 0; padding: 4px 0; color: inherit; background: transparent; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
-.success { margin-block: 16px; padding: 12px 14px; border: 1px solid #aceebb; border-left: 3px solid #1f883d; border-radius: var(--radius-sm); color: #1a7f37; background: #dafbe1; line-height: 1.6; }
+.success { margin-block: 16px; padding: 12px 14px; border: 1px solid var(--success-border); border-left: 3px solid #1f883d; border-radius: var(--radius-sm); color: var(--success-text); background: var(--success-surface); line-height: 1.6; }
 .warning { margin-block: 16px; padding: 12px 14px; border: 1px solid #d4a72c; border-left: 3px solid #9a6700; border-radius: var(--radius-sm); color: #704800; background: #fff8c5; line-height: 1.6; }
 .confirm { border-color: #d4a72c; color: #3b2f00; background: #fff8c5; }
 .confirm p { margin-block: 9px 15px; line-height: 1.6; }
@@ -69,8 +70,8 @@
 .fileDiff .warning { margin: 12px; }
 .diff { display: block; max-width: 100%; max-height: 70vh; margin: 0; overflow: auto; padding-block: 8px; border: 0; border-radius: 0; color: var(--text); background: var(--surface); font: .8rem/1.65 ui-monospace, SFMono-Regular, Consolas, monospace; tab-size: 4; }
 .diffLine { display: block; min-width: max-content; padding-inline: 14px; white-space: pre; }
-.diffLineAdded { background: #dafbe1; color: #14532d; }
-.diffLineRemoved { background: #ffebe9; color: #8a1721; }
+.diffLineAdded { background: var(--success-surface); color: var(--success-text); }
+.diffLineRemoved { background: var(--danger-surface); color: var(--danger-text); }
 .diffLineMeta { background: var(--brand-50); color: var(--brand-700); }
 .empty { display: grid; justify-items: center; gap: 10px; padding: 48px 22px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); text-align: center; box-shadow: var(--shadow-sm); }
 .empty > span { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; color: var(--brand-700); background: var(--brand-50); font-size: 1.25rem; font-weight: 800; }

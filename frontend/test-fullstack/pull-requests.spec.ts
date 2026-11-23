@@ -6,6 +6,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { PrismaClient as Database } from '../../backend/test/fullstack-types';
+import { selectChoice } from '../test/select-choice';
 
 const origin = 'http://localhost:3112';
 const password = 'mvp-pr-journey-password-1';
@@ -105,7 +106,7 @@ test('WRITE collaborator accepts invite, pushes a feature branch, and owner merg
     await expect(createPullRequest, 'Collaborator can create PR and the same-origin API returned its permissions.').toBeVisible({ timeout: 15_000 });
     await createPullRequest.click();
     await collaboratorPage.getByLabel('Tiêu đề').fill('Review collaborator change');
-    await collaboratorPage.getByLabel('Branch nguồn').selectOption('feature/pull-flow');
+    await selectChoice(collaboratorPage.getByRole('combobox', { name: 'Branch nguồn', exact: true }), 'feature/pull-flow');
     await collaboratorPage.getByLabel('Mô tả').fill('A complete owner and collaborator flow.');
     await collaboratorPage.getByRole('button', { name: 'Tạo pull request', exact: true }).last().click();
     await expect(collaboratorPage.getByRole('heading', { name: /Review collaborator change/ })).toBeVisible();
@@ -115,7 +116,7 @@ test('WRITE collaborator accepts invite, pushes a feature branch, and owner merg
     await expect(page.getByRole('heading', { name: /Review collaborator change/ })).toBeVisible();
     await expect(page.getByText('feature/pull-flow', { exact: true }).first()).toBeVisible();
     await expect(page.getByLabel('Diff của collaborator-change.txt')).toContainText('Change pushed by the WRITE collaborator.');
-    await expect(page.getByRole('region', { name: /Files changed/ })
+    await expect(page.getByRole('region', { name: 'Tệp đã thay đổi 1', exact: true })
       .getByText('collaborator-change.txt', { exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: 'Merge pull request' }).click();

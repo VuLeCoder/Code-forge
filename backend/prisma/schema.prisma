@@ -68,6 +68,7 @@ model User {
   normalizedUsername   String                @unique @map("normalized_username") @db.VarChar(39)
   email                String                @db.VarChar(320)
   normalizedEmail      String                @unique @map("normalized_email") @db.VarChar(320)
+  avatarUrl            String?               @map("avatar_url") @db.Text
   passwordHash         String                @map("password_hash") @db.VarChar(255)
   systemRole           SystemRole            @default(USER) @map("system_role")
   status               UserStatus            @default(ACTIVE)
@@ -96,6 +97,7 @@ model Repository {
   visibility        RepositoryVisibility        @default(PRIVATE)
   status            RepositoryStatus            @default(ACTIVE)
   defaultBranch     String                      @default("main") @map("default_branch") @db.VarChar(255)
+  protectDefaultBranch Boolean                   @default(true) @map("protect_default_branch")
   storageKey        String                      @unique @map("storage_key") @db.VarChar(255)
   storageGeneration Int                         @default(0) @map("storage_generation")
   createdAt         DateTime                    @default(now()) @map("created_at") @db.Timestamptz(3)
@@ -107,6 +109,7 @@ model Repository {
   invitations       Invitation[]
   pullRequests      PullRequest[]
   mergeOperations   PullRequestMergeOperation[]
+  branchUpdates     BranchUpdate[]
   gitPushOperations GitPushOperation[]
 
   @@unique([ownerId, normalizedName])
@@ -120,6 +123,7 @@ model RepositoryMember {
   repositoryId String               @map("repository_id") @db.Uuid
   userId       String               @map("user_id") @db.Uuid
   role         RepositoryMemberRole
+  canMerge     Boolean              @default(false) @map("can_merge")
   createdAt    DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
   repository   Repository           @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
@@ -265,4 +269,20 @@ model Session {
   @@index([familyId])
   @@index([expiresAt])
   @@map("sessions")
+}
+
+model BranchUpdate {
+  id String @id @default(uuid()) @db.Uuid
+  repositoryId String @map("repository_id") @db.Uuid
+  storageGeneration Int @map("storage_generation")
+  branch String @db.VarChar(255)
+  sha String @db.VarChar(64)
+  actorId String @map("actor_id") @db.Uuid
+  kind String @db.VarChar(16)
+  operationId String @map("operation_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  @@unique([operationId, branch])
+  @@index([repositoryId, storageGeneration, branch, sha])
+  @@map("branch_updates")
 }

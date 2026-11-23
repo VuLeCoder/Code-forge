@@ -10,6 +10,7 @@ import { AuthService } from './auth.service';
 const now = new Date('2026-09-12T00:00:00.000Z');
 const user: User = {
   id: '32f274d7-985d-4619-8990-9a240dbbe1d0',
+  avatarUrl: null,
   username: 'alice',
   normalizedUsername: 'alice',
   email: 'alice@example.com',

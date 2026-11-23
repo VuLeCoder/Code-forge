@@ -6,6 +6,7 @@ import { AuthService } from './auth.service';
 import { ACCESS_COOKIE, REFRESH_COOKIE } from './auth.constants';
 import { AccessTokenGuard } from './access-token.guard';
 import type { AuthenticatedRequest } from './auth.types';
+import { AccountDto } from './dto/account.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { OriginGuard } from './origin.guard';
@@ -60,6 +61,14 @@ export class AuthController {
     this.clearCookies(response);
   }
 
+  @Post('account')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(OriginGuard, AccessTokenGuard)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  async account(@Body() dto: AccountDto, @Req() request: AuthenticatedRequest) {
+    return { user: await this.auth.updateAccount(request.user.id, request.user.sessionId, dto) };
+  }
+
   @Get('me')
   @UseGuards(AccessTokenGuard)
   me(@Req() request: AuthenticatedRequest) {
@@ -68,6 +77,7 @@ export class AuthController {
         id: request.user.id,
         username: request.user.username,
         email: request.user.email,
+        avatarUrl: request.user.avatarUrl,
         systemRole: request.user.systemRole,
         status: request.user.status,
         createdAt: request.user.createdAt,

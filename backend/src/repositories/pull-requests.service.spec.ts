@@ -27,7 +27,7 @@ describe('PullRequestsService', () => {
   let storage: { compare: jest.Mock; createMergeCandidate: jest.Mock; assertMergeCandidateQuota: jest.Mock; compareAndSwapBranch: jest.Mock; branchSha: jest.Mock };
   let locks: { acquire: jest.Mock };
   let repo: { id: string; ownerId: string; status: string; deletedAt: null; storageGeneration: number; storageKey: string;
-    owner: { username: string }; members: { userId: string; role: string }[] };
+    owner: { username: string }; members: { userId: string; role: string; canMerge?: boolean }[] };
   let pullRequest: { id: string; repositoryId: string; number: number; authorId: string; status: string; version: number;
     storageGeneration: number; sourceSha: string; targetSha: string; sourceBranch: string; targetBranch: string;
     author: { id: string; username: string }; mergedBy: null };
@@ -235,7 +235,31 @@ describe('PullRequestsService', () => {
     expect(storage.compareAndSwapBranch).not.toHaveBeenCalled();
   });
 
-  it('allows only the repository owner to merge a pull request', async () => {
+  it('rejects a WRITE collaborator without an explicit merge grant', async () => {
+    await expect(service.merge('owner', 'repo', writerId, 4, { operationId, expectedSourceSha: sourceSha,
+      expectedTargetSha: targetSha, storageGeneration: 2, version: 3 })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(locks.acquire).not.toHaveBeenCalled();
+  });
+
+  it('allows a WRITE collaborator with a merge grant and records that actor', async () => {
+    repo.members = [{ userId: writerId, role: 'WRITE', canMerge: true }];
+    Object.assign(db, { branchUpdate: { createMany: jest.fn().mockResolvedValue({ count: 1 }) } });
+    await service.merge('owner', 'repo', writerId, 4, { operationId, expectedSourceSha: sourceSha,
+      expectedTargetSha: targetSha, storageGeneration: 2, version: 3 });
+    expect(storage.compareAndSwapBranch).toHaveBeenCalled();
+    expect((db.pullRequestMergeOperation.create.mock.calls as unknown[][])[0]?.[0]).toMatchObject({ data: { actorId: writerId } });
+  });
+
+  it('rechecks a revoked merge grant after acquiring the repository lock', async () => {
+    repo.members = [{ userId: writerId, role: 'WRITE', canMerge: true }];
+    db.repository.findUnique.mockResolvedValueOnce({ ...repo, members: [{ userId: writerId, role: 'WRITE', canMerge: false }] });
+    await expect(service.merge('owner', 'repo', writerId, 4, { operationId, expectedSourceSha: sourceSha,
+      expectedTargetSha: targetSha, storageGeneration: 2, version: 3 })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(storage.compareAndSwapBranch).not.toHaveBeenCalled();
+  });
+
+  it('rejects a stale merge grant after a member is downgraded to READ', async () => {
+    repo.members[0] = { userId: writerId, role: 'READ', canMerge: true };
     await expect(service.merge('owner', 'repo', writerId, 4, { operationId, expectedSourceSha: sourceSha,
       expectedTargetSha: targetSha, storageGeneration: 2, version: 3 })).rejects.toBeInstanceOf(ForbiddenException);
     expect(locks.acquire).not.toHaveBeenCalled();

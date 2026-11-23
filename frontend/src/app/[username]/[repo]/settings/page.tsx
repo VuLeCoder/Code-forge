@@ -1,5 +1,8 @@
 "use client";
 
+import { Select } from "@/components/select";
+
+
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
@@ -7,13 +10,15 @@ import { useAuth } from "@/components/auth-provider";
 import { RepositoryNavigation } from "@/components/repository-navigation";
 import { sessionFetch } from "@/lib/auth";
 import { repositoryPath, type RepositorySummary } from "@/lib/repositories";
+import { RepositoryIcon } from "../repository-icon";
 import styles from "./settings.module.css";
 
 const namePattern = /^(?!.*\.\.)(?!.*\.git$)[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/i;
-type Repository = RepositorySummary & { status: string };
+type Repository = RepositorySummary & { status: string; defaultBranch: string; protectDefaultBranch: boolean };
 type Member = {
   userId: string;
   role: "READ" | "WRITE";
+  canMerge?: boolean;
   createdAt: string;
   updatedAt: string;
   user: { id: string; username: string };
@@ -66,6 +71,8 @@ export default function RepositorySettingsPage() {
   const routeKey = `${params.username}/${params.repo}`;
   const routeAbortRef = useRef<AbortController | null>(null);
   const [result, setResult] = useState<{ key: string; repository: Repository | null; error: "not-found" | "unavailable" | null }>({ key: "", repository: null, error: null });
+  const [section, setSection] = useState<"general" | "collaborators" | "protection">("general");
+  const [branches, setBranches] = useState<{ key: string; names: string[]; error: boolean }>({ key: "", names: [], error: false });
   const [attempt, setAttempt] = useState(0);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
@@ -129,6 +136,11 @@ export default function RepositorySettingsPage() {
       if (active && !controller.signal.aborted) {
         setResult(next);
         if (next.repository?.permissions?.canManage) {
+          void sessionFetch(`${path}/branches`, { cache: "no-store", signal: controller.signal }).then(async (response) => {
+            if (!response.ok) throw new Error("Không thể tải nhánh");
+            const data = await response.json() as { branches: { name: string }[] };
+            if (!controller.signal.aborted) setBranches({ key: routeKey, names: data.branches.map((branch) => branch.name), error: false });
+          }).catch(() => { if (!controller.signal.aborted) setBranches({ key: routeKey, names: [], error: true }); });
           void loadMembers(controller.signal);
           void loadInvitations(controller.signal);
         }
@@ -252,7 +264,7 @@ export default function RepositorySettingsPage() {
       const updated = await update({ name, description: description || null }, "Không thể lưu thông tin repository.");
       if (updated.name !== repo.name) router.replace(`${repositoryPath(updated)}/settings`);
       else setResult({ key: routeKey, repository: updated, error: null });
-      setMessage("Đã lưu thông tin repository.");
+      if (updated.name !== repo.name) setMessage("Đã lưu thông tin repository.");
     } catch (error) { setFailure(error instanceof Error ? error.message : "Không thể lưu thông tin repository."); }
     finally { setPending(false); }
   }
@@ -266,6 +278,31 @@ export default function RepositorySettingsPage() {
       visibilityDialog.current?.close();
       setMessage(updated.visibility === "PRIVATE" ? "Repository hiện riêng tư; chủ sở hữu và cộng tác viên được cấp quyền vẫn truy cập được." : "Repository hiện được công khai.");
     } catch (error) { setFailure(error instanceof Error ? error.message : "Không thể đổi quyền xem repository."); visibilityDialog.current?.close(); }
+    finally { setPending(false); }
+  }
+
+  async function saveSetting(data: Record<string, unknown>) {
+    if (pending) return;
+    setPending(true); setFailure(""); setMessage("");
+    try {
+      const updated = await update(data, "Không thể cập nhật cài đặt.");
+      setResult({ key: routeKey, repository: updated, error: null });
+      setMessage("Đã cập nhật cài đặt.");
+    } catch (error) { setFailure(error instanceof Error ? error.message : "Không thể cập nhật cài đặt."); }
+    finally { setPending(false); }
+  }
+
+  async function changeMergePermission(member: Member, canMerge: boolean) {
+    if (pending) return;
+    setPending(true); setFailure(""); setMessage("");
+    try {
+      const response = await sessionFetch(`${path}/members/${member.userId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ canMerge }) });
+      const data = await readBody(response);
+      if (!response.ok) throw new Error(errorMessage(data, "Không thể đổi quyền merge."));
+      const updated = (data as { member: Member }).member;
+      setMemberList((previous) => previous.key === routeKey ? { ...previous, items: previous.items.map((item) => item.userId === member.userId ? updated : item) } : previous);
+      setMessage(canMerge ? `Đã cấp quyền merge cho ${member.user.username}.` : `Đã thu hồi quyền merge của ${member.user.username}.`);
+    } catch (error) { setFailure(error instanceof Error ? error.message : "Không thể đổi quyền merge."); }
     finally { setPending(false); }
   }
 
@@ -286,11 +323,17 @@ export default function RepositorySettingsPage() {
 
   return <main className={`container ${styles.page}`}>
     <RepositoryNavigation owner={repo.owner.username} repository={repo.name} current="settings" canManage={canManage} />
-    <Link className={styles.back} href={repositoryPath(repo)}>← Về repository</Link>
     <h1>Cài đặt {repo.name}</h1>
-    <p className={styles.intro}>Quản lý thông tin và quyền xem của repository.</p>
+    <p className={styles.intro}>Quản lý dự án, cộng tác viên và cách đưa thay đổi vào nhánh mặc định.</p>
+    <div className={styles.layout}>
+    <nav className={styles.sidebar} aria-label="Các mục cài đặt">
+      {([ ["general", "settings", "Cài đặt chung"], ["collaborators", "code", "Mời tham gia dự án"], ["protection", "branch", "Luật bảo vệ nhánh"] ] as const).map(([value, icon, label]) => <button key={value} type="button" aria-current={section === value ? "page" : undefined} onClick={() => { setSection(value); setMessage(""); setFailure(""); }}><RepositoryIcon name={icon} />{label}</button>)}
+    </nav>
+    <div className={styles.content}>
+    <h2 className={styles.sectionTitle}>{section === "general" ? "Cài đặt chung" : section === "collaborators" ? "Mời tham gia dự án" : "Luật bảo vệ nhánh mặc định"}</h2>
     {failure && <div className={styles.error} role="alert">{failure}</div>}
     {message && <div className={styles.success} role="status">{message}</div>}
+    <div hidden={section !== "general"}>
     <section className={styles.card} aria-labelledby="info-title">
       <h2 id="info-title">Thông tin chung</h2>
       <form key={repo.id + repo.name + repo.description} onSubmit={saveInfo} className={styles.form} aria-busy={pending}>
@@ -302,12 +345,28 @@ export default function RepositorySettingsPage() {
         <button className="button buttonPrimary" type="submit" disabled={pending}>{pending ? "Đang lưu…" : "Lưu thay đổi"}</button>
       </form>
     </section>
+    <section className={styles.card} aria-labelledby="default-title">
+      <h2 id="default-title">Nhánh mặc định</h2>
+      <p>Nhánh dùng khi mở mã nguồn, clone dự án và chọn nhánh đích ban đầu cho pull request.</p>
+      {branches.key === routeKey && branches.error ? <div className={styles.inlineError}>Không thể tải danh sách nhánh.<button onClick={() => setAttempt((value) => value + 1)}>Thử lại</button></div> : branches.key !== routeKey ? <p role="status">Đang tải nhánh…</p> : branches.names.length === 0 ? <p>Nhánh đầu tiên được tạo hoặc push lên sẽ trở thành nhánh mặc định.</p> : <form className={styles.inviteForm} onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void saveSetting({ defaultBranch: String(form.get("defaultBranch")) }); }}>
+        <label htmlFor="default-branch">Nhánh mặc định</label>
+        <Select id="default-branch" name="defaultBranch" key={repo.defaultBranch} defaultValue={repo.defaultBranch} disabled={pending}>{branches.names.map((name) => <option key={name} value={name}>{name}</option>)}</Select>
+        <button className="button buttonSecondary" disabled={pending}>Đổi nhánh mặc định</button>
+      </form>}
+    </section>
     <section className={styles.card} aria-labelledby="visibility-title">
       <h2 id="visibility-title">Quyền xem</h2>
       <p>Hiện tại: <strong>{repo.visibility === "PUBLIC" ? "Công khai" : "Riêng tư"}</strong></p>
       <p>{repo.visibility === "PUBLIC" ? "Mọi người có thể xem repository." : "Chủ sở hữu và cộng tác viên được cấp quyền vẫn có thể xem repository."}</p>
       <button className="button buttonSecondary" type="button" disabled={pending} onClick={() => { setDesiredVisibility(repo.visibility === "PUBLIC" ? "PRIVATE" : "PUBLIC"); visibilityDialog.current?.showModal(); }}>Đổi quyền xem</button>
     </section>
+    <section className={`${styles.card} ${styles.danger}`} aria-labelledby="delete-title">
+      <h2 id="delete-title">Xóa repository</h2>
+      <p>Repository sẽ biến mất khỏi trang công khai và không thể truy cập. Bạn có thể khôi phục trong thời hạn lưu giữ.</p>
+      <button className="button buttonSecondary" type="button" disabled={pending} onClick={() => { setConfirmation(""); deleteDialog.current?.showModal(); }}>Xóa repository</button>
+    </section>
+    </div>
+    <div hidden={section !== "collaborators"}>
     <section className={styles.card} aria-labelledby="access-title">
       <h2 id="access-title">Thành viên và cộng tác</h2>
       <p>Quản lý người dùng có quyền đọc hoặc ghi mã nguồn trong repository.</p>
@@ -323,7 +382,7 @@ export default function RepositorySettingsPage() {
           maxLength={39}
           aria-label="Tên người dùng muốn mời"
         />
-        <select
+        <Select
           value={inviteRole}
           onChange={(e) => setInviteRole(e.target.value as "READ" | "WRITE")}
           className={styles.roleSelect}
@@ -331,7 +390,7 @@ export default function RepositorySettingsPage() {
         >
           <option value="READ">Đọc (READ)</option>
           <option value="WRITE">Ghi (WRITE)</option>
-        </select>
+        </Select>
         <button className="button buttonPrimary buttonSmall" type="submit" disabled={pending || !inviteUsername.trim()}>
           {pending ? "Đang gửi…" : "Gửi lời mời"}
         </button>
@@ -350,7 +409,7 @@ export default function RepositorySettingsPage() {
                 <Link href={`/${encodeURIComponent(m.user.username)}`}><strong>{m.user.username}</strong></Link>
               </div>
               <div className={styles.memberActions}>
-                <select
+                <Select
                   value={m.role}
                   onChange={(e) => handleUpdateMemberRole(m.userId, e.target.value as "READ" | "WRITE")}
                   className={styles.roleSelect}
@@ -359,7 +418,7 @@ export default function RepositorySettingsPage() {
                 >
                   <option value="READ">Đọc (READ)</option>
                   <option value="WRITE">Ghi (WRITE)</option>
-                </select>
+                </Select>
                 <button
                   type="button"
                   className={styles.removeBtn}
@@ -405,11 +464,26 @@ export default function RepositorySettingsPage() {
         </>
       ) : <p className={styles.emptyHint}>Chưa có lời mời nào đang chờ.</p>}
     </section>
-    <section className={`${styles.card} ${styles.danger}`} aria-labelledby="delete-title">
-      <h2 id="delete-title">Xóa repository</h2>
-      <p>Repository sẽ biến mất khỏi trang công khai và không thể truy cập. Bạn có thể khôi phục trong thời hạn lưu giữ.</p>
-      <button className="button buttonSecondary" type="button" disabled={pending} onClick={() => { setConfirmation(""); deleteDialog.current?.showModal(); }}>Xóa repository</button>
+    </div>
+    {section === "protection" && <div>
+    <section className={styles.card} aria-labelledby="protection-title">
+      <h2 id="protection-title">Bảo vệ nhánh <code>{repo.defaultBranch}</code></h2>
+      <div className={styles.toggle}><button className={styles.switch} type="button" role="switch" aria-label="Ngăn push trực tiếp vào nhánh mặc định" aria-checked={repo.protectDefaultBranch ?? true} disabled={pending} onClick={() => void saveSetting({ protectDefaultBranch: !(repo.protectDefaultBranch ?? true) })} /><span>Ngăn push trực tiếp vào nhánh mặc định</span></div>
+      <p>Khi bật, mọi người (kể cả chủ repo) phải cập nhật nhánh mặc định qua pull request. Lần tạo nhánh đầu tiên vẫn được cho phép. Khi tắt, người có quyền ghi có thể push; xóa nhánh mặc định và force push vẫn bị chặn.</p>
+      <p>Luật tự áp dụng cho nhánh mới khi bạn đổi nhánh mặc định.</p>
     </section>
+    <section className={styles.card} aria-labelledby="merge-title">
+      <h2 id="merge-title">Người có quyền merge</h2>
+      <p>Chủ repo luôn có quyền merge. Bạn có thể cấp thêm quyền cho cộng tác viên có quyền ghi; quyền này độc lập với nút bảo vệ nhánh.</p>
+      <ul className={styles.memberList}>
+        <li className={styles.memberItem}><strong>{repo.owner.username}</strong><span className="badge">Chủ repo · Luôn có quyền merge</span></li>
+      </ul>
+      {memberState === "error" ? <div className={styles.inlineError}>{memberError}<button onClick={() => void loadMembers()}>Thử lại</button></div> : memberState === "loading" ? <p role="status">Đang tải thành viên…</p> : <ul className={styles.memberList}>{members.filter((member) => member.role === "WRITE").map((member) => <li key={member.userId} className={styles.memberItem}><strong>{member.user.username}</strong><button type="button" className={`button buttonSecondary buttonSmall`} disabled={pending} onClick={() => void changeMergePermission(member, !member.canMerge)}>{member.canMerge ? `Thu hồi quyền merge của ${member.user.username}` : `Cấp quyền merge cho ${member.user.username}`}</button></li>)}</ul>}
+      {memberState === "ready" && !members.some((member) => member.role === "WRITE") && <p>Chưa có cộng tác viên có quyền ghi. Mời hoặc đổi quyền tại mục Mời tham gia dự án.</p>}
+    </section>
+    </div>}
+    </div>
+    </div>
     <dialog ref={visibilityDialog} className={styles.dialog} aria-labelledby="visibility-confirm-title" onClose={() => setDesiredVisibility(repo.visibility)}>
       <h2 id="visibility-confirm-title">Xác nhận đổi quyền xem</h2>
       <p>{desiredVisibility === "PRIVATE" ? "Sau khi chuyển sang riêng tư, người dùng không có quyền sẽ không thể xem repository này. Cộng tác viên được cấp quyền vẫn truy cập được." : "Sau khi chuyển sang công khai, mọi người có thể xem repository này."}</p>

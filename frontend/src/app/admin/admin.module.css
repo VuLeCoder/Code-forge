@@ -1,4 +1,4 @@
-.shell { padding-block: 2.5rem 4rem; display: grid; gap: 1.5rem; }
+.shell { padding-block: var(--page-space); display: grid; gap: 1.5rem; }
 .heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
 .heading h1 { font-size: clamp(1.7rem, 4vw, 2.25rem); letter-spacing: -.035em; }
 .heading p { max-width: 52rem; color: var(--muted); line-height: 1.6; margin-top: .65rem; }
@@ -20,14 +20,15 @@
 .releaseControl p { max-width: 48rem; color: var(--muted); line-height: 1.5; }
 .releaseControl button { flex: 0 0 auto; }
 .filters { display: flex; align-items: flex-end; flex-wrap: wrap; gap: .8rem; padding: 1rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); }
-.filters label { display: grid; gap: .4rem; min-width: 12rem; color: #475467; font-size: .8rem; font-weight: 700; }
+.filters label { display: grid; gap: .4rem; min-width: 12rem; color: var(--text-secondary); font-size: .8rem; font-weight: 700; }
 .filters .searchField { flex: 1 1 20rem; }
-.filters input, .filters select { width: 100%; min-height: 42px; padding: .55rem .7rem; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.filters :global(.selectControl) { width: 100%; }
+.filters input { width: 100%; min-height: 42px; padding: .55rem .7rem; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .filters .button { min-height: 42px; }
 .tableWrap { width: 100%; overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); }
 .tableWrap table { width: 100%; min-width: 760px; border-collapse: collapse; text-align: left; font-size: .88rem; }
 .tableWrap th, .tableWrap td { padding: .85rem 1rem; vertical-align: middle; border-bottom: 1px solid var(--border); }
-.tableWrap th { color: #475467; background: #f8fafc; font-size: .75rem; letter-spacing: .02em; }
+.tableWrap th { color: var(--text-secondary); background: var(--surface-subtle); font-size: .75rem; letter-spacing: .02em; }
 .tableWrap tbody tr:last-child td { border-bottom: 0; }
 .tableWrap td strong, .tableWrap td small { display: block; }
 .tableWrap td small { max-width: 25rem; margin-top: .25rem; color: var(--muted); overflow-wrap: anywhere; }
@@ -52,7 +53,7 @@
 .dialogActions { justify-content: flex-end; flex-wrap: wrap; }
 
 @media (max-width: 720px) {
-  .shell { padding-block: 1.5rem 3rem; }
+
   .heading { flex-direction: column; }
   .statsGrid { grid-template-columns: 1fr; }
   .releaseControl { align-items: stretch; flex-direction: column; }
@@ -127,7 +128,7 @@
     content: attr(data-label);
     font-size: 0.76rem;
     font-weight: 700;
-    color: #475467;
+    color: var(--text-secondary);
     flex-shrink: 0;
     text-transform: uppercase;
     letter-spacing: 0.03em;

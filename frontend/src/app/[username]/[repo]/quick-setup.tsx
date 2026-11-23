@@ -36,7 +36,7 @@ export function QuickSetup({ repository }: { repository: QuickSetupRepository })
     }
   }
 
-  return <details className={styles.quickSetup} open={isEmpty} role="region" aria-labelledby="quick-setup-title">
+  return <details className={styles.quickSetup} open role="region" aria-labelledby="quick-setup-title">
     <summary className={styles.quickSetupSummary}>
       <span><strong>{isEmpty ? "Quick setup" : "Hướng dẫn clone và thiết lập"}</strong><small>{isEmpty ? "Tạo commit đầu tiên và push từ máy local" : "Mở khi cần các lệnh Git cơ bản"}</small></span>
       <span aria-hidden="true" className={styles.summaryChevron} />
@@ -46,7 +46,7 @@ export function QuickSetup({ repository }: { repository: QuickSetupRepository })
       <div>
         <span className="eyebrow">Quick setup</span>
         <h2 id="quick-setup-title">Bắt đầu với repository này</h2>
-        <p>{isEmpty ? "Tạo commit đầu tiên từ máy local rồi push lên Code Forge." : "Clone repository về máy để bắt đầu làm việc như trên GitHub."}</p>
+        <p>{isEmpty ? "Tạo commit đầu tiên từ máy local rồi push lên Code Forge. Nhánh được push đầu tiên sẽ là nhánh mặc định; lần push đầu chỉ gửi một nhánh." : "Clone repository về máy để bắt đầu làm việc như trên GitHub."}</p>
       </div>
       <button className="button buttonSecondary" type="button" onClick={copyCommands} disabled={!resolvedUrl}>Sao chép lệnh</button>
     </div>
@@ -57,7 +57,7 @@ export function QuickSetup({ repository }: { repository: QuickSetupRepository })
         <ol className={styles.quickSetupSteps}>
           {isEmpty ? <>
             <li>Trong thư mục dự án, khởi tạo Git và thêm remote:</li>
-            <li>Thêm file, tạo commit đầu tiên, rồi push lên branch <code>{branch}</code>.</li>
+            <li>Thêm file, tạo commit đầu tiên, rồi push lên branch <code>{branch}</code> hoặc tên nhánh bạn chọn.</li>
           </> : <>
             <li>Clone repository về máy:</li>
             <li>Chuyển vào thư mục và tải commit mới nhất bằng <code>git fetch origin</code>.</li>
@@ -70,7 +70,7 @@ export function QuickSetup({ repository }: { repository: QuickSetupRepository })
         <code className={styles.cloneUrl}>{resolvedUrl || "URL clone chưa được cung cấp"}</code>
         {isPrivate ? <p>Repository riêng tư cần username tài khoản và PAT. Khi Git hỏi mật khẩu, nhập PAT có quyền <code>repo:read</code>{repository.permissions.canWrite ? ", repo:write" : ""}; không đưa PAT vào URL.</p> : <p>Repository công khai có thể clone mà không cần đăng nhập.</p>}
         {repository.permissions.canWrite ? <p>Bạn có quyền ghi. Push branch bằng <code>git push origin ten-branch</code>.</p> : <p>Bạn đang có quyền chỉ đọc; cần WRITE hoặc OWNER để push.</p>}
-        {isPrivate && <Link href="/settings/tokens">Tạo hoặc quản lý PAT</Link>}
+        {isPrivate && <Link href="/settings#tokens">Tạo hoặc quản lý PAT</Link>}
       </aside>
     </div>
       <p className={styles.quickSetupStatus} role="status" aria-live="polite">{message}</p>

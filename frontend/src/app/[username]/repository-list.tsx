@@ -2,30 +2,35 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
 import { sessionFetch } from "@/lib/auth";
 import { repositoryPath, type RepositorySummary } from "@/lib/repositories";
 import styles from "./profile.module.css";
 
-export function RepositoryList({ username, initial }: { username: string; initial: RepositorySummary[] }) {
+export function RepositoryList({ username, initial, showDeletedNotice = false }: { username: string; initial: RepositorySummary[]; showDeletedNotice?: boolean }) {
+  const router = useRouter();
   const { user, loading } = useAuth();
+  const [tab, setTab] = useState<"active" | "deleted">("active");
   const [attempt, setAttempt] = useState(0);
-  const [owned, setOwned] = useState<{ key: string; repositories: RepositorySummary[]; error: boolean } | null>(null);
+  const [accessible, setAccessible] = useState<{ key: string; repositories: RepositorySummary[]; error: boolean } | null>(null);
   const [deleted, setDeleted] = useState<{ key: string; repositories: RepositorySummary[]; error: boolean } | null>(null);
   const [restoring, setRestoring] = useState<string | null>(null);
   const [restoreMessage, setRestoreMessage] = useState("");
+  const [restoredRepository, setRestoredRepository] = useState<RepositorySummary | null>(null);
   const key = `${user?.id ?? ""}/${username}/${attempt}`;
   const isOwner = user?.username.toLowerCase() === username.toLowerCase();
-  const repositories = isOwner && owned?.key === key ? owned.repositories : initial;
+  const isSignedIn = Boolean(user);
+  const repositories = isSignedIn && accessible?.key === key ? accessible.repositories : initial;
   useEffect(() => {
-    if (loading || !isOwner) return;
+    if (loading || !isSignedIn) return;
     let active = true;
     sessionFetch(`/api/v1/users/${encodeURIComponent(username)}`, { cache: "no-store" })
       .then((response) => { if (!response.ok) throw new Error("Không thể tải repository."); return response.json(); })
-      .then((data: { repositories: RepositorySummary[] }) => { if (active) setOwned({ key, repositories: data.repositories, error: false }); })
-      .catch(() => { if (active) setOwned({ key, repositories: [], error: true }); });
+      .then((data: { repositories: RepositorySummary[] }) => { if (active) setAccessible({ key, repositories: data.repositories, error: false }); })
+      .catch(() => { if (active) setAccessible({ key, repositories: [], error: true }); });
     return () => { active = false; };
-  }, [isOwner, loading, username, key]);
+  }, [isSignedIn, loading, username, key]);
 
   useEffect(() => {
     if (loading || !isOwner) return;
@@ -37,28 +42,42 @@ export function RepositoryList({ username, initial }: { username: string; initia
     return () => { active = false; };
   }, [isOwner, loading, key]);
 
+  function dismissDeletedNotice() {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("deleted");
+    router.replace(`${url.pathname}${url.search}${url.hash}`, { scroll: false });
+  }
+
   async function restore(repo: RepositorySummary) {
     if (restoring) return;
-    setRestoring(repo.id); setRestoreMessage("");
+    setRestoring(repo.id); setRestoreMessage(""); setRestoredRepository(null);
     try {
       const response = await sessionFetch(`/api/v1/repos/${encodeURIComponent(repo.owner.username)}/${encodeURIComponent(repo.name)}/restore`, { method: "POST" });
       if (!response.ok) {
         const body = await response.json().catch(() => ({})) as { error?: { code?: string; message?: string } };
         throw new Error(body.error?.code === "RESTORE_EXPIRED" ? "Đã hết thời hạn khôi phục repository." : body.error?.message ?? "Không thể khôi phục repository.");
       }
-      setRestoreMessage(`Đã khôi phục ${repo.name}.`);
+      setRestoredRepository(repo);
+      if (showDeletedNotice) dismissDeletedNotice();
       setAttempt((value) => value + 1);
     } catch (error) { setRestoreMessage(error instanceof Error ? error.message : "Không thể khôi phục repository."); }
     finally { setRestoring(null); }
   }
 
-  if (loading || (isOwner && owned?.key !== key)) return <div className={styles.empty}><p role="status">Đang tải repository…</p></div>;
-  if (isOwner && owned?.error) return <div className={styles.empty}><p role="alert">Chưa thể tải danh sách repository. Vui lòng thử lại.</p><button className="button buttonSecondary" onClick={() => setAttempt((value) => value + 1)}>Thử lại</button></div>;
+  const deletionNotice = isOwner && showDeletedNotice && <div className={styles.successNotice}>
+      <div role="status"><strong>Repository đã được xóa thành công.</strong><p>Bạn có thể khôi phục trong mục <button className={styles.noticeLink} type="button" onClick={() => setTab("deleted")}>Repo đã xóa</button> trước khi hết thời hạn lưu giữ.</p></div>
+      <button className="button buttonSecondary" type="button" aria-label="Đóng thông báo xóa repository" onClick={dismissDeletedNotice}>Đóng</button>
+    </div>;
 
-  const activeContent = !repositories.length ? <div className={styles.empty}>
+  const restoreNotice = isOwner && restoredRepository && <div className={styles.successNotice}>
+      <div role="status"><strong>Repository đã được khôi phục thành công.</strong><p>Bạn có thể tiếp tục làm việc với <Link href={repositoryPath(restoredRepository)}>{restoredRepository.name}</Link>.</p></div>
+      <button className="button buttonSecondary" type="button" aria-label="Đóng thông báo khôi phục repository" onClick={() => setRestoredRepository(null)}>Đóng</button>
+    </div>;
+
+  const activeContent = loading || (isSignedIn && accessible?.key !== key) ? <div className={styles.empty}><p role="status">Đang tải repository…</p></div> : isSignedIn && accessible?.error ? <div className={styles.empty}><p role="alert">Chưa thể tải danh sách repository. Vui lòng thử lại.</p><button className="button buttonSecondary" onClick={() => setAttempt((value) => value + 1)}>Thử lại</button></div> : !repositories.length ? <div className={styles.empty}>
     <span className={styles.repoIcon} aria-hidden="true">&lt;/&gt;</span>
     <h3>Chưa có repository</h3>
-    <p>{isOwner ? "Bạn chưa tạo repository nào." : "Repository công khai của thành viên sẽ xuất hiện ở đây."}</p>
+    <p>{isOwner ? "Bạn chưa tạo repository nào." : "Repository bạn có quyền xem sẽ xuất hiện ở đây."}</p>
     <Link className="button buttonSecondary" href={isOwner ? "/new" : "/"}>{isOwner ? "Tạo repository" : "Khám phá Code Forge"}</Link>
   </div> : <ul className={styles.repoList}>{repositories.map((repo) => <li key={repo.id}>
     <div><Link href={repositoryPath(repo)}>{repo.name}</Link><span className="badge">{repo.visibility === "PRIVATE" ? "Riêng tư" : "Công khai"}</span></div>
@@ -67,11 +86,28 @@ export function RepositoryList({ username, initial }: { username: string; initia
   </li>)}</ul>;
 
   return <>
-    {activeContent}
-    {isOwner && <section className={styles.deletedSection} aria-labelledby="deleted-title">
+    <div className={styles.tabs} role="tablist" aria-label="Danh sách repository">
+      {(["active", ...(isOwner ? ["deleted"] : [])] as ("active" | "deleted")[]).map((item) => <button
+        key={item} id={`profile-${item}-tab`} type="button" role="tab"
+        aria-selected={tab === item} aria-controls={`profile-${item}-panel`} tabIndex={tab === item ? 0 : -1}
+        onClick={() => setTab(item)}
+        onKeyDown={(event) => {
+          if (isOwner && ["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+            event.preventDefault();
+            const next = event.key === "Home" ? "active" : event.key === "End" ? "deleted" : item === "active" ? "deleted" : "active";
+            setTab(next);
+            document.getElementById(`profile-${next}-tab`)?.focus();
+          }
+        }}
+      >{item === "active" ? "Repo" : "Repo đã xóa"}</button>)}
+    </div>
+    {deletionNotice}
+    {restoreNotice}
+    <div id="profile-active-panel" role="tabpanel" aria-labelledby="profile-active-tab" hidden={tab !== "active"}>{activeContent}</div>
+    {isOwner && <section id="profile-deleted-panel" role="tabpanel" hidden={tab !== "deleted"} className={styles.deletedSection} aria-labelledby="profile-deleted-tab">
       <h3 id="deleted-title">Repository đã xóa</h3>
       <p>Repository được giữ đến hết thời hạn bên dưới rồi xóa vĩnh viễn.</p>
-      {restoreMessage && <p role="status">{restoreMessage}</p>}
+      {restoreMessage && <p role="alert">{restoreMessage}</p>}
       {deleted?.key !== key ? <p role="status">Đang tải repository đã xóa…</p> : deleted.error ?
         <p role="alert">Chưa thể tải repository đã xóa. <button type="button" onClick={() => setAttempt((value) => value + 1)}>Thử lại</button></p> :
         deleted.repositories.length === 0 ? <p>Không có repository đang chờ xóa.</p> :

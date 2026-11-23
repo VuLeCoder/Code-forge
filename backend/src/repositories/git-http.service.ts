@@ -56,7 +56,7 @@ export class GitHttpService implements OnModuleDestroy {
     const reject = (status: number) => { res.status(status).type('text/plain').end('Git request unavailable.\n'); };
     if (!/^[a-z0-9][a-z0-9._-]{1,37}[a-z0-9]$/i.test(owner) ||
       !/^(?!.*\.\.)(?!.*\.git\.git$)[a-z0-9](?:[a-z0-9._-]{0,98}[a-z0-9])?\.git$/i.test(repository)) return reject(404);
-    let access: { storageKey: string; defaultBranch: string; repositoryId: string; userId?: string; actorIsOwner: boolean; operation: 'read' | 'write'; storageGeneration: number };
+    let access: { storageKey: string; defaultBranch: string; repositoryId: string; userId?: string; actorIsOwner: boolean; protectDefaultBranch?: boolean; operation: 'read' | 'write'; storageGeneration: number };
     try { access = await this.repositories.prepareGit(owner, repository.slice(0, -4), req.headers.authorization, write ? 'write' : 'read'); }
     catch (error) {
       const status = (error as { getStatus?: () => number }).getStatus?.();
@@ -99,7 +99,7 @@ export class GitHttpService implements OnModuleDestroy {
     }
 
     let child: ReturnType<GitStorageService['openPack']>;
-    try { child = this.storage.openPack(access.storageKey, access.defaultBranch, service, advertise, protocol, access.actorIsOwner); }
+    try { child = this.storage.openPack(access.storageKey, access.defaultBranch, service, advertise, protocol, access.actorIsOwner, access.protectDefaultBranch); }
     catch {
       if (pushOperationId) await this.pushJournal.fail(pushOperationId, 'GIT_PROCESS_START_FAILED').catch(() => undefined);
       await lock.release(); return reject(503);

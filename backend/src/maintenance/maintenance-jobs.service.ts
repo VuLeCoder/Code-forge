@@ -156,6 +156,8 @@ export class MaintenanceJobsService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     await this.db.$transaction(async (tx) => {
+      await tx.branchUpdate.createMany({ data: [{ repositoryId: operation.repositoryId, storageGeneration: operation.storageGeneration,
+        operationId, actorId: operation.actorId, branch: operation.pullRequest.targetBranch, sha: operation.candidateSha!, kind: 'MERGE' }], skipDuplicates: true });
       await tx.pullRequest.updateMany({ where: { id: operation.pullRequestId, status: { not: 'MERGED' } },
         data: { status: 'MERGED', version: { increment: 1 }, mergedById: operation.actorId,
           mergedAt: new Date(), mergeCommitSha: operation.candidateSha } });
