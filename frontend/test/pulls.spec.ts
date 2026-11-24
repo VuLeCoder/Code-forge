@@ -123,24 +123,63 @@ test("repository navigation keeps settings hidden for collaborators without mana
   await expect(navigation.getByRole("link", { name: "Cài đặt" })).toHaveCount(0);
 });
 
-test("stale compare prevents owner merge and displays a refresh warning", async ({ page }) => {
-  await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { user: owner } }));
-  await page.route("**/api/v1/repos/alice/project/pulls/1", (route) =>
-    route.fulfill({ json: { pullRequest, permissions: { canCreate: true, canEdit: true, canMerge: true }, mergeOperation: null } }),
-  );
-  await routeComparePages(page, { summary: () => ({ ...compare, stale: true }) });
+// A difference from creation is informational; only an outdated displayed
+// snapshot must block the merge. Cover both source and target moving.
+for (const movedRef of ["sourceSha", "targetSha"] as const) {
+  test(`owner refreshes and merges after ${movedRef} moves since PR creation`, async ({ page }) => {
+    let current = { ...compare, storageGeneration: pullRequest.storageGeneration };
+    let merged = false;
+    let mergeRequest: Record<string, unknown> | undefined;
+    await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { user: owner } }));
+    await page.route("**/api/v1/repos/alice/project/pulls/1", (route) =>
+      route.fulfill({ json: { pullRequest: { ...pullRequest, status: merged ? "MERGED" : "OPEN" },
+        permissions: { canCreate: true, canEdit: true, canMerge: true }, mergeOperation: null } }),
+    );
+    await page.route((url) => url.pathname.endsWith("/pulls/1/compare"), (route) =>
+      route.fulfill({ json: { ...current, state: merged ? "ALREADY_MERGED" : "READY" } }));
+    for (const section of ["commits", "files", "diff"] as const) {
+      await page.route((url) => url.pathname.endsWith(`/pulls/1/${section}`), (route) => {
+        const query = new URL(route.request().url()).searchParams;
+        expect(query.get("sourceSha")).toBe(current.sourceSha);
+        expect(query.get("targetSha")).toBe(current.targetSha);
+        expect(query.get("storageGeneration")).toBe(String(current.storageGeneration));
+        const items = section === "commits" ? [{ ...commit, sha: current.sourceSha }]
+          : section === "files" ? [changedFile] : [{ ...diffFile, diff: `+Reviewed ${current[movedRef]}\n` }];
+        return route.fulfill({ json: { snapshot: current, pagination: pageEnvelope([changedFile]).pagination,
+          [section === "commits" ? "commits" : "files"]: items } });
+      });
+    }
+    await page.route("**/api/v1/repos/alice/project/pulls/1/merge", (route) => {
+      mergeRequest = route.request().postDataJSON() as Record<string, unknown>;
+      merged = true;
+      return route.fulfill({ json: { status: "MERGED", operationId: mergeRequest.operationId } });
+    });
 
-  await page.goto("/alice/project/pulls/1");
-  await expect(page.getByRole("status").filter({ hasText: "Branch đã thay đổi" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Merge pull request" })).toBeDisabled();
-});
+    await page.goto("/alice/project/pulls/1");
+    await page.getByRole("button", { name: "Merge pull request" }).click();
+    await expect(page.getByRole("heading", { name: "Xác nhận merge" })).toBeVisible();
+    current = { ...current, [movedRef]: "f".repeat(40), stale: true };
+    await page.getByRole("button", { name: "Tải lại dữ liệu" }).click();
+    await expect(page.getByLabel("Diff của README.md")).toContainText(current[movedRef]);
+    await expect(page.getByRole("heading", { name: "Xác nhận merge" })).toHaveCount(0);
+    await expect(page.getByRole("status").filter({ hasText: "Branch đã thay đổi" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Merge pull request" })).toBeEnabled();
+    expect(mergeRequest).toBeUndefined();
+    await page.getByRole("button", { name: "Merge pull request" }).click();
+    await expect(page.locator("#merge-confirmation")).toContainText(current[movedRef].slice(0, 12));
+    await page.getByRole("button", { name: "Xác nhận merge" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Đã merge" })).toBeVisible();
+    expect(mergeRequest).toMatchObject({ expectedSourceSha: current.sourceSha, expectedTargetSha: current.targetSha,
+      storageGeneration: current.storageGeneration, version: pullRequest.version });
+  });
+}
 
 test("compare 409 reloads summary and all pages from one refreshed snapshot", async ({ page }) => {
   await page.route("**/api/v1/auth/me", (route) => route.fulfill({ json: { user: owner } }));
   await page.route("**/api/v1/repos/alice/project/pulls/1", (route) =>
     route.fulfill({ json: { pullRequest, permissions: { canCreate: true, canEdit: true, canMerge: true }, mergeOperation: null } }),
   );
-  const fresh = { ...compare, sourceSha: "f".repeat(40), storageGeneration: 1 };
+  const fresh = { ...compare, sourceSha: "f".repeat(40), storageGeneration: 1, stale: true };
   let summaryCalls = 0;
   let oldSnapshotCommitCalls = 0;
   const acceptedSnapshots: string[] = [];

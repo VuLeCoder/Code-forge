@@ -114,6 +114,7 @@ export default function PullRequestDetailPage() {
 
   const load = useCallback(async () => {
     setLoading(true); setActionError("");
+    setConfirmMerge(false);
     setSectionErrors({ commits: "", files: "" });
     try {
       for (let attempt = 0; attempt < 2; attempt++) {
@@ -237,7 +238,9 @@ export default function PullRequestDetailPage() {
 
   const pull = result.pullRequest;
   const canEdit = result.permissions.canEdit && pull.status !== "MERGED";
-  const canMerge = result.permissions.canMerge && pull.status === "OPEN" && compare.state === "READY" && !compare.stale && !reconciling;
+  // `stale` compares against PR creation, not the snapshot loaded for review.
+  // The merge endpoint revalidates the displayed SHAs under the repository lock.
+  const canMerge = result.permissions.canMerge && pull.status === "OPEN" && compare.state === "READY" && !reconciling;
   const renderPagination = (label: string, pagination: Pagination | undefined, busy: boolean, onPage: (page: number) => void) => {
     if (!pagination || pagination.totalPages <= 1) return null;
     return <nav className={styles.pagination} aria-label={`Phân trang ${label}`}>

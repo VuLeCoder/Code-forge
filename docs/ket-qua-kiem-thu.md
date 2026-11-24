@@ -11,6 +11,19 @@ Cập nhật 23/11/2026. Kết quả dưới đây được ghi nhận trong cá
 | Frontend lint/typecheck | Đạt sau sửa commit selectors | Local |
 | Full-stack và full backend unit trước đó | 4/4 full-stack; 268/268 unit | Kết quả local ngày 23/11 trước bản sửa Git abort; không xác nhận HEAD |
 
+## Sửa tải lại snapshot PR — 24/11/2026
+
+Nhánh local `fix/pr-refresh-merge-snapshot`, nền `36d187a`. Phạm vi: frontend cho phép merge snapshot mới đã tải đồng nhất sau khi source/target đổi kể từ lúc tạo PR; đóng hộp xác nhận cũ khi tải lại. Không đổi backend hoặc dữ liệu.
+
+- Hai regression source/target đều thất bại trước sửa vì hộp xác nhận cũ vẫn mở; sau sửa, toàn bộ `frontend/test/pulls.spec.ts` đạt **14/14**, gồm gửi SHA mới, tải lại sau compare 409, báo lỗi merge stale và chặn merge khi đang đối soát.
+- Thay test cũ yêu cầu khóa merge với mọi `stale=true`: cờ này so với thời điểm **tạo PR**, không phải snapshot hiện đang xem. Đây là sửa kỳ vọng nghiệp vụ sai, không bỏ kiểm tra snapshot lỗi; giữ cảnh báo và assertion 409, bổ sung kiểm tra commits/files/diff dùng cùng SHA/generation và phải xác nhận lại.
+- `pnpm --filter frontend lint`, `pnpm --filter frontend typecheck`: đạt. Production build được chạy thành công bởi Playwright trước browser suite.
+- `pnpm --filter backend test --runTestsByPath src/repositories/pull-requests.service.spec.ts`: **25/25**. Lần đầu bị chặn do Prisma Client cũ thiếu `branchUpdate`; chạy `pnpm --filter backend prisma:generate` rồi kiểm thử lại đạt. Không chạy migration.
+- Môi trường local: Node **25.9.0**, khác Node 24 quy định của CI. Máy thiếu Corepack; web server test dùng shim tạm ngoài repository để gọi pnpm. API browser là fixture; unit backend dùng mock, không thay thế full-stack hoặc Git/DB thật.
+- Chưa chạy CI cho thay đổi này; chưa nghiệm thu cloud hoặc deploy. Cần gate trên SHA tích hợp cuối trước merge/release.
+
+Lệnh browser: `pnpm --filter frontend exec playwright test test/pulls.spec.ts` (PATH bổ sung shim Corepack tạm).
+
 ## Giới hạn và ghi nhận lịch sử
 
 - File viewer ưu tiên laptop 1366/1440 px theo phạm vi đã chốt; test mobile khác vẫn giữ, chưa nghiệm thu file viewer trên mobile hoặc screen reader.
